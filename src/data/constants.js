@@ -1,0 +1,30 @@
+// Konstanta umum Lomeal
+
+export const getLocalYMD = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+export const getMonthKey = (ymd) => ymd.substring(0, 7); // 'YYYY-MM'
+
+export const DAY_NAMES_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+export const MONTH_NAMES_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+// Sesi makan default; snack bisa bertambah dinamis di Meal Grid
+export const MEAL_SESSIONS = [
+  { id: 'breakfast', label: 'Sarapan',      emoji: '🍳' },
+  { id: 'lunch',     label: 'Makan Siang',  emoji: '🍛' },
+  { id: 'dinner',    label: 'Makan Malam',  emoji: '🍲' },
+  { id: 'snack',     label: 'Camilan',      emoji: '🍿' },
+  { id: 'drink',     label: 'Minuman',      emoji: '🥤' },
+];
+
+export const WATER_STEP_ML = 200;    // satu tap = +200ml (blueprint Tab 2)
+export const WATER_GOAL_ML = 2000;
+
+// Satpam API: batas Smart Input Bar per user per hari (blueprint Fase 5)
+export const AI_DAILY_LIMIT = 10;
+
+export const APP_NAME = 'Lomeal';

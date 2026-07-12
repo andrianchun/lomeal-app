@@ -1,0 +1,139 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Sora:wght@500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  /* Headings */
+  .h1 { @apply font-heading text-2xl font-bold tracking-tight leading-tight; }
+  .h2 { @apply font-heading text-base font-bold leading-snug; }
+  .h3 { @apply font-heading text-[10px] font-bold uppercase tracking-wider; }
+
+  /* Body & Text */
+  .body-lg { @apply text-sm font-bold leading-relaxed; }
+  .body-md { @apply text-xs font-bold leading-relaxed; }
+  .caption { @apply text-[10px] font-bold leading-tight; }
+}
+html, body {
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
+}
+body {
+  background-color: #070a08;
+  color: #fff;
+  margin: 0;
+  padding: 0;
+  overscroll-behavior-y: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* --- AMBIENT APP BACKGROUND (glassmorphism backdrop) --- */
+/* Dark = nyaris hitam dengan aksen hijau tipis (bukan #000 pekat / abu-abu Android) — Fase 2 blueprint */
+.app-bg-dark {
+  background-color: #070a08;
+  background-image:
+    radial-gradient(ellipse 90% 55% at 15% -10%, rgba(34,197,94,0.20), transparent 60%),
+    radial-gradient(ellipse 70% 45% at 100% 0%, rgba(74,222,128,0.10), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(21,128,61,0.16), transparent 60%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+/* Light = putih bersih dengan aksen hijau */
+.app-bg-light {
+  background-color: #f0f7f2;
+  background-image:
+    radial-gradient(ellipse 90% 55% at 15% -10%, rgba(34,197,94,0.13), transparent 60%),
+    radial-gradient(ellipse 70% 45% at 100% 0%, rgba(74,222,128,0.09), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(21,128,61,0.07), transparent 60%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* --- GLASSMORPHISM SURFACES --- */
+.glass-nav {
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+.glass-card {
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* --- ENTRANCE ANIMATION --- */
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.anim-rise { animation: riseIn 0.45s cubic-bezier(0.25, 1, 0.5, 1) both; }
+
+input, textarea {
+  user-select: auto;
+  -webkit-user-select: auto;
+}
+
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+
+.no-spinners::-webkit-inner-spin-button, 
+.no-spinners::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+
+.animate-spin-slow { animation: spin 3s linear infinite; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
+input:disabled { opacity: 0.5; }
+
+@keyframes flashGlow {
+    0% { background-color: rgba(34, 197, 94, 0.5); }
+    100% { background-color: inherit; }
+}
+
+@keyframes customSlideInFromRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+@keyframes customSlideInFromLeft {
+    from { transform: translateX(-100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+.anim-slide-left {
+    animation: customSlideInFromRight 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+.anim-slide-right {
+    animation: customSlideInFromLeft 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+.flash-glow { animation: flashGlow 0.5s ease-out; }
+svg:focus, .recharts-wrapper:focus, .recharts-surface:focus { outline: none !important; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+* { outline: none !important; -webkit-tap-highlight-color: transparent !important; }
+.recharts-wrapper, .recharts-surface, .recharts-layer { outline: none !important; }
+
+video::-webkit-media-controls,
+video::-webkit-media-controls-enclosure,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-start-playback-button,
+video::-webkit-media-controls-overlay-play-button {
+  display: none !important;
+  -webkit-appearance: none;
+}
+
+/* GLOBAL MODAL SCROLL LOCK */
+body:has(.fixed.inset-0:not(.pointer-events-none)) {
+  overflow: hidden !important;
+}
+
+/* Fix native time/date picker icons in dark mode */
+.dark input[type="time"]::-webkit-calendar-picker-indicator,
+.dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(0.8);
+}
+

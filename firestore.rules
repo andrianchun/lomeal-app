@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Project Firebase Lomeal berdiri sendiri (bukan berbagi dengan Logym/Lyfit),
+    // jadi seluruh data di sini memang milik Lomeal — tidak perlu skema isolasi
+    // sub-koleksi seperti versi sebelumnya. Fitur sosial akan connect langsung
+    // ke project Logym lewat instance Firebase kedua di client, bukan disimpan
+    // dobel di sini (lihat IMPLEMENTATION PLAN.docx).
+    match /users/{uid} {
+      // Dokumen profil utama: data fisik, dietProfile, pace, targets, konsen onboarding.
+      allow read, write: if isOwner(uid);
+
+      // Log harian (1 dokumen per bulan: log_YYYY-MM), resep, dan custom foods.
+      match /food_logs/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+  }
+}

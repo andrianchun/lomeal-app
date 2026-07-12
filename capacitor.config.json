@@ -1,0 +1,15 @@
+{
+  "appId": "com.andrianchun.lomeal",
+  "appName": "Lomeal",
+  "webDir": "dist",
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": false,
+      "providers": ["google.com"]
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_launcher",
+      "iconColor": "#22C55E"
+    }
+  }
+}
