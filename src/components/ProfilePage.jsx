@@ -6,14 +6,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Cropper from 'react-easy-crop';
 import { X, Loader2, Check, Camera, LogOut, Users, Lock } from 'lucide-react';
-import { updateProfile, signInWithPopup } from 'firebase/auth';
+import { updateProfile } from 'firebase/auth';
 import { doc, setDoc, getDoc, runTransaction } from 'firebase/firestore';
-import { authLogym, dbLogym, googleProviderLogym } from '../firebaseLogym';
+import { authLogym, dbLogym } from '../firebaseLogym';
 import { uploadImageToFirebase, deleteImageFromFirebase } from '../utils/storageLogym';
 import { registerToCommunity, updateUserProfileInFeed, getUserPosts } from '../utils/communityApi';
 import { getFollowerCount, getFollowingCount } from '../utils/followApi';
 import { ACHIEVEMENTS, checkAchievements } from '../data/achievements';
 import FollowListModal from './FollowListModal';
+import LogymConnectPrompt from './LogymConnectPrompt';
 
 const AVATAR_OUTPUT_SIZE = 512;
 const getCroppedBlob = (imageSrc, pixelCrop) => new Promise((resolve, reject) => {
@@ -40,6 +41,9 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
   const [isEditingUsername, setIsEditingUsername] = useState(false);
   const [usernameInput, setUsernameInput] = useState('');
   const [isSavingUsername, setIsSavingUsername] = useState(false);
+  
+  const [allergiesInput, setAllergiesInput] = useState(profile?.allergies || '');
+  const [dietProfileInput, setDietProfileInput] = useState(profile?.dietProfile || 'weight_loss');
 
   // --- Cropper state ---
   const [cropSourceUrl, setCropSourceUrl] = useState(null);
@@ -143,21 +147,13 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
   };
 
   if (!logymUser) {
-    const handleConnect = async () => {
-      try {
-        await signInWithPopup(authLogym, googleProviderLogym);
-      } catch (err) {
-        console.error(err);
-        await showAlert(err.message || 'Gagal menyambungkan ke Logym.');
-      }
-    };
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16 text-center px-6">
         <Lock size={32} className={t.textMuted} />
-        <p className={`font-bold ${t.textMain}`}>Sambungkan akun Google-mu ke Logym buat akses Social Hub & Profil.</p>
-        <button onClick={handleConnect} className={`mt-2 px-6 py-3 rounded-2xl font-bold text-sm ${t.bgAccent}`}>
-          Hubungkan ke Logym
-        </button>
+        <p className={`font-bold ${t.textMain}`}>Sambungkan akunmu ke Logym buat akses Social Hub & Profil.</p>
+        <div className="w-full max-w-xs mt-2">
+          <LogymConnectPrompt t={t} />
+        </div>
       </div>
     );
   }
@@ -232,6 +228,44 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Preferensi Diet & Alergi */}
+      <div className="flex flex-col gap-3">
+        <p className={`h3 mb-1 ${t.textMuted}`}>Preferensi Makanan</p>
+        
+        <div>
+          <label className={`text-xs font-bold ${t.textMuted} mb-1.5 block`}>Profil Diet</label>
+          <select 
+            value={dietProfileInput}
+            onChange={(e) => {
+              setDietProfileInput(e.target.value);
+              saveProfilePatch({ dietProfile: e.target.value });
+            }}
+            className={`w-full px-3 py-2.5 rounded-xl border-2 font-bold text-sm border-transparent outline-none ${t.inputBg} ${t.textMain}`}
+          >
+            <option value="weight_loss">Weight Loss (Defisit Kalori)</option>
+            <option value="maintain">Maintain (Pertahankan Berat)</option>
+            <option value="muscle_gain">Muscle Gain (Surplus Kalori)</option>
+            <option value="vegan">Vegan</option>
+            <option value="keto">Keto</option>
+            <option value="dash">DASH (Darah Tinggi)</option>
+            <option value="low_purine">Rendah Purin (Asam Urat)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className={`text-xs font-bold ${t.textMuted} mb-1.5 block`}>Alergi / Intoleransi Makanan</label>
+          <input
+            type="text"
+            value={allergiesInput}
+            onChange={(e) => setAllergiesInput(e.target.value)}
+            onBlur={() => saveProfilePatch({ allergies: allergiesInput.trim() })}
+            placeholder="Misal: Kacang, Seafood, Laktosa..."
+            className={`w-full px-3 py-2.5 rounded-xl border-2 font-bold text-sm border-transparent outline-none ${t.inputBg} ${t.textMain}`}
+          />
+          <p className={`text-[9px] mt-1 font-medium ${t.textMuted}`}>Konteks ini akan dibagikan ke AI Logym.</p>
         </div>
       </div>
 

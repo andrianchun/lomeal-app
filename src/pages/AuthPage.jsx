@@ -13,6 +13,7 @@ import {
   signInWithCredential,
   GoogleAuthProvider
 } from 'firebase/auth';
+import { authLogym } from '../firebaseLogym';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { Capacitor } from '@capacitor/core';
 
@@ -77,6 +78,16 @@ const AuthPage = ({ t, theme, soundEnabled, onLogin }) => {
     try {
       if (isLoginMode) {
         const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        
+        // --- BRIDGE SYNC: Silently login to Logym project ---
+        try {
+          await signInWithEmailAndPassword(authLogym, formData.email, formData.password);
+        } catch (err) {
+          if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+            try { await createUserWithEmailAndPassword(authLogym, formData.email, formData.password); } catch(e) {}
+          }
+        }
+
         onLogin({ 
             uid: userCredential.user.uid, 
             email: userCredential.user.email, 
@@ -86,6 +97,10 @@ const AuthPage = ({ t, theme, soundEnabled, onLogin }) => {
       } else {
         const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
         await updateProfile(userCredential.user, { displayName: formData.name });
+        
+        // --- BRIDGE SYNC: Silently register to Logym project ---
+        try { await createUserWithEmailAndPassword(authLogym, formData.email, formData.password); } catch(e) {}
+
         onLogin({ 
             uid: userCredential.user.uid, 
             email: userCredential.user.email, 
@@ -122,6 +137,9 @@ const AuthPage = ({ t, theme, soundEnabled, onLogin }) => {
         const credential = GoogleAuthProvider.credential(result.credential.idToken);
         const userCredential = await signInWithCredential(auth, credential);
 
+        // --- BRIDGE SYNC: Silently login to Logym project ---
+        try { await signInWithCredential(authLogym, credential); } catch(e) {}
+
         onLogin({
           uid: userCredential.user.uid,
           email: userCredential.user.email,
@@ -131,6 +149,14 @@ const AuthPage = ({ t, theme, soundEnabled, onLogin }) => {
       } else {
         // JALUR WEB BROWSER
         const result = await signInWithPopup(auth, googleProvider);
+
+        // --- BRIDGE SYNC: Silently login to Logym project ---
+        try {
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          if (credential) {
+             await signInWithCredential(authLogym, credential);
+          }
+        } catch(e) {}
 
         onLogin({
           uid: result.user.uid,

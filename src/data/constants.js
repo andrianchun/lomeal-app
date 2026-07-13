@@ -9,6 +9,14 @@ export const getLocalYMD = (d = new Date()) => {
 
 export const getMonthKey = (ymd) => ymd.substring(0, 7); // 'YYYY-MM'
 
+// dob = sumber kebenaran usia (skema disamakan dgn Logym, lihat utils/lyfitSync.js).
+export const computeAge = (dob) => {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (isNaN(d)) return null;
+  return Math.floor((Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000));
+};
+
 export const DAY_NAMES_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 export const MONTH_NAMES_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 

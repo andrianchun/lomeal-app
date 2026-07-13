@@ -10,6 +10,45 @@
 import { dbLogym } from '../firebaseLogym';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
+// Susun profil Logym dari raw doc data — dipakai fetchLyfitProfile (one-shot) &
+// subscribeLyfitProfile (terus-menerus, buat sinkron biometrik 2 arah).
+const parseLyfitProfile = (data) => {
+  const settings = typeof data.settings === 'string' ? JSON.parse(data.settings) : (data.settings || {});
+  const p = settings.userProfile || {};
+  const bio = p.biometrics || p; // dukung kedua bentuk penyimpanan
+  const dob = p.dob || bio.dob || null;
+  // Umur dari DOB jika ada (dob = sumber kebenaran, sama seperti skema Logym)
+  let age = bio.age || null;
+  if (!age && dob) {
+    const d = new Date(dob);
+    if (!isNaN(d)) age = Math.floor((Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000));
+  }
+  // Migrasi kunci lama → array (pola sama seperti App.jsx Logym sendiri)
+  let userApiKeys = settings.userApiKeys || [];
+  if (userApiKeys.length === 0) {
+    if (settings.userApiKey) userApiKeys.push(settings.userApiKey);
+    if (settings.userGeminiApiKey && settings.userGeminiApiKey !== settings.userApiKey) userApiKeys.push(settings.userGeminiApiKey);
+  }
+  userApiKeys = userApiKeys.filter((k) => k && k.trim());
+  return {
+    weight: bio.weight || null,
+    height: bio.height || null,
+    gender: p.gender || bio.gender || null,
+    dob,
+    age,
+    bmr: bio.bmr || null,
+    // Tujuan program — dipakai buat cek kontradiksi vs dietProfile Lomeal
+    // (mis. Logym 'muscle_gain'/surplus vs Lomeal 'weight_loss'/defisit).
+    // Cuma dibaca & ditampilkan sebagai peringatan, TIDAK auto-override apa pun.
+    goal: p.goal || null,
+    activityLevel: p.activityLevel || null,
+    targetWeight: p.targetWeight || null,
+    userApiKeys,
+    theme: settings.theme || null,
+    displayName: data.displayName || null,
+  };
+};
+
 // Ambil biometrik dasar dari profil Logym untuk pre-fill kuesioner onboarding,
 // plus userApiKeys yang sudah diisi user di Settings Logym (dipakai Settings Lomeal
 // untuk ditawarkan "Salin ke Lomeal" — lihat SettingsPage.jsx).
@@ -17,38 +56,21 @@ export const fetchLyfitProfile = async (uid) => {
   try {
     const snap = await getDoc(doc(dbLogym, 'users', uid));
     if (!snap.exists()) return null;
-    const data = snap.data();
-    const settings = typeof data.settings === 'string' ? JSON.parse(data.settings) : (data.settings || {});
-    const p = settings.userProfile || {};
-    const bio = p.biometrics || p; // dukung kedua bentuk penyimpanan
-    // Umur dari DOB jika ada
-    let age = bio.age || null;
-    if (!age && (p.dob || bio.dob)) {
-      const dob = new Date(p.dob || bio.dob);
-      if (!isNaN(dob)) age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 3600 * 1000));
-    }
-    // Migrasi kunci lama → array (pola sama seperti App.jsx Logym sendiri)
-    let userApiKeys = settings.userApiKeys || [];
-    if (userApiKeys.length === 0) {
-      if (settings.userApiKey) userApiKeys.push(settings.userApiKey);
-      if (settings.userGeminiApiKey && settings.userGeminiApiKey !== settings.userApiKey) userApiKeys.push(settings.userGeminiApiKey);
-    }
-    userApiKeys = userApiKeys.filter((k) => k && k.trim());
-    return {
-      weight: bio.weight || null,
-      height: bio.height || null,
-      gender: p.gender || bio.gender || null,
-      age,
-      bmr: bio.bmr || null,
-      userApiKeys,
-      theme: settings.theme || null,
-      displayName: data.displayName || null,
-    };
+    return parseLyfitProfile(snap.data());
   } catch (e) {
     console.warn('fetchLyfitProfile gagal:', e);
     return null;
   }
 };
+
+// Versi onSnapshot dari fetchLyfitProfile — buat mirroring biometrik berkelanjutan
+// (App.jsx#dob/height/weight/gender 2-arah, lihat utils/biometricSync.js).
+export const subscribeLyfitProfile = (uid, cb) =>
+  onSnapshot(
+    doc(dbLogym, 'users', uid),
+    (snap) => cb(snap.exists() ? parseLyfitProfile(snap.data()) : null),
+    () => cb(null)
+  );
 
 // Data aktivitas Logym untuk satu tanggal → bonus kalori + kartu sync ringkas.
 // Struktur history Logym: { 'YYYY-MM-DD': { bioData: {...}, workouts: [...] } }

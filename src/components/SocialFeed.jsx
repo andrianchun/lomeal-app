@@ -1,7 +1,7 @@
 // src/components/SocialFeed.jsx — versi ringkas dari lyfit.app/src/pages/CommunityTab.jsx
 // (tanpa search user, leaderboard, edit post, image lightbox — lihat "sengaja belum
 // digarap" di rencana). Filter Semua/Diikuti, like, komentar, hapus post sendiri, lapor.
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Heart, MessageCircle, Loader2, Plus, MoreHorizontal, Trash2, Flag, Send, Sparkles } from 'lucide-react';
 import {
   getGlobalFeed, getFollowingFeed, toggleLike, deletePost,
@@ -23,8 +23,15 @@ const timeAgo = (ts) => {
   return `${Math.floor(secs / 86400)}h`;
 };
 
+const SOURCE_FILTERS = [
+  { id: 'all', label: 'Semua App' },
+  { id: 'logym', label: 'Logym' },
+  { id: 'lomeal', label: 'Lomeal' },
+];
+
 const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated }) => {
   const [filter, setFilter] = useState('Semua');
+  const [sourceFilter, setSourceFilter] = useState('all');
   const [feed, setFeed] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [followingIds, setFollowingIds] = useState([]);
@@ -55,6 +62,14 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
   }, [filter, logymUser]);
 
   useEffect(() => { loadFeed(); }, [loadFeed]);
+
+  // Post Lomeal ditandai sourceApp:'lomeal' eksplisit (lihat utils/communityApi.js);
+  // post Logym asli TIDAK ditandai apa-apa (kode Logym gak pernah kita ubah) — jadi
+  // "bukan lomeal" = dari Logym.
+  const visibleFeed = useMemo(() => {
+    if (sourceFilter === 'all') return feed;
+    return feed.filter((p) => (sourceFilter === 'lomeal' ? p.sourceApp === 'lomeal' : p.sourceApp !== 'lomeal'));
+  }, [feed, sourceFilter]);
 
   const handleLike = async (post) => {
     if (!logymUser) return;
@@ -115,22 +130,34 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
           </button>
         ))}
         <button
-          onClick={() => (logymUser ? setIsCreating(true) : showAlert('Sambungkan akun ke Logym dulu lewat tab Profil.'))}
+          onClick={() => (logymUser ? setIsCreating(true) : showAlert('Sambungkan akun dulu lewat tab Profil (bisa langsung bikin identitas baru, gak perlu akun Logym yang sudah ada).'))}
           className={`ml-auto flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold ${t.bgAccentSoft} ${t.textAccent}`}
         >
           <Plus size={14} /> Post
         </button>
       </div>
 
+      <div className="flex items-center gap-1.5">
+        {SOURCE_FILTERS.map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setSourceFilter(f.id)}
+            className={`px-3 py-1.5 rounded-full text-[11px] font-bold transition-colors ${sourceFilter === f.id ? `${t.bgAccentSoft} ${t.textAccent} border ${t.borderAccentSoft}` : `${t.textMuted} border ${t.border}`}`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
       {isLoading ? (
         <div className="flex justify-center py-12"><Loader2 className={`animate-spin ${t.textMuted}`} size={28} /></div>
-      ) : feed.length === 0 ? (
+      ) : visibleFeed.length === 0 ? (
         <div className={`flex flex-col items-center gap-2 py-16 ${t.textMuted}`}>
           <Sparkles size={32} className="opacity-40" />
           <p className="text-sm font-bold">Belum ada postingan di sini.</p>
         </div>
       ) : (
-        feed.map((post) => {
+        visibleFeed.map((post) => {
           const liked = logymUser && (post.likedBy || []).includes(logymUser.uid);
           const isMine = logymUser && post.userId === logymUser.uid;
           return (
@@ -146,8 +173,8 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <p className={`font-black text-sm ${t.textMain}`}>{post.userName || 'Anonim'}</p>
-                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${post.sourceApp === 'logym' ? 'bg-blue-500/15 text-blue-400' : `${t.bgAccentSoft} ${t.textAccent}`}`}>
-                      {post.sourceApp === 'logym' ? 'Logym' : 'Lomeal'}
+                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${post.sourceApp === 'lomeal' ? `${t.bgAccentSoft} ${t.textAccent}` : 'bg-blue-500/15 text-blue-400'}`}>
+                      {post.sourceApp === 'lomeal' ? 'Lomeal' : 'Logym'}
                     </span>
                     <span className={`text-[10px] ${t.textMuted}`}>· {timeAgo(post.timestamp)}</span>
                   </div>

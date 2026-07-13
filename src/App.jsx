@@ -12,10 +12,15 @@ import {
   subscribeCustomFoods, saveCustomFoods,
   deleteAllUserData,
 } from './utils/foodLog';
-import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear } from './utils/lyfitSync';
+import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitProfile } from './utils/lyfitSync';
+import {
+  pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym,
+} from './utils/biometricSync';
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration } from './utils/healthConnect';
+import { computeDayTotals } from './data/nutrition';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { Sparkles } from 'lucide-react';
 import useDialog from './hooks/useDialog';
 
 const MEAL_REMINDER_ID = 1001;
@@ -32,6 +37,7 @@ import FoodDbTab from './pages/FoodDbTab';
 import SocialHub from './pages/SocialHub';
 import SettingsPage from './pages/SettingsPage';
 import NotificationPanel from './components/NotificationPanel';
+import LogymConnectPrompt from './components/LogymConnectPrompt';
 import { createCommunityPost } from './utils/communityApi';
 
 const AppContent = ({ user, profile, logymUser, onLogout }) => {
@@ -89,7 +95,12 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       hcWriteNutrition(ymd, totals).catch(() => {});
       if (dayData?.water) hcWriteHydration(ymd, dayData.water).catch(() => {});
     }
-  }, [user, settings.healthConnectEnabled]);
+    // Kalori-dimakan HARI INI juga dikirim ke Logym (field lomealSync, namespace
+    // sendiri) — biar Logym punya akses ke data ini kalau nanti mau ditampilkan.
+    if (logymUser && ymd === todayYmd) {
+      pushDailyTotalsToLogym(logymUser.uid, ymd, computeDayTotals(dayData)).catch(() => {});
+    }
+  }, [user, settings.healthConnectEnabled, logymUser, todayYmd]);
 
   // --- Resep & custom foods ---
   const [recipes, setRecipes] = useState([]);
@@ -127,6 +138,76 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logymUser]);
+
+  // --- Sinkron biometrik 2-arah dengan Logym (gender/dob/height/weight) ---
+  // Lomeal TIDAK PERNAH sentuh kode Logym — 2 arah dicapai lewat listener
+  // terus-menerus (Logym→Lomeal) + tulis langsung ke dbLogym (Lomeal→Logym).
+  // lastSyncedPhysicalRef mencegah ping-pong: kalau nilai baru == yang barusan
+  // disinkron (dari arah mana pun), jangan tulis ulang.
+  const lastSyncedPhysicalRef = useRef(null);
+  const physicalRef = useRef(profile?.physical);
+  physicalRef.current = profile?.physical;
+
+  // Tujuan program Logym (goal/activityLevel/targetWeight) — cuma buat DITAMPILKAN
+  // & dicek kontradiksi vs dietProfile Lomeal, TIDAK pernah ditulis balik/di-auto-ubah.
+  const [logymGoalInfo, setLogymGoalInfo] = useState(null);
+
+  useEffect(() => {
+    if (!logymUser) { setLogymGoalInfo(null); return undefined; }
+    return subscribeLyfitProfile(logymUser.uid, (p) => {
+      if (!p) return;
+      setLogymGoalInfo({ goal: p.goal, activityLevel: p.activityLevel, targetWeight: p.targetWeight });
+      const incoming = {};
+      ['gender', 'dob', 'height', 'weight'].forEach((k) => { if (p[k]) incoming[k] = p[k]; });
+      if (Object.keys(incoming).length === 0) return;
+      const current = physicalRef.current || {};
+      const changed = Object.keys(incoming).some((k) => incoming[k] !== current[k]);
+      if (!changed) return;
+      const merged = { ...current, ...incoming };
+      const key = JSON.stringify(merged);
+      if (key === lastSyncedPhysicalRef.current) return;
+      lastSyncedPhysicalRef.current = key;
+      saveProfilePatch({ physical: merged });
+    });
+  }, [logymUser, saveProfilePatch]);
+
+  // Peta kasar goal Logym ↔ dietProfile Lomeal buat deteksi kontradiksi arah kalori
+  // (mis. Logym lagi bulking/surplus tapi Lomeal ditarget defisit) — cuma peringatan,
+  // gak pernah auto-ubah dietProfile (sesuai keputusanmu).
+  const goalMismatch = useMemo(() => {
+    const goal = logymGoalInfo?.goal;
+    const diet = profile?.dietProfile;
+    if (!goal || !diet) return null;
+    if (goal === 'muscle_gain' && diet === 'weight_loss') {
+      return 'Logym: target Muscle Gain (surplus) — tapi profil dietmu di Lomeal Weight Loss (defisit). Dua app narik arah berlawanan.';
+    }
+    if (goal === 'fat_loss' && diet === 'muscle_gain') {
+      return 'Logym: target Fat Loss (defisit) — tapi profil dietmu di Lomeal Muscle Gain (surplus). Dua app narik arah berlawanan.';
+    }
+    return null;
+  }, [logymGoalInfo, profile?.dietProfile]);
+
+  useEffect(() => {
+    if (!logymUser || !profile?.physical) return;
+    const key = JSON.stringify(profile.physical);
+    if (key === lastSyncedPhysicalRef.current) return;
+    lastSyncedPhysicalRef.current = key;
+    pushBiometricsToLogym(logymUser.uid, profile.physical);
+  }, [logymUser, profile?.physical]);
+
+  // Sync Preferences ke Logym (Diet Profile, Allergies)
+  const lastSyncedPreferencesRef = useRef(null);
+  useEffect(() => {
+    if (!logymUser) return;
+    const prefs = { 
+      dietProfile: profile?.dietProfile, 
+      allergies: profile?.allergies 
+    };
+    const key = JSON.stringify(prefs);
+    if (key === lastSyncedPreferencesRef.current) return;
+    lastSyncedPreferencesRef.current = key;
+    pushPreferencesToLogym(logymUser.uid, prefs.dietProfile, prefs.allergies);
+  }, [logymUser, profile?.dietProfile, profile?.allergies]);
 
   // Kunci AI efektif: milik Lomeal sendiri (prioritas) + cadangan dari Logym.
   // Jangan pernah array kosong (truthy!) — pass null biar guard `!aiKey` di tab lain tetap benar.
@@ -228,6 +309,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     aiKey: effectiveAiKeys,
     waterGoal: profile?.targets?.waterGoal,
     lyfitToday: dashboardLyfitToday,
+    logymGoalInfo, goalMismatch,
     showAlert, showConfirm,
   };
 
@@ -309,6 +391,7 @@ function App() {
   const [authState, setAuthState] = useState({ loading: true, user: null });
   const [profile, setProfile] = useState(undefined); // undefined = belum dicek, null = belum ada profil
   const [logymUser, setLogymUser] = useState(null); // identitas Social Hub (project Logym)
+  const [logymAuthChecked, setLogymAuthChecked] = useState(false); // hindari kedip gate connect pas awal load
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -318,10 +401,11 @@ function App() {
     return unsub;
   }, []);
 
-  // Sesi kedua ke project Logym — diisi otomatis via kredensial Google yang sama
-  // saat login (lihat AuthPage.jsx). Kalau user login lewat email/password, ini
-  // tetap null (Social Hub akan minta login Google).
-  useEffect(() => onAuthStateChanged(authLogym, setLogymUser), []);
+  // Sesi kedua ke project Logym — diisi manual lewat tombol "Hubungkan ke Logym"
+  // (Google popup ATAU email/password Logym langsung, lihat ProfilePage.jsx &
+  // OnboardingFlow.jsx). Listener global ini cuma memantau status sesi authLogym,
+  // bukan yang memicu login-nya.
+  useEffect(() => onAuthStateChanged(authLogym, (u) => { setLogymUser(u); setLogymAuthChecked(true); }), []);
 
   useEffect(() => {
     if (!authState.user) return undefined;
@@ -355,16 +439,39 @@ function App() {
       <OnboardingFlow
         t={darkTheme}
         theme="dark"
-        prefill={null}
+        logymUser={logymUser}
         onComplete={handleOnboardingComplete}
       />
     );
   }
 
+  // Logout Lomeal TIDAK ikut nyabut sesi Logym — itu link akun terpisah yang
+  // sengaja persisten (biar gak harus connect ulang tiap kali logout/login Lomeal).
   const handleLogout = () => {
     signOut(auth);
-    if (logymUser) signOut(authLogym);
   };
+
+  // Gate sekali sesudah login (bukan cuma pas onboarding) buat user yang sudah
+  // pernah selesai onboarding sebelum fitur sambung-Logym ada, atau yang skip
+  // waktu onboarding. Ditandai profile.logymConnectPromptShown biar gak nagih
+  // tiap login — dismiss sekali, gak muncul lagi (masih bisa connect manual
+  // lewat Profil di Social Hub kapan saja).
+  if (logymAuthChecked && !logymUser && !profile?.logymConnectPromptShown) {
+    const dismiss = () => saveLomealProfile(authState.user.uid, { logymConnectPromptShown: true });
+    return (
+      <div className={`min-h-screen ${darkTheme.bgApp} flex flex-col items-center justify-center px-6 gap-4 text-center`}>
+        <Sparkles size={32} className={darkTheme.textAccent} />
+        <h1 className={`h1 ${darkTheme.textMain}`}>Sambungkan ke Logym?</h1>
+        <p className={`body-md ${darkTheme.textMuted} max-w-xs`}>
+          Ini yang buka akses Social Hub-mu — udah punya akun Logym atau belum, sama saja bisa sambung sekarang (kalau belum punya, otomatis dibuatkan).
+        </p>
+        <div className="w-full max-w-xs">
+          <LogymConnectPrompt t={darkTheme} onConnected={dismiss} />
+        </div>
+        <button onClick={dismiss} className={`text-sm font-bold ${darkTheme.textMuted}`}>Lewati</button>
+      </div>
+    );
+  }
 
   return (
     <BrowserRouter>

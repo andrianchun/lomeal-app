@@ -177,3 +177,42 @@ export const nutritionForAmount = (food, grams) => {
   Object.entries(food.nutrition).forEach(([k, v]) => { out[k] = Math.round(v * factor * 10) / 10; });
   return out;
 };
+
+// ─── API FETCH: OpenFoodFacts ──────────────────────────────────────
+export const fetchOpenFoodFacts = async (query) => {
+  if (!query || query.trim().length < 2) return [];
+  try {
+    const res = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=true&page_size=20`);
+    const data = await res.json();
+    if (!data.products) return [];
+
+    return data.products.filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g']).map(p => {
+      const n = p.nutriments;
+      return {
+        id: `off_${p.code || Date.now()}`,
+        name: p.product_name_id || p.product_name || 'Tanpa Nama',
+        category: 'packaged', // Default for OFF
+        unit: p.product_quantity_unit === 'ml' ? 'ml' : 'g',
+        isDrink: p.product_quantity_unit === 'ml' || p.categories_tags?.includes('en:beverages'),
+        portion: { label: '100g', grams: 100 },
+        nutrition: {
+          kcal: Number(n['energy-kcal_100g']) || 0,
+          protein: Number(n.proteins_100g) || 0,
+          carbs: Number(n.carbohydrates_100g) || 0,
+          fat: Number(n.fat_100g) || 0,
+          sodium: (Number(n.sodium_100g) || 0) * 1000, // OFF gives g, we need mg
+          sugar: Number(n.sugars_100g) || 0,
+          cholesterol: (Number(n.cholesterol_100g) || 0) * 1000, // OFF gives g, we need mg
+          satFat: Number(n['saturated-fat_100g']) || 0,
+          iron: (Number(n.iron_100g) || 0) * 1000, // OFF gives g, we need mg
+          calcium: (Number(n.calcium_100g) || 0) * 1000, // OFF gives g, we need mg
+          purine: 0 // Tidak ada data purin
+        },
+        source: 'OpenFoodFacts',
+      };
+    });
+  } catch (e) {
+    console.error('Failed to fetch from OpenFoodFacts', e);
+    return [];
+  }
+};

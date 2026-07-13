@@ -6,11 +6,13 @@ import { NUTRIENTS, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMU
 import { STATUS, statusFor, MACRO_COLORS } from '../theme';
 import { getLocalYMD } from '../data/constants';
 
+const GOAL_LABELS = { muscle_gain: 'Muscle Gain', fat_loss: 'Fat Loss', strength: 'Strength', general: 'General Fitness' };
+
 /**
  * TAB 1: DASHBOARD — Pusat Pantau Imersif (Fase 5 blueprint).
  * Murni panel pemantauan; tidak ada aksi input/edit di sini.
  */
-const DashboardTab = ({ t, theme, profile, daysMap, lyfitToday, todayYmd = getLocalYMD() }) => {
+const DashboardTab = ({ t, theme, profile, daysMap, lyfitToday, logymGoalInfo, goalMismatch, todayYmd = getLocalYMD() }) => {
   const targets = profile?.targets || {};
   const dietProfile = profile?.dietProfile;
   const [chartRange, setChartRange] = useState(30);
@@ -184,6 +186,17 @@ const DashboardTab = ({ t, theme, profile, daysMap, lyfitToday, todayYmd = getLo
             : 'Belum ada aktivitas Lyfit hari ini'}
         </p>
       </div>
+
+      {logymGoalInfo?.goal && (
+        <div className={`rounded-2xl border px-4 py-3 flex items-start gap-3 anim-rise ${goalMismatch ? 'border-amber-500/40 bg-amber-500/10' : `${t.border} ${t.bgCardSoft}`}`}>
+          <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${goalMismatch ? 'bg-amber-500' : `${t.bgAccent}`}`}>
+            <AlertTriangle size={15} className="text-white" />
+          </span>
+          <p className={`body-md flex-1 ${goalMismatch ? 'text-amber-500' : t.textMuted}`}>
+            {goalMismatch || `Tujuan Logym: ${GOAL_LABELS[logymGoalInfo.goal] || logymGoalInfo.goal} — sejalan dengan profil dietmu di Lomeal.`}
+          </p>
+        </div>
+      )}
     </div>
   );
 };
