@@ -331,13 +331,13 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
             <button key={f.id} onClick={() => { setDetail(f); playSoundEffect('click', soundEnabled); }}
               className={`w-full flex items-center justify-between p-3 rounded-2xl border text-left transition-all active:scale-[0.98] ${t.border} ${t.bgCard}`}>
               <div className="w-full">
-                <p className={`body-md font-bold ${t.textMain} flex items-start justify-between gap-2`}>
+                <div className={`body-md font-bold ${t.textMain} flex items-start justify-between gap-2`}>
                   <span className="line-clamp-2 pr-2">{f.name}</span>
                   <div className="flex shrink-0 gap-1 flex-col items-end">
                     {f.source === 'OpenFoodFacts' && <span className={`px-1.5 py-0.5 rounded text-[8px] bg-blue-500/10 text-blue-500 uppercase tracking-widest`}>Online</span>}
                     {f.isCustom && <span className={`px-1.5 py-0.5 rounded text-[8px] ${t.bgAccentSoft} ${t.textAccent} uppercase tracking-widest`}>Custom</span>}
                   </div>
-                </p>
+                </div>
                 <div className="flex items-center gap-2.5 mt-1.5">
                   <p className={`text-[10px] font-medium ${t.textMuted} truncate max-w-[80px]`}>{f.portion.label}</p>
                   <div className={`w-1 h-1 rounded-full ${t.bgSunken}`}></div>

@@ -142,7 +142,7 @@ const DashboardTab = ({ t, theme, profile, daysMap, lyfitToday, logymGoalInfo, g
           </div>
         </div>
         <div className="h-44 -ml-3">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
             <BarChart data={chartData} barCategoryGap="25%">
               <XAxis dataKey="label" tick={{ fontSize: 9, fill: theme === 'dark' ? '#94a3b8' : '#64748b' }}
                 axisLine={false} tickLine={false} interval={Math.floor(chartRange / 7)} />
