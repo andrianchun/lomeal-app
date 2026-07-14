@@ -14,7 +14,7 @@ import {
 } from './utils/foodLog';
 import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitProfile } from './utils/lyfitSync';
 import {
-  pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym,
+  pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym, pushNutritionBioToLogym,
 } from './utils/biometricSync';
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration } from './utils/healthConnect';
 import { computeDayTotals, calcTargets } from './data/nutrition';
@@ -119,13 +119,31 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       hcWriteNutrition(ymd, totals).catch(() => {});
       if (dayData?.water) hcWriteHydration(ymd, dayData.water).catch(() => {});
     }
-    // Kalori-dimakan HARI INI juga dikirim ke Logym (field lomealSync, namespace
-    // sendiri) — biar Logym punya akses ke data ini kalau nanti mau ditampilkan.
-    if (logymUser && ymd === todayYmd) {
+    // Kalori-dimakan dikirim ke Logym untuk SEMUA hari yang berubah — bukan cuma hari ini.
+    // pushDailyTotalsToLogym → lomealSync.today (dashboard Lomeal ringkas di Logym)
+    // pushNutritionBioToLogym → bioData.nutritionCalories (grafik bio Logym sinkron sama Lomeal)
+    if (logymUser) {
       const mealsCount = Object.entries(dayData?.meals || {}).filter(([k, e]) => ['breakfast', 'lunch', 'dinner'].includes(k) && e.length > 0).length;
-      pushDailyTotalsToLogym(logymUser.uid, ymd, computeDayTotals(dayData), mealsCount).catch(() => {});
+      const dayTotals = computeDayTotals(dayData);
+      if (ymd === todayYmd) {
+        pushDailyTotalsToLogym(logymUser.uid, ymd, dayTotals, mealsCount).catch(() => {});
+      }
+      pushNutritionBioToLogym(logymUser.uid, ymd, dayTotals.kcal).catch(() => {});
     }
   }, [user, settings.healthConnectEnabled, logymUser, todayYmd, profile?.targets]);
+
+  // Sinkron SEMUA riwayat Lomeal ke Logym sekaligus (bioData.nutritionCalories)
+  const syncAllNutritionToLogym = useCallback(async () => {
+    if (!logymUser) return;
+    const entries = Object.entries(daysMap).filter(([, d]) => computeDayTotals(d).kcal > 0);
+    let synced = 0;
+    for (const [ymd, dayData] of entries) {
+      const kcal = computeDayTotals(dayData).kcal;
+      await pushNutritionBioToLogym(logymUser.uid, ymd, kcal);
+      synced++;
+    }
+    return synced;
+  }, [logymUser, daysMap]);
 
   // --- Resep & custom foods ---
   const [recipes, setRecipes] = useState([]);
@@ -153,12 +171,14 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   // --- Sinkronisasi ekosistem Logym: API key cadangan + kartu aktivitas Dashboard ---
   const [logymApiKeys, setLogymApiKeys] = useState([]);
   const [lyfitToday, setLyfitToday] = useState(null);
+  const [lyfitYearData, setLyfitYearData] = useState(null);
   useEffect(() => {
-    if (!logymUser) { setLogymApiKeys([]); setLyfitToday(null); return undefined; }
+    if (!logymUser) { setLogymApiKeys([]); setLyfitToday(null); setLyfitYearData(null); return undefined; }
     fetchLyfitProfile(logymUser.uid).then((p) => setLogymApiKeys(p?.userApiKeys || []));
     const year = new Date().getFullYear();
     const unsub = subscribeLyfitYear(logymUser.uid, year, (yearData) => {
       setLyfitToday(extractLyfitDay(yearData, todayYmd));
+      setLyfitYearData(yearData);
     });
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -339,6 +359,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     aiKey: effectiveAiKeys,
     waterGoal: profile?.targets?.waterGoal,
     lyfitToday: dashboardLyfitToday,
+    lyfitYearData,
     showAlert, showConfirm,
   };
 
@@ -408,6 +429,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
           healthConnected={!!settings.healthConnectEnabled}
           healthAvailable={healthAvailable}
           onDeleteAccount={handleDeleteAccount}
+          syncAllNutritionToLogym={syncAllNutritionToLogym}
+          lomealUser={user}
         />
       )}
 
@@ -441,7 +464,21 @@ function App() {
   // masih ada sebagai fallback.
   const bridgeAttemptedRef = useRef(null); // uid terakhir yang sudah dicoba, hindari spam retry
   useEffect(() => {
-    if (!authState.user || logymUser || !logymAuthChecked) return;
+    if (!authState.user || !logymAuthChecked) return;
+
+    // BUG FIX: Kalau logymUser sudah ada tapi emailnya beda sama Lomeal user saat ini,
+    // berarti sesi Logym lama (akun sebelumnya) masih nempel — WAJIB sign out dulu lalu re-bridge.
+    const logymEmailMismatch = logymUser && logymUser.email && authState.user.email &&
+      logymUser.email.toLowerCase() !== authState.user.email.toLowerCase();
+
+    if (logymEmailMismatch) {
+      console.warn('[DEBUG bridge] Email mismatch! Logym:', logymUser.email, '≠ Lomeal:', authState.user.email, '— sign out logym dulu');
+      bridgeAttemptedRef.current = null; // reset agar bisa bridge ulang setelah sign out
+      signOut(authLogym).catch(() => {});
+      return;
+    }
+
+    if (logymUser) return; // sudah tersambung dengan akun yang benar
     if (bridgeAttemptedRef.current === authState.user.uid) return;
     bridgeAttemptedRef.current = authState.user.uid;
     console.log('[DEBUG bridge] mencoba sambung untuk lomeal uid', authState.user.uid, authState.user.email);

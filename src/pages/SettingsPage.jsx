@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   X, Moon, Sun, Globe, Volume2, VolumeX, Timer, Download, Upload, CalendarDays,
   Bell, BellOff, Clock, Activity, Scale, Ruler, Thermometer, Trash2, Plus,
-  MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock,
+  MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw,
 } from 'lucide-react';
 import { getLang } from '../i18n';
 
@@ -82,10 +82,40 @@ const SettingsPage = ({
   onClose, onLogout, showAlert, showConfirm,
   exportData, handleImportFile,
   onToggleHealthConnect, healthConnected, healthAvailable,
-  onDeleteAccount,
+  onDeleteAccount, syncAllNutritionToLogym, lomealUser,
 }) => {
   const [activeTab, setActiveTab] = useState('preferensi');
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSyncAll = async () => {
+    if (!syncAllNutritionToLogym || isSyncing) return;
+
+    const lomealEmail = lomealUser?.email || '(tidak diketahui)';
+    const logymEmail = logymUser?.email || '(tidak diketahui)';
+    const emailMismatch = lomealUser?.email && logymUser?.email && lomealUser.email !== logymUser.email;
+
+    // Log diagnostik — cek di browser console jika ada bug cross-account
+    console.log('[SyncAll] Lomeal user:', lomealEmail, '| Logym user:', logymEmail, '| logymUID:', logymUser?.uid);
+
+    if (emailMismatch) {
+      showAlert?.(`⚠️ Sinkronisasi DIBLOKIR karena akun tidak cocok!\n\nLomeal (sumber data): ${lomealEmail}\nLogym (tujuan tulis): ${logymEmail}\n\nIni menandakan bug di koneksi Logym — jangan lakukan sinkronisasi sampai masalah ini diperbaiki untuk menghindari data bercampur.`);
+      return;
+    }
+
+    const confirmed = await showConfirm?.(`Data makan Lomeal akan ditulis ke akun Logym:\n\n${logymEmail}\n\nLanjutkan?`);
+    if (!confirmed) return;
+
+    setIsSyncing(true);
+    try {
+      const count = await syncAllNutritionToLogym();
+      showAlert?.(`Sinkronisasi selesai! ${count} hari riwayat Lomeal telah dikirim ke Logym (${logymEmail}).`);
+    } catch (e) {
+      showAlert?.('Sinkronisasi gagal: ' + (e?.message || 'Error tidak dikenal'));
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Swipe kiri/kanan pindah tab Preferensi/FAQ/Lanjutan — pola sama kayak swipe lokal
   // ProfileModal Logym (modal ini udah .no-swipe jadi gak bentrok sama swipe global App.jsx).
@@ -259,6 +289,27 @@ const SettingsPage = ({
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {logymUser && syncAllNutritionToLogym && (
+                <div className={`mt-3 pt-3 border-t ${t.border}`}>
+                  <p className={`text-[10px] font-black uppercase tracking-wider ${t.textMuted} mb-2 flex items-center gap-1.5`}>
+                    <RefreshCw size={10} /> Migrasi Data Historis (Satu Kali)
+                  </p>
+                  <button
+                    onClick={handleSyncAll}
+                    disabled={isSyncing}
+                    className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                      isSyncing ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'
+                    } ${t.bgAccentSoft} ${t.textAccent} border ${t.border}`}
+                  >
+                    <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                    {isSyncing ? 'Menyinkronkan...' : 'Push Riwayat Lama ke Logym'}
+                  </button>
+                  <p className={`text-[10px] ${t.textMuted} mt-1.5 leading-tight`}>
+                    Hanya untuk data sebelum fitur sinkronisasi otomatis aktif. Setelah itu, semua perubahan di Lomeal langsung tersinkron ke Logym secara otomatis tanpa perlu tombol ini.
+                  </p>
                 </div>
               )}
             </Section>

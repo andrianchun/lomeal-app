@@ -1,17 +1,21 @@
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { getLocalYMD } from '../data/constants';
 import { formatNumber } from '../utils/numberFormat';
 import { computeDayTotals } from '../data/nutrition';
 
-const NutritionChart = ({ t, theme, daysMap = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
+const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
   const chartMetricsList = [
       { key: 'calories', label: 'Kalori', color: theme === 'dark' ? '#818cf8' : '#4f46e5', type: 'grouped',
         subMetrics: [
             { key: 'nutritionCalories', label: 'Dimakan', color: theme === 'dark' ? '#34d399' : '#059669' },
             { key: 'activityCalories', label: 'Dibakar', color: theme === 'dark' ? '#60a5fa' : '#2563eb' }
         ]
-      }
+      },
+      { key: 'delta', label: 'Delta', color: theme === 'dark' ? '#f43f5e' : '#e11d48', type: 'single' },
+      { key: 'protein', label: 'Protein', color: theme === 'dark' ? '#fbbf24' : '#f59e0b', type: 'single' },
+      { key: 'fat', label: 'Lemak', color: theme === 'dark' ? '#f87171' : '#ef4444', type: 'single' },
+      { key: 'carbs', label: 'Karbo', color: theme === 'dark' ? '#38bdf8' : '#0ea5e9', type: 'single' }
   ];
 
   const [activeMetric, setActiveMetric] = useState('calories');
@@ -35,16 +39,27 @@ const NutritionChart = ({ t, theme, daysMap = {}, soundEnabled, playSoundEffect,
       bioEntries.forEach(entry => {
           const d = new Date(entry.dateStr);
           const totals = computeDayTotals(entry.dayData);
+          const burned = Number(lyfitYearData?.[entry.dateStr]?.bioData?.activityCalories) || 0;
+          const eaten = totals.kcal || 0;
           
+          let delta = null;
+          if (eaten > 0 && targets?.kcal) {
+             delta = Math.round(eaten - (targets.tdee || targets.kcal) - burned);
+          }
+
           data.push({
               name: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
               dateFull: entry.dateStr,
-              nutritionCalories: totals.kcal > 0 ? totals.kcal : null,
-              activityCalories: null // Historis dibakar dari logym belum tersimpan di Lomeal
+              nutritionCalories: eaten > 0 ? eaten : null,
+              activityCalories: burned > 0 ? burned : null,
+              delta: delta,
+              protein: totals.protein > 0 ? totals.protein : null,
+              fat: totals.fat > 0 ? totals.fat : null,
+              carbs: totals.carbs > 0 ? totals.carbs : null,
           });
       });
       return data;
-  }, [daysMap]);
+  }, [daysMap, lyfitYearData, targets]);
 
   const scrollRef = useRef(null);
 
@@ -140,9 +155,14 @@ const NutritionChart = ({ t, theme, daysMap = {}, soundEnabled, playSoundEffect,
 
       if (min !== Infinity && max !== -Infinity) {
           const diff = max - min;
-          setYDomain([0, max + diff * 0.15 || max * 1.1]);
+          if (activeMetric === 'delta') {
+              const absMax = Math.max(Math.abs(min), Math.abs(max));
+              setYDomain([-(absMax * 1.15), absMax * 1.15]);
+          } else {
+              setYDomain([0, max + diff * 0.15 || max * 1.1]);
+          }
       } else {
-          setYDomain([0, 100]);
+          setYDomain(activeMetric === 'delta' ? [-100, 100] : [0, 100]);
       }
   }, [multiChartData, activeMetric]);
 
@@ -266,12 +286,28 @@ const NutritionChart = ({ t, theme, daysMap = {}, soundEnabled, playSoundEffect,
                     <XAxis dataKey="name" stroke={theme === 'dark' ? '#a1a1aa' : '#64748b'} fontSize={10} tickLine={false} axisLine={false} />
                     <YAxis domain={yDomain} hide={true} />
                     
+                    {activeMetric === 'calories' && targets?.kcal && (
+                        <ReferenceLine y={targets.tdee || targets.kcal} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    )}
+                    {activeMetric === 'protein' && targets?.protein && (
+                        <ReferenceLine y={targets.protein} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    )}
+                    {activeMetric === 'fat' && targets?.fat && (
+                        <ReferenceLine y={targets.fat} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    )}
+                    {activeMetric === 'carbs' && targets?.carbs && (
+                        <ReferenceLine y={targets.carbs} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    )}
+                    {activeMetric === 'delta' && (
+                        <ReferenceLine y={0} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    )}
+
                     {activeObj.type === 'single' ? (
                         <Bar 
                             dataKey={activeMetric} 
                             name={activeObj.label} 
                             fill={`url(#gradient-${activeMetric})`}
-                            radius={[50, 50, 0, 0]} 
+                            radius={activeMetric === 'delta' ? 0 : [50, 50, 0, 0]} 
                             isAnimationActive={false} 
                             maxBarSize={30}
                         />

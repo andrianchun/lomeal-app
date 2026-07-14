@@ -14,10 +14,9 @@ import SwipeInput from '../components/SwipeInput';
  * TAB 1: DASHBOARD — Pusat Pantau Imersif (Fase 5 blueprint).
  * Murni panel pemantauan; tidak ada aksi input/edit di sini.
  */
-const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday, saveProfilePatch, todayYmd = getLocalYMD() }) => {
+const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday, lyfitYearData, saveProfilePatch, todayYmd = getLocalYMD() }) => {
   const targets = profile?.targets || {};
   const dietProfile = profile?.dietProfile;
-  const [chartRange, setChartRange] = useState(30);
 
   // State accordion untuk Tren Kalori
   const [isChartExpanded, setIsChartExpanded] = useState(() => {
@@ -64,7 +63,20 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
 
   // Kalori Dimakan selalu ditarik dari "Tab Catat" (totals.kcal dari rekam makanan lokal Lomeal).
   const displayKcal = totals.kcal;
-  const allowance = (targets.kcal || 0) + burnedBonus;
+
+  // FIX: Logym activityCalories = BMR + langkah + workout = total bakar NYATA hari ini.
+  // Formula lama salah: allowance = targets.kcal + burnedBonus (double-counting!).
+  // Formula baru: allowance = burn_aktual + program_delta
+  //   Maintenance: allowance = burnedBonus + 0          → sisa = burnedBonus - dimakan
+  //   Cutting:     allowance = burnedBonus - defisit    → sisa lebih kecil
+  //   Bulking:     allowance = burnedBonus + surplus     → sisa lebih besar
+  // Kalau tidak ada data Logym, fallback ke targets.kcal (behavior lama).
+  const baseTdee = targets.tdee || targets.kcal || 0;
+  const programDelta = (targets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
+  const allowance = burnedBonus > 0
+    ? Math.max(0, burnedBonus + programDelta)
+    : (targets.kcal || 0);
+
   const remaining = Math.round(allowance - displayKcal);
   const ringProgress = allowance > 0 ? Math.min(1, displayKcal / allowance) : 0;
   const balance = getEnergyBalance(displayKcal, targets.tdee || targets.kcal || 0, burnedBonus);
@@ -72,18 +84,7 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
 
   const warnings = useMemo(() => getSmartWarnings(totals, targets, dietProfile), [totals, targets, dietProfile]);
 
-  // Data grafik batang historis (ala Samsung Health) + garis target putus-putus
-  const chartData = useMemo(() => {
-    const out = [];
-    for (let i = chartRange - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const ymd = getLocalYMD(d);
-      const dayTotals = computeDayTotals(daysMap[ymd]);
-      out.push({ ymd, label: `${d.getDate()}/${d.getMonth() + 1}`, kcal: Math.round(dayTotals.kcal) });
-    }
-    return out;
-  }, [daysMap, chartRange]);
+
 
   const microChips = NUTRIENTS.filter(n => !n.macro && (!n.conditional || dietProfile === 'low_purine'));
 
@@ -292,24 +293,47 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
       {/* ===== KARTU TREN KALORI ===== */}
       <div className="relative flex flex-col w-full min-w-0 anim-rise" style={{ animationDelay: '90ms' }}>
          <div className={`rounded-2xl border ${t.border} ${theme === 'dark' ? 'bg-black/40 backdrop-blur-md' : 'bg-white/45 backdrop-blur-md'} shadow-sm relative z-20`}>
-             <div className="p-4 flex items-center justify-between">
-                 <div className="flex items-center gap-2">
-                     <Flame size={15} className={t.textAccent} />
+             {/* Latar Belakang Coach */}
+             <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden rounded-2xl">
+                <div 
+                  className={`absolute inset-0 transition-all duration-700 opacity-30 blur-[2px]`}
+                  style={{
+                    backgroundImage: `url('/bg-lomeal-coach.webp')`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'top center',
+                    backgroundRepeat: 'no-repeat',
+                  }}
+                />
+                <div 
+                  className={`absolute top-0 bottom-0 right-0 w-[50%] transition-all duration-700 opacity-70`}
+                  style={{
+                    WebkitMaskImage: 'linear-gradient(to left, black 60%, transparent 100%)',
+                    maskImage: 'linear-gradient(to left, black 60%, transparent 100%)'
+                  }}
+                >
+                  <div 
+                    className="absolute inset-0 transition-all duration-700"
+                    style={{
+                      backgroundImage: `url('/bg-lomeal-coach.webp')`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'top center',
+                      backgroundRepeat: 'no-repeat',
+                      transform: 'scale(1.15)',
+                    }}
+                  />
+                </div>
+             </div>
+
+             <div className="p-4 flex items-center justify-between relative z-10">
+                 <div className="flex flex-col">
                      <span className={`h2 ${t.textMain}`}>Tren Kalori</span>
-                 </div>
-                 <div className={`flex rounded-xl overflow-hidden border ${t.border}`}>
-                   {[[7, '7H'], [30, '30H'], [90, '3B']].map(([days, label]) => (
-                     <button key={days} onClick={() => setChartRange(days)}
-                       className={`px-2.5 py-1 caption transition-colors ${chartRange === days ? `${t.bgAccentSoft} ${t.textAccent}` : t.textMuted}`}>
-                       {label}
-                     </button>
-                   ))}
+                     <span className={`caption ${t.textMuted}`}>Pantau defisit & surplus kalori harian</span>
                  </div>
              </div>
-             <div className="pt-0 pb-4">
+             <div className="pt-0 pb-4 relative z-10">
                  <NutritionChart
                      t={t} theme={theme} daysMap={daysMap} targets={targets}
-                     chartRange={chartRange}
+                     lyfitYearData={lyfitToday === null && lyfitToday === undefined ? null : lyfitYearData} 
                  />
              </div>
          </div>

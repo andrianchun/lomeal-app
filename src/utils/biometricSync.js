@@ -106,3 +106,24 @@ export const pushActivityOverrideToLogym = async (logymUid, ymd, burnedKcal) => 
     console.warn('Gagal push koreksi kalori dibakar ke Logym:', e);
   }
 };
+
+// Push total kalori-dimakan dari Lomeal ke bioData.nutritionCalories Logym
+// (di path history_years yang sama dengan activityCalories), agar grafik Logym
+// bisa menampilkan data yang konsisten dengan food log Lomeal.
+// Flag _manualFlags.nutritionCalories=true mencegah proses Logym menimpa data ini.
+export const pushNutritionBioToLogym = async (logymUid, ymd, kcal) => {
+  if (!logymUid || !ymd) return;
+  const year = ymd.slice(0, 4);
+  try {
+    await setDoc(doc(dbLogym, 'users', logymUid, 'history_years', year), {
+      [ymd]: {
+        bioData: {
+          nutritionCalories: Math.round(kcal) || 0,
+          _manualFlags: { nutritionCalories: true },
+        },
+      },
+    }, { merge: true });
+  } catch (e) {
+    console.warn('Gagal push kalori dimakan ke Logym bioData:', e);
+  }
+};
