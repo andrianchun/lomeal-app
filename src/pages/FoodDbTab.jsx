@@ -19,35 +19,6 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   // ── Tab State ────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState('all'); // 'all' | 'custom'
 
-  // --- Swipe Logic for Tab Switch ---
-  const touchStartX = useRef(null);
-  const touchEndX = useRef(null);
-  const minSwipeDistance = 50;
-
-  const onTouchStart = (e) => {
-    touchEndX.current = null;
-    touchStartX.current = e.targetTouches[0].clientX;
-  };
-  const onTouchMove = (e) => {
-    touchEndX.current = e.targetTouches[0].clientX;
-  };
-  const onTouchEnd = (e) => {
-    if (!touchStartX.current || !touchEndX.current) return;
-    const distance = touchStartX.current - touchEndX.current;
-    const isLeftSwipe = distance > minSwipeDistance;
-    const isRightSwipe = distance < -minSwipeDistance;
-    
-    if (isLeftSwipe && viewMode === 'all') {
-      setViewMode('custom');
-      playSoundEffect('swipe', soundEnabled);
-      e.stopPropagation();
-    } else if (isRightSwipe && viewMode === 'custom') {
-      setViewMode('all');
-      playSoundEffect('swipe', soundEnabled);
-      e.stopPropagation();
-    }
-  };
-
   const [term, setTerm] = useState('');
   const [category, setCategory] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -246,12 +217,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   }
 
   return (
-    <div 
-      className="p-4 pb-24 h-full flex flex-col"
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-    >
+    <div className="p-4 pb-24 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4 shrink-0">
         <h1 className={`h1 ${t.textMain}`}>Database Gizi</h1>
         <div className={`relative flex p-1 rounded-full ${t.btnBg} w-44 shrink-0 border ${t.border}`}>

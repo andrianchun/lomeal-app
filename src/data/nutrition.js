@@ -36,18 +36,30 @@ export const scaleNutrition = (n, factor) => {
 
 // ---------- Profil Diet Medis (Tahap 2 kuesioner) ----------
 export const DIET_PROFILES = [
-  { id: 'weight_loss',  label: 'Weight Loss',              emoji: '⚖️', desc: 'Defisit kalori terkontrol untuk penurunan berat badan yang sehat.' },
-  { id: 'muscle_gain',  label: 'High Protein / Muscle Gain', emoji: '💪', desc: 'Surplus ringan dengan protein tinggi untuk pembentukan otot.' },
-  { id: 'gluten_free',  label: 'Gluten-Free',              emoji: '🌾', desc: 'Menghindari gluten; fokus bahan alami bebas gandum.' },
-  { id: 'vegan',        label: 'Vegan',                    emoji: '🌱', desc: 'Nabati penuh; perhatian ekstra pada zat besi & protein.' },
+  { id: 'weight_loss',  label: 'Lo Fat',                   emoji: '🫃', desc: 'Lemak ditekan, defisit kalori terkontrol untuk penurunan berat badan.' },
+  { id: 'muscle_gain',  label: 'Hi Protein',               emoji: '💪', desc: 'Surplus ringan dengan protein tinggi untuk pembentukan otot.' },
   { id: 'dash',         label: 'DASH / Anti-Hipertensi',   emoji: '🫀', desc: 'Natrium ketat, kaya kalsium — ramah tekanan darah.' },
-  { id: 'low_purine',   label: 'Rendah Purin',             emoji: '🦶', desc: 'Batasi purin untuk mengelola asam urat / gout.' },
+  { id: 'low_purine',   label: 'Rendah Purin / Asam Urat', emoji: '🦶', desc: 'Batasi purin untuk mengelola asam urat / gout.' },
+  { id: 'carnivore',    label: 'Carnivore',                emoji: '🥩', desc: 'Hampir tanpa karbo, protein & lemak hewani penuh.' },
+  { id: 'vegan',        label: 'Vegan',                    emoji: '🌱', desc: 'Nabati penuh; perhatian ekstra pada zat besi & protein.' },
+  { id: 'keto',         label: 'Ketogenik',                emoji: '🥑', desc: 'Karbo sangat rendah, lemak tinggi — tubuh berbahan bakar keton.' },
+  { id: 'gluten_free',  label: 'Gluten-Free',              emoji: '🌾', desc: 'Menghindari gluten; fokus bahan alami bebas gandum.' },
 ];
 
 export const PACES = [
   { id: 'santai',  label: 'Santai',  desc: '±10% penyesuaian kalori — pelan tapi konsisten', factor: 0.10 },
   { id: 'normal',  label: 'Normal',  desc: '±15% penyesuaian kalori — jalur teruji',         factor: 0.15 },
   { id: 'agresif', label: 'Agresif', desc: '±22% penyesuaian kalori — hasil cepat, disiplin tinggi', factor: 0.22 },
+];
+
+// Fase kalori — arah defisit/surplus, TERPISAH dari DIET_PROFILES (gaya makan/makro).
+// Ini yang dulu jadi preset "Cutting/Maintenance/Clean Bulk" di Logym; sekarang milik Lomeal
+// (murni urusan makan, gak ngaruh ke pemilihan/intensitas latihan) — dan disimpan per-hari
+// (lihat calcTargets di bawah, field `dietGoal` ikut ke targets) buat kalender riwayat fase.
+export const DIET_GOALS = [
+  { id: 'cutting',     label: 'Cutting',     emoji: '✂️', desc: 'Defisit kalori — fokus turunkan berat badan.' },
+  { id: 'maintenance', label: 'Maintenance', emoji: '⚖️', desc: 'Kalori seimbang — pertahankan berat & performa.' },
+  { id: 'bulk',        label: 'Bulk',        emoji: '📈', desc: 'Surplus kalori — fokus naikkan berat/massa otot.' },
 ];
 
 // ---------- Kalkulasi Target ----------
@@ -60,20 +72,36 @@ export const calcBMR = ({ weight, height, age, gender }) => {
 };
 
 export const calcTargets = (profile) => {
-  const { weight = 70, dietProfile = 'weight_loss', pace = 'normal' } = profile || {};
+  const { weight = 70, dietGoal = 'maintenance', dietProfile = 'weight_loss', pace = 'normal' } = profile || {};
   const bmr = calcBMR(profile) || 1600;
   const tdee = Math.round(bmr * 1.375);
   const paceFactor = (PACES.find(p => p.id === pace) || PACES[1]).factor;
 
+  // Arah kalori dari dietGoal (fase cutting/maintenance/bulk) — TERPISAH dari dietProfile
+  // (gaya makan di bawah cuma ngatur rasio makro, gak lagi nentuin defisit/surplus).
   let kcal = tdee;
-  if (dietProfile === 'weight_loss') kcal = Math.round(tdee * (1 - paceFactor));
-  else if (dietProfile === 'muscle_gain') kcal = Math.round(tdee * (1 + paceFactor * 0.6));
+  if (dietGoal === 'cutting') kcal = Math.round(tdee * (1 - paceFactor));
+  else if (dietGoal === 'bulk') kcal = Math.round(tdee * (1 + paceFactor * 0.6));
 
-  // Makro (g): protein per kg BB menyesuaikan profil, lemak % kalori, sisanya karbo
-  const proteinPerKg = dietProfile === 'muscle_gain' ? 2.0 : dietProfile === 'weight_loss' ? 1.6 : 1.2;
+  // Makro (g): protein per kg BB menyesuaikan profil. Keto/Carnivore rasionya beda drastis
+  // (karbo ditekan abis) makanya dihitung terpisah dari pola persen-lemak-tetap yang lain.
+  const proteinPerKg = dietProfile === 'muscle_gain' ? 2.0 : dietProfile === 'weight_loss' ? 1.6
+    : dietProfile === 'keto' ? 1.6 : dietProfile === 'carnivore' ? 2.2 : 1.2;
   const protein = Math.round(weight * proteinPerKg);
-  const fat = Math.round((kcal * 0.27) / 9);
-  const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
+  let fat, carbs;
+  if (dietProfile === 'keto') {
+    carbs = 25; // g — batas ketat standar keto (~5% kalori)
+    fat = Math.max(0, Math.round((kcal - protein * 4 - carbs * 4) / 9));
+  } else if (dietProfile === 'carnivore') {
+    carbs = 0;
+    fat = Math.max(0, Math.round((kcal - protein * 4) / 9));
+  } else if (dietProfile === 'weight_loss') {
+    fat = Math.round((kcal * 0.18) / 9); // Lo Fat — lemak ditekan lebih dari default 27%
+    carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
+  } else {
+    fat = Math.round((kcal * 0.27) / 9);
+    carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
+  }
 
   // Batas mikro harian (default klinis umum; DASH memperketat natrium)
   const targets = {
@@ -85,8 +113,8 @@ export const calcTargets = (profile) => {
     iron: profile?.gender === 'female' ? 18 : 9,       // mg (AKG, target minimal)
     calcium: 1000,                                     // mg (target minimal)
     purine: dietProfile === 'low_purine' ? 400 : null, // mg — hanya dilacak kondisional
-    waterGoal: 2000, // ml (default umum; belum dipersonalisasi per berat badan)
-    tdee, bmr,
+    waterGoal: profile?.waterGoal || 2000, // ml — bisa dikustom user, default 2000
+    tdee, bmr, dietGoal,
   };
   return targets;
 };

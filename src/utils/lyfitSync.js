@@ -37,12 +37,6 @@ const parseLyfitProfile = (data) => {
     dob,
     age,
     bmr: bio.bmr || null,
-    // Tujuan program — dipakai buat cek kontradiksi vs dietProfile Lomeal
-    // (mis. Logym 'muscle_gain'/surplus vs Lomeal 'weight_loss'/defisit).
-    // Cuma dibaca & ditampilkan sebagai peringatan, TIDAK auto-override apa pun.
-    goal: p.goal || null,
-    activityLevel: p.activityLevel || null,
-    targetWeight: p.targetWeight || null,
     userApiKeys,
     theme: settings.theme || null,
     displayName: data.displayName || null,
@@ -86,6 +80,10 @@ export const extractLyfitDay = (yearDays, ymd) => {
     weight: Number(bio.weight) || null,
     workoutCount: completed.length,
     workoutNames: completed.map(w => w.programName).filter(Boolean),
+    // Simetris sama burnedKcal: kalau user isi manual "Kalori Makanan" langsung di Logym
+    // (bukan lewat Lomeal), Lomeal ikut baca angka itu buat ring/remaining — murni override
+    // tampilan, log makanan asli di Lomeal (Log tab, lengkap makronya) tetap gak disentuh.
+    nutritionOverride: bio._manualFlags?.nutritionCalories ? (Number(bio.nutritionCalories) || null) : null,
   };
 };
 

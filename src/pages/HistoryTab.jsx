@@ -52,9 +52,17 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
   const dayDot = (ymd) => {
     const totals = computeDayTotals(daysMap[ymd]);
     if (!totals.kcal) return null;
-    const ratio = totals.kcal / (targets.kcal || 1);
+    // Arsip: hari yang udah lewat pakai target yang berlaku WAKTU ITU (targetSnapshot),
+    // bukan target sekarang — biar ganti Diet Profile gak nulis ulang riwayat kepatuhan.
+    const dayTargets = daysMap[ymd]?.targetSnapshot || targets;
+    const ratio = totals.kcal / (dayTargets.kcal || 1);
     return ratio > 1.05 ? STATUS.danger : ratio >= 0.7 ? STATUS.ok : STATUS.warn;
   };
+
+  // Cincin warna di angka tanggal — fase (cutting/bulk) yang berlaku hari itu, diambil dari
+  // arsip targetSnapshot (bukan target sekarang), biar riwayat fase kebaca kayak kalender.
+  const PHASE_RING = { cutting: 'ring-2 ring-rose-500/70', bulk: 'ring-2 ring-emerald-500/70' };
+  const phaseRing = (ymd) => PHASE_RING[daysMap[ymd]?.targetSnapshot?.dietGoal] || '';
 
   // ---------- CRUD dalam dropdown sub-card ----------
   const expandedDay = expandedYmd ? (daysMap[expandedYmd] || { meals: {}, water: 0 }) : null;
@@ -155,7 +163,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
                 return (
                   <button key={di} onClick={() => setExpandedYmd(expanded ? null : ymd)}
                     className={`relative py-1.5 flex flex-col items-center rounded-xl transition-all ${expanded ? `${t.bgAccentSoft} border ${t.borderAccentSoft}` : ''}`}>
-                    <span className={`text-xs font-bold w-7 h-7 flex items-center justify-center rounded-full ${isToday ? `${t.bgAccent} text-white` : isFuture ? t.textMuted : t.textMain}`}>
+                    <span className={`text-xs font-bold w-7 h-7 flex items-center justify-center rounded-full ${phaseRing(ymd)} ${isToday ? `${t.bgAccent} text-white` : isFuture ? t.textMuted : t.textMain}`}>
                       {Number(ymd.slice(8))}
                     </span>
                     <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${dot ? dot.bg : 'bg-transparent'}`} />

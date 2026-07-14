@@ -31,7 +31,7 @@ export const buildTheme = (theme) => ({
   navIconInactive: theme === 'dark' ? 'text-slate-500' : 'text-slate-400',
   placeholderAccent: theme === 'dark' ? 'placeholder-green-400/40' : 'placeholder-green-600/40',
   borderDashed: theme === 'dark' ? 'border-white/10' : 'border-black/10',
-  bgBox: theme === 'dark' ? 'bg-white/5' : 'bg-green-600/10',
+  bgBox: theme === 'dark' ? 'bg-black/20' : 'bg-green-600/10',
   glow: theme === 'dark' ? 'shadow-[0_8px_32px_-10px_rgba(34,197,94,0.35)]' : 'shadow-[0_8px_32px_-14px_rgba(34,197,94,0.25)]',
 });
 

@@ -13,6 +13,7 @@ import { uploadImageToFirebase, deleteImageFromFirebase } from '../utils/storage
 import { registerToCommunity, updateUserProfileInFeed, getUserPosts } from '../utils/communityApi';
 import { getFollowerCount, getFollowingCount } from '../utils/followApi';
 import { ACHIEVEMENTS, checkAchievements } from '../data/achievements';
+import { DIET_PROFILES } from '../data/nutrition';
 import FollowListModal from './FollowListModal';
 import LogymConnectPrompt from './LogymConnectPrompt';
 
@@ -245,13 +246,9 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
             }}
             className={`w-full px-3 py-2.5 rounded-xl border-2 font-bold text-sm border-transparent outline-none ${t.inputBg} ${t.textMain}`}
           >
-            <option value="weight_loss">Weight Loss (Defisit Kalori)</option>
-            <option value="maintain">Maintain (Pertahankan Berat)</option>
-            <option value="muscle_gain">Muscle Gain (Surplus Kalori)</option>
-            <option value="vegan">Vegan</option>
-            <option value="keto">Keto</option>
-            <option value="dash">DASH (Darah Tinggi)</option>
-            <option value="low_purine">Rendah Purin (Asam Urat)</option>
+            {DIET_PROFILES.map((dp) => (
+              <option key={dp.id} value={dp.id}>{dp.emoji} {dp.label}</option>
+            ))}
           </select>
         </div>
 

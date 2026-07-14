@@ -6,7 +6,7 @@ import React from 'react';
  * - atau progress tunggal: progress (0-1) + color
  * Dipakai untuk Hero Widget dashboard & pinggiran piring Meal Grid.
  */
-const RingChart = ({ size = 120, stroke = 10, progress = null, color = '#22c55e', trackColor = 'rgba(148,163,184,0.15)', segments = null, children }) => {
+const RingChart = ({ size = 120, stroke = 10, progress = null, color = '#22c55e', trackColor = 'rgba(148,163,184,0.15)', segments = null, glass = false, children }) => {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const center = size / 2;
@@ -33,8 +33,15 @@ const RingChart = ({ size = 120, stroke = 10, progress = null, color = '#22c55e'
 
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size}>
-        <circle cx={center} cy={center} r={r} fill="none" stroke={trackColor} strokeWidth={stroke} />
+      {/* Backdrop kaca di belakang ring — pola sama kayak ring SCORE Komposisi Tubuh Logym */}
+      {glass && (
+        <div className="absolute rounded-full backdrop-blur-md border border-white/10 z-0"
+          style={{ inset: stroke, backgroundColor: 'rgba(0,0,0,0.35)' }} />
+      )}
+      <svg className="relative z-10" width={size} height={size}>
+        {/* Track titik-titik (bukan garis solid) — pola sama kayak ring SCORE di Logym */}
+        <circle cx={center} cy={center} r={r} fill="none" stroke={trackColor} strokeWidth={stroke}
+          strokeLinecap="round" strokeDasharray={`${stroke * 0.3} ${stroke * 1.24}`} />
         {segEls}
         {p !== null && (
           <circle cx={center} cy={center} r={r} fill="none"
