@@ -1,8 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { X, Search, Scale, ChefHat, Plus, Minus } from 'lucide-react';
 import { searchFoods, nutritionForAmount, FOOD_CATEGORIES } from '../data/foodDatabase';
-import { scaleNutrition } from '../data/nutrition';
+import { scaleNutrition, NUTRIENTS } from '../data/nutrition';
 import { makeEntry } from '../utils/foodLog';
+
+const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key, `${n.label} (${n.unit})`]);
+const EXTRA_NUTRIENT_FIELDS = NUTRIENTS.filter(n => !n.macro).map(n => [n.key, `${n.label} (${n.unit})`]);
 
 /**
  * Manual Fallback Presisi (blueprint Tab 2): pencarian database + resep +
@@ -55,7 +58,7 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], rec
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm no-swipe" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
         className={`w-full sm:max-w-md max-h-[88vh] flex flex-col rounded-t-3xl sm:rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]' : 'bg-white'} anim-rise`}>
         {/* Header + tabs */}
@@ -158,9 +161,17 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], rec
             <div className="space-y-2.5">
               <input className={inputCls} placeholder="Nama makanan" value={manual.name} onChange={(e) => setManual(m => ({ ...m, name: e.target.value }))} />
               <div className="grid grid-cols-2 gap-2">
-                {[['grams', 'Berat (g/ml)'], ['kcal', 'Energi (kkal)'], ['protein', 'Protein (g)'], ['carbs', 'Karbo (g)'], ['fat', 'Lemak (g)'], ['sugar', 'Gula (g)'], ['sodium', 'Natrium (mg)'], ['cholesterol', 'Kolesterol (mg)'], ['satFat', 'Lemak Jenuh (g)'], ['iron', 'Zat Besi (mg)'], ['calcium', 'Kalsium (mg)'], ['purine', 'Purin (mg)']].map(([k, label]) => (
+                <div>
+                  <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Berat (g/ml)</p>
+                  <input type="number" inputMode="decimal" className={`${inputCls} no-spinners`} value={manual.grams} onChange={(e) => setManual(m => ({ ...m, grams: e.target.value }))} placeholder="0" />
+                </div>
+                <div>
+                  <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Energi (kkal)</p>
+                  <input type="number" inputMode="decimal" className={`${inputCls} no-spinners`} value={manual.kcal} onChange={(e) => setManual(m => ({ ...m, kcal: e.target.value }))} placeholder="0" />
+                </div>
+                {NUTRIENT_FIELDS.map(([k, label]) => (
                   <div key={k}>
-                    <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>{label}</p>
+                    <p className={`caption font-medium mb-0.5 ${t.textMuted} truncate`}>{label}</p>
                     <input type="number" inputMode="decimal" className={`${inputCls} no-spinners`} value={manual[k]}
                       onChange={(e) => setManual(m => ({ ...m, [k]: e.target.value }))} placeholder="0" />
                   </div>

@@ -137,3 +137,13 @@ body:has(.fixed.inset-0:not(.pointer-events-none)) {
   filter: invert(1) brightness(0.8);
 }
 
+/* Hide number input spinners */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+

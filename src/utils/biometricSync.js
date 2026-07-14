@@ -65,7 +65,7 @@ export const pushTargetsToLogym = async (logymUid, targets) => {
   }
 };
 
-export const pushDailyTotalsToLogym = async (logymUid, ymd, totals) => {
+export const pushDailyTotalsToLogym = async (logymUid, ymd, totals, mealsCount = 0) => {
   if (!logymUid) return;
   try {
     await setDoc(doc(dbLogym, 'users', logymUid), {
@@ -76,6 +76,7 @@ export const pushDailyTotalsToLogym = async (logymUid, ymd, totals) => {
           protein: Math.round(totals.protein || 0),
           carbs: Math.round(totals.carbs || 0),
           fat: Math.round(totals.fat || 0),
+          mealsCount: mealsCount,
           updatedAt: new Date().toISOString(),
         },
       },

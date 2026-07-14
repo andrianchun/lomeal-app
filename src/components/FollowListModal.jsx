@@ -154,7 +154,7 @@ export default function FollowListModal({ currentUser, type, isDark, t, onClose 
   };
 
   const modal = (
-    <div className="fixed inset-0 z-[2000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={onClose}>
+    <div className="fixed inset-0 z-[2000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300 no-swipe" onClick={onClose}>
       <div
         className={`w-full max-w-sm ${t?.bgCard || (isDark ? 'bg-slate-900' : 'bg-white')} rounded-3xl flex flex-col max-h-[80vh] shadow-2xl animate-in zoom-in-95`}
         onClick={(e) => e.stopPropagation()}

@@ -7,6 +7,8 @@
 // `portion` = ukuran rumah tangga (URT) default untuk 1x klik log.
 // ============================================================
 
+import { TKPI_DB, formatTKPI } from './tkpi';
+
 const F = (id, name, category, portionLabel, portionGrams, n, opts = {}) => ({
   id, name, category,
   unit: opts.unit || 'g',
@@ -16,6 +18,10 @@ const F = (id, name, category, portionLabel, portionGrams, n, opts = {}) => ({
     kcal: n[0], protein: n[1], carbs: n[2], fat: n[3],
     sodium: n[4], sugar: n[5], cholesterol: n[6], satFat: n[7],
     iron: n[8], calcium: n[9], purine: n[10] || 0,
+    fiber: n[11] || 0, kalium: n[12] || 0, fosfor: n[13] || 0, zinc: n[14] || 0,
+    tembaga: n[15] || 0, magnesium: n[16] || 0, vitA: n[17] || 0, vitB1: n[18] || 0,
+    vitB2: n[19] || 0, vitB3: n[20] || 0, vitB6: n[21] || 0, vitB9: n[22] || 0,
+    vitB12: n[23] || 0, vitC: n[24] || 0, vitD: n[25] || 0, vitE: n[26] || 0, vitK: n[27] || 0,
   },
   source: opts.source || 'TKPI',
 });
@@ -32,7 +38,7 @@ export const FOOD_CATEGORIES = [
 ];
 
 //                                                    kcal  prot  carb  fat  sodium sugar chol satFat iron  calc  purine
-export const FOOD_DB = [
+const OLD_FOOD_DB = [
   // ---------- MAKANAN POKOK ----------
   F('nasi-putih',      'Nasi Putih',            'staple', '1 centong (100g)', 100, [ 180,  3.0, 39.8,  0.3,    1,  0.1,   0,  0.1, 0.2,   25,  10]),
   F('nasi-merah',      'Nasi Merah',            'staple', '1 centong (100g)', 100, [ 149,  2.8, 32.5,  0.4,    2,  0.3,   0,  0.1, 0.8,   12,  10]),
@@ -88,7 +94,7 @@ export const FOOD_DB = [
 
   // ---------- BUAH ----------
   F('pisang',          'Pisang',                'fruit', '1 buah (100g)',      100, [  89,  1.1, 22.8,  0.3,    1, 12.2,   0,  0.1, 0.3,    5,  10]),
-  F('apel',            'Apel',                  'fruit', '1 buah (150g)',      150, [  52,  0.3, 13.8,  0.2,    1, 10.4,   0,  0.0, 0.1,    6,   5]),
+  F('apel',            'Apel',                  'fruit', '1 buah (150g)',      150, [  52,  0.3, 13.8,  0.2,    1, 10.4,   0,  0.0, 0.1,    6,   5, 2.4, 107, 11, 0.04, 0.03, 5, 3, 0.02, 0.03, 0.09, 0.04, 3, 0, 4.6, 0, 0.18, 2.2]),
   F('pepaya',          'Pepaya',                'fruit', '1 potong (100g)',    100, [  43,  0.5, 10.8,  0.3,    8,  7.8,   0,  0.1, 0.3,   20,   5]),
   F('mangga',          'Mangga',                'fruit', '1 buah (200g)',      200, [  60,  0.8, 15.0,  0.4,    1, 13.7,   0,  0.1, 0.2,   11,   5]),
   F('semangka',        'Semangka',              'fruit', '1 potong (150g)',    150, [  30,  0.6,  7.6,  0.2,    1,  6.2,   0,  0.0, 0.2,    7,   5]),
@@ -160,6 +166,11 @@ export const FOOD_DB = [
   F('sereal',          'Sereal Jagung',         'packaged', '1 mangkok (30g)',   30, [ 380,  6.0, 84.0,  1.5,  660,  9.0,   0,  0.5, 12.0,  20,  10], { source: 'USDA' }),
 ];
 
+// Menggabungkan data lama (yang kurang detail) dengan TKPI_DB baru yang kaya vitamin
+// Item di TKPI_DB akan menimpa item lama jika ID-nya sama.
+const oldFiltered = OLD_FOOD_DB.filter(oldItem => !TKPI_DB.find(newF => newF[0] === oldItem.id));
+export const FOOD_DB = [...formatTKPI(TKPI_DB), ...oldFiltered];
+
 export const searchFoods = (term, customFoods = []) => {
   const q = (term || '').toLowerCase().trim();
   const all = [...customFoods, ...FOOD_DB];
@@ -180,39 +191,7 @@ export const nutritionForAmount = (food, grams) => {
 
 // ─── API FETCH: OpenFoodFacts ──────────────────────────────────────
 export const fetchOpenFoodFacts = async (query) => {
-  if (!query || query.trim().length < 2) return [];
-  try {
-    const res = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=true&page_size=20`);
-    const data = await res.json();
-    if (!data.products) return [];
-
-    return data.products.filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g']).map(p => {
-      const n = p.nutriments;
-      return {
-        id: `off_${p.code || Date.now()}`,
-        name: p.product_name_id || p.product_name || 'Tanpa Nama',
-        category: 'packaged', // Default for OFF
-        unit: p.product_quantity_unit === 'ml' ? 'ml' : 'g',
-        isDrink: p.product_quantity_unit === 'ml' || p.categories_tags?.includes('en:beverages'),
-        portion: { label: '100g', grams: 100 },
-        nutrition: {
-          kcal: Number(n['energy-kcal_100g']) || 0,
-          protein: Number(n.proteins_100g) || 0,
-          carbs: Number(n.carbohydrates_100g) || 0,
-          fat: Number(n.fat_100g) || 0,
-          sodium: (Number(n.sodium_100g) || 0) * 1000, // OFF gives g, we need mg
-          sugar: Number(n.sugars_100g) || 0,
-          cholesterol: (Number(n.cholesterol_100g) || 0) * 1000, // OFF gives g, we need mg
-          satFat: Number(n['saturated-fat_100g']) || 0,
-          iron: (Number(n.iron_100g) || 0) * 1000, // OFF gives g, we need mg
-          calcium: (Number(n.calcium_100g) || 0) * 1000, // OFF gives g, we need mg
-          purine: 0 // Tidak ada data purin
-        },
-        source: 'OpenFoodFacts',
-      };
-    });
-  } catch (e) {
-    console.error('Failed to fetch from OpenFoodFacts', e);
-    return [];
-  }
+  // DINONAKTIFKAN SESUAI PERMINTAAN USER DEMI KECEPATAN (OFFLINE FIRST)
+  // Tidak lagi menggunakan OpenFoodFacts karena lambat dan data mikronya kosong.
+  return [];
 };

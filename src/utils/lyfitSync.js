@@ -76,6 +76,10 @@ export const extractLyfitDay = (yearDays, ymd) => {
   const completed = workouts.filter(w => w.status === 'completed');
   return {
     burnedKcal: Number(bio.activityCalories) || 0,
+    // Lantai BMR+langkah+workout internal Logym HARI ITU — dipakai buat clamp input koreksi
+    // manual dari Lomeal (lihat DashboardTab.jsx#handleSaveBurnOverride), biar koreksi dari
+    // Lomeal gak bisa "menghapus" pencatatan internal Logym, sama kayak proteksi di Logym sendiri.
+    floorKcal: Number(bio.activityCaloriesFloor) || 0,
     steps: Number(bio.steps) || 0,
     weight: Number(bio.weight) || null,
     workoutCount: completed.length,

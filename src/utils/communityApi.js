@@ -1,8 +1,10 @@
 // src/utils/communityApi.js
 // Lapisan API Social Hub — SEMUA baca/tulis di sini mengarah ke project Logym
 // (dbLogym), BUKAN Firestore Lomeal sendiri. Diporting dari lyfit.app/src/utils/communityApi.js,
-// dipangkas: tanpa leaderboard/workout-specific (shareWorkoutToFeed, shareTemplate,
-// getLeaderboard) — lihat "Yang sengaja belum digarap" di rencana.
+// dipangkas: tanpa workout-specific (shareWorkoutToFeed, shareTemplate) — lihat "Yang
+// sengaja belum digarap" di rencana. getWeeklyLeaderboard READ-ONLY (buat halo avatar
+// top-10) — Lomeal gak nulis skor baru (posting/like di Lomeal gak nambah poin leaderboard,
+// itu murni domain aktivitas Logym), cuma nampilin siapa aja yang lagi di collection bersama.
 // uid selalu parameter eksplisit (bukan auth.currentUser) — portabel lintas-app.
 import { dbLogym } from '../firebaseLogym';
 import {
@@ -10,6 +12,29 @@ import {
   serverTimestamp, doc, setDoc, updateDoc, deleteDoc,
   increment, where, writeBatch, arrayUnion, arrayRemove
 } from 'firebase/firestore';
+
+// ─── Leaderboard (read-only) ──────────────────────────────────────────────────
+export const getCurrentWeekId = () => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}_W${weekNo}`;
+};
+
+export const getWeeklyLeaderboard = async () => {
+  try {
+    const snap = await getDoc(doc(dbLogym, 'leaderboards', getCurrentWeekId()));
+    const scores = snap.exists() ? (snap.data().scores || {}) : {};
+    return Object.entries(scores)
+      .map(([id, val]) => ({ id, name: val.name, photoUrl: val.photoUrl, score: val.score || 0 }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+  } catch (err) {
+    console.error('Gagal fetch leaderboard:', err);
+    return [];
+  }
+};
 
 // ─── Community User Registration ────────────────────────────────────────────
 export const registerToCommunity = async (userId, userProfile) => {

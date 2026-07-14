@@ -19,9 +19,12 @@ const STEPS = [
   { key: 'connect', title: 'Sambungkan ke Logym?' },
   { key: 'identity', title: 'Identitas & Gender' },
   { key: 'physical', title: 'Data Fisik' },
+  { key: 'medical', title: 'Riwayat Medis & Alergi' },
   { key: 'diet', title: 'Target Diet Medis' },
   { key: 'pace', title: 'Komitmen Waktu' },
 ];
+
+const MEDICAL_CONDITIONS = ['Hipertensi', 'Diabetes/Prediabetes', 'Asam Urat', 'Stroke', 'CKD (Gagal Ginjal)', 'PCOS', 'Penyakit Jantung', 'Kolesterol Tinggi', 'Kanker'];
 
 const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
   const [step, setStep] = useState(0);
@@ -31,6 +34,8 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
   const [physical, setPhysical] = useState({ dob: '', height: 165, weight: 60, gender: 'male' });
   const [dietProfile, setDietProfile] = useState(null);
   const [pace, setPace] = useState('normal');
+  const [medicalHistory, setMedicalHistory] = useState([]);
+  const [allergies, setAllergies] = useState('');
   const [fromLogym, setFromLogym] = useState(false);
 
   // --- Sambungkan ke Logym (opsional, skippable) ---
@@ -60,8 +65,9 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
     if (step === 1) return true; // opsional, selalu bisa lanjut/skip
     if (step === 2) return !!physical.gender && !!physical.dob && computeAge(physical.dob) > 9;
     if (step === 3) return physicalValid;
-    if (step === 4) return !!dietProfile;
-    if (step === 5) return true;
+    if (step === 4) return true; // riwayat medis opsional
+    if (step === 5) return !!dietProfile;
+    if (step === 6) return true;
     return false;
   };
 
@@ -73,7 +79,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
       onboardingCompleted: true,
       consents: { ...consents, agreedAt: new Date().toISOString() },
       physical: { dob: physical.dob, height: Number(physical.height), weight: Number(physical.weight), gender: physical.gender, fromLogym },
-      dietProfile, pace, targets,
+      dietProfile, pace, targets, medicalHistory, allergies: allergies.trim(),
       createdAt: new Date().toISOString(),
     });
   };
@@ -245,6 +251,33 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
                         <span className={`body-md font-bold ${t.textMain}`}>{bmi}</span>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {s.key === 'medical' && (
+                  <div className="flex-1 flex flex-col gap-4 overflow-y-auto hide-scrollbar">
+                    <p className={`caption font-medium ${t.textMuted}`}>Pilih jika ada (bisa lebih dari satu, opsional):</p>
+                    <div className="flex flex-wrap gap-2">
+                      {MEDICAL_CONDITIONS.map(cond => {
+                        const isSelected = medicalHistory.includes(cond);
+                        return (
+                          <button key={cond}
+                            onClick={() => {
+                              if (isSelected) setMedicalHistory(prev => prev.filter(c => c !== cond));
+                              else setMedicalHistory(prev => [...prev, cond]);
+                            }}
+                            className={`px-3 py-1.5 rounded-full border text-sm transition-all ${isSelected ? `${t.bgAccent} ${t.borderAccent} text-white` : `${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'} ${t.textMuted}`}`}>
+                            {cond}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-2">
+                      <p className={`caption font-medium mb-1 ${t.textMuted}`}>Alergi Makanan (opsional)</p>
+                      <input type="text" placeholder="Misal: Kacang, udang, kerang..." value={allergies}
+                        onChange={e => setAllergies(e.target.value)}
+                        className={`w-full px-3 py-2 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} outline-none text-sm`} />
+                    </div>
                   </div>
                 )}
 

@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
  * Diadaptasi dari SwipeInput Logym (lyfit.app/src/components/SwipeInput.jsx) — versi ringan,
  * cuma buat angka bulat (gak butuh parser desimal/locale kayak versi Logym).
  */
-const SwipeInput = ({ value, onChange, step = 1, min = 0, max, className, placeholder }) => {
+const SwipeInput = ({ value, onChange, step = 1, min = 0, max, className, placeholder, ...props }) => {
   const inputRef = useRef(null);
   const dragRef = useRef({ isDragging: false, startY: 0, startVal: 0, lastVal: undefined });
   const [localValue, setLocalValue] = useState(value);
@@ -61,6 +61,7 @@ const SwipeInput = ({ value, onChange, step = 1, min = 0, max, className, placeh
       ref={inputRef}
       type="number" inputMode="numeric"
       style={{ touchAction: 'none' }}
+      {...props}
       value={localValue ?? ''}
       onChange={(e) => setLocalValue(e.target.value)}
       onBlur={() => { const n = clamp(Number(localValue) || 0); setLocalValue(n); onChange(n); }}

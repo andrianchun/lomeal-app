@@ -1,7 +1,7 @@
 // src/pages/SocialHub.jsx — shell layar penuh dibuka dari icon Share2 di Header
 // (Fase 9 blueprint): 3 sub-tab Feed / Studio / Profil, persis pola ProfileModal.jsx
 // Lyfit (yang jadi wadah CommunityTab+ShareCardGenerator+SharedProfileView).
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { X, Newspaper, Sparkles, UserCircle2 } from 'lucide-react';
 import SocialFeed from '../components/SocialFeed';
 import ProfilePage from '../components/ProfilePage';
@@ -15,8 +15,24 @@ const TABS = [
 const SocialHub = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, onClose, onLogout, showAlert, showConfirm }) => {
   const [tab, setTab] = useState(logymUser ? 'feed' : 'profil');
 
+  // Swipe kiri/kanan pindah tab Feed/Studio/Profil — pola sama kayak swipe lokal
+  // ProfileModal Logym (modal ini udah .no-swipe jadi gak bentrok sama swipe global App.jsx).
+  const TAB_IDS = TABS.map((tb) => tb.id);
+  const swipeRef = useRef({ x: 0, y: 0 });
+  const handleSwipeStart = (e) => { swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+  const handleSwipeEnd = (e) => {
+    const dx = e.changedTouches[0].clientX - swipeRef.current.x;
+    const dy = e.changedTouches[0].clientY - swipeRef.current.y;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      const idx = TAB_IDS.indexOf(tab);
+      if (dx < 0 && idx < TAB_IDS.length - 1) setTab(TAB_IDS[idx + 1]);
+      else if (dx > 0 && idx > 0) setTab(TAB_IDS[idx - 1]);
+    }
+  };
+
   return (
-    <div className={`fixed inset-0 z-[500] flex flex-col ${t.bgApp}`}>
+    <div className={`fixed inset-0 z-[500] flex flex-col ${t.bgApp} no-swipe`}
+      onTouchStart={handleSwipeStart} onTouchEnd={handleSwipeEnd}>
       <div
         className={`sticky top-0 z-10 ${t.navBg} border-b ${t.border} px-4 flex items-center justify-between`}
         style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))', paddingBottom: '0.75rem' }}

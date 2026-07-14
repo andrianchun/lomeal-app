@@ -1,23 +1,35 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Search, Plus, Camera, X, Trash2, Pencil, Loader2, ChevronLeft, Database, Globe } from 'lucide-react';
 import { searchFoods, FOOD_CATEGORIES, fetchOpenFoodFacts } from '../data/foodDatabase';
+import { NUTRIENTS } from '../data/nutrition';
 import { compressImageTo100KB, scanNutritionLabel } from '../utils/aiFood';
 import { playSoundEffect } from '../utils/audio';
 
-const NUTRIENT_FIELDS = [
-  ['kcal', 'Energi (kkal)'], ['protein', 'Protein (g)'], ['carbs', 'Karbo (g)'], ['fat', 'Lemak (g)'],
-  ['sugar', 'Gula (g)'], ['sodium', 'Natrium (mg)'], ['cholesterol', 'Kolesterol (mg)'], ['satFat', 'Lemak Jenuh (g)'],
-  ['iron', 'Zat Besi (mg)'], ['calcium', 'Kalsium (mg)'], ['purine', 'Purin (mg)'],
-];
+const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key, `${n.label} (${n.unit})`]);
+const EXTRA_NUTRIENT_FIELDS = NUTRIENTS.filter(n => !n.macro).map(n => [n.key, `${n.label} (${n.unit})`]);
 
-const emptyForm = () => ({
-  name: '', grams: 100, kcal: '', protein: '', carbs: '', fat: '', sugar: '',
-  sodium: '', cholesterol: '', satFat: '', iron: '', calcium: '', purine: '',
-});
+const emptyForm = () => {
+  const obj = { name: '', grams: 100, kcal: '', protein: '', carbs: '', fat: '' };
+  EXTRA_NUTRIENT_FIELDS.forEach(([k]) => obj[k] = '');
+  return obj;
+};
 
 const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, showConfirm, soundEnabled }) => {
   // ── Tab State ────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState('all'); // 'all' | 'custom'
+
+  // Swipe antar sub-tab Semua/Custom — pola sama kayak DatabaseTab Logym: kalau udah di
+  // ujung (all→kiri lagi, atau custom→kanan lagi), gak di-stopPropagation, jadi event-nya
+  // "jatuh" ke swipe handler global App.jsx yang pindah ke tab utama sebelah.
+  const swipeXRef = useRef({ start: 0, end: 0 });
+  const handleSubTabTouchStart = (e) => { swipeXRef.current.start = e.touches[0].clientX; };
+  const handleSubTabTouchMove = (e) => { swipeXRef.current.end = e.touches[0].clientX; };
+  const handleSubTabTouchEnd = (e) => {
+    const dist = swipeXRef.current.start - swipeXRef.current.end;
+    if (Math.abs(dist) < 50) return;
+    if (dist > 0 && viewMode === 'all') { setViewMode('custom'); e.stopPropagation(); }
+    else if (dist < 0 && viewMode === 'custom') { setViewMode('all'); e.stopPropagation(); }
+  };
 
   const [term, setTerm] = useState('');
   const [category, setCategory] = useState(null);
@@ -158,9 +170,13 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
             <input type="number" inputMode="numeric" className={`${inputCls} no-spinners`} value={form.grams} onChange={(e) => setForm((f) => ({ ...f, grams: e.target.value }))} />
           </div>
           <div className="grid grid-cols-2 gap-2">
+            <div>
+              <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Energi (kkal)</p>
+              <input type="number" inputMode="decimal" className={`${inputCls} no-spinners`} value={form.kcal} onChange={(e) => setForm(f => ({ ...f, kcal: e.target.value }))} placeholder="0" />
+            </div>
             {NUTRIENT_FIELDS.map(([k, label]) => (
               <div key={k}>
-                <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>{label}</p>
+                <p className={`caption font-medium mb-0.5 ${t.textMuted} truncate`}>{label}</p>
                 <input type="number" inputMode="decimal" className={`${inputCls} no-spinners`} value={form[k]}
                   onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} placeholder="0" />
               </div>
@@ -193,12 +209,15 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
             ))}
           </div>
           <div className={`rounded-2xl border ${t.border} ${t.bgCard} divide-y ${t.border}`}>
-            {NUTRIENT_FIELDS.slice(4).map(([k, label]) => (
+            {EXTRA_NUTRIENT_FIELDS.filter(([k]) => detail.nutrition[k] && detail.nutrition[k] !== 0).map(([k, label]) => (
               <div key={k} className="flex justify-between px-4 py-2.5">
                 <span className={`body-md ${t.textMuted}`}>{label}</span>
-                <span className={`body-md font-bold ${t.textMain}`}>{detail.nutrition[k] || 0}</span>
+                <span className={`body-md font-bold ${t.textMain}`}>{detail.nutrition[k]}</span>
               </div>
             ))}
+            {EXTRA_NUTRIENT_FIELDS.filter(([k]) => detail.nutrition[k] && detail.nutrition[k] !== 0).length === 0 && (
+              <div className={`px-4 py-3 caption text-center ${t.textMuted}`}>Tidak ada data nutrisi mikro.</div>
+            )}
           </div>
         </div>
         
@@ -246,7 +265,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         <input 
           value={term} 
           onChange={(e) => setTerm(e.target.value)} 
-          placeholder={viewMode === 'all' ? "Cari dari 3jt+ produk (min 3 huruf)..." : "Cari bahan buatanmu..."}
+          placeholder={viewMode === 'all' ? "Cari dari ribuan bahan (offline)..." : "Cari bahan buatanmu..."}
           className={`flex-1 bg-transparent outline-none body-md ${t.textMain}`} 
         />
         {term && <button onClick={() => setTerm('')}><X size={16} className={t.textMuted} /></button>}
@@ -279,19 +298,11 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
 
       <div className="flex items-center justify-between mb-2 shrink-0">
         <p className={`text-[11px] font-bold ${t.textMuted}`}>Menampilkan {results.length} hasil</p>
-        {viewMode === 'all' && (
-          <div className="flex items-center gap-1.5 bg-blue-500/10 px-2 py-1 rounded-md">
-            {onlineLoading ? (
-              <Loader2 size={10} className={`animate-spin text-blue-500`} />
-            ) : (
-              <Globe size={10} className="text-blue-500" />
-            )}
-            <p className={`text-[10px] font-bold text-blue-500 uppercase tracking-wide`}>OpenFoodFacts</p>
-          </div>
-        )}
+        {/* OpenFoodFacts dipensiunkan */}
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-2 pb-10 hide-scrollbar -mx-4 px-4 pt-1">
+      <div className="flex-1 overflow-y-auto space-y-2 pb-10 hide-scrollbar -mx-4 px-4 pt-1"
+        onTouchStart={handleSubTabTouchStart} onTouchMove={handleSubTabTouchMove} onTouchEnd={handleSubTabTouchEnd}>
         <div key={viewMode} className={`space-y-2 animate-in fade-in duration-300 ${viewMode === 'all' ? 'slide-in-from-left-12' : 'slide-in-from-right-12'}`}>
           {results.map((f) => (
             <button key={f.id} onClick={() => { setDetail(f); playSoundEffect('click', soundEnabled); }}
@@ -300,7 +311,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
                 <div className={`body-md font-bold ${t.textMain} flex items-start justify-between gap-2`}>
                   <span className="line-clamp-2 pr-2">{f.name}</span>
                   <div className="flex shrink-0 gap-1 flex-col items-end">
-                    {f.source === 'OpenFoodFacts' && <span className={`px-1.5 py-0.5 rounded text-[8px] bg-blue-500/10 text-blue-500 uppercase tracking-widest`}>Online</span>}
+                    {/* OpenFoodFacts dipensiunkan */}
                     {f.isCustom && <span className={`px-1.5 py-0.5 rounded text-[8px] ${t.bgAccentSoft} ${t.textAccent} uppercase tracking-widest`}>Custom</span>}
                   </div>
                 </div>

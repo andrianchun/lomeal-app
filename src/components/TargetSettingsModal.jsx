@@ -14,22 +14,29 @@ import SwipeInput from './SwipeInput';
 const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) => {
   const [dietGoal, setDietGoal] = useState(profile?.dietGoal || 'maintenance');
   const [pace, setPace] = useState(profile?.pace || 'normal');
+  const [customDeltaKcal, setCustomDeltaKcal] = useState(profile?.customDeltaKcal ?? '');
   const [dietProfile, setDietProfile] = useState(profile?.dietProfile || 'weight_loss');
   const [waterGoal, setWaterGoal] = useState(profile?.targets?.waterGoal || 2000);
   const [allergies, setAllergies] = useState(profile?.allergies || '');
+  const [medicalHistory, setMedicalHistory] = useState(profile?.medicalHistory || []);
+  const [customProteinPerKg, setCustomProteinPerKg] = useState(profile?.customProteinPerKg ?? '');
+
+  const customDeltaNum = customDeltaKcal === '' ? null : Number(customDeltaKcal);
+  const customProteinNum = customProteinPerKg === '' ? null : Number(customProteinPerKg);
 
   // Preview live — pakai calcTargets yang sama kayak yang beneran jalan, biar user lihat
-  // efeknya ke kkal/protein/karbo/lemak/natrium SEBELUM nekan Simpan.
+  // efeknya ke kkal/protein/karbo/lemak/natrium SEBELUM nekan Simpan (termasuk kalau
+  // delta custom-nya kepotong ke lantai aman — preview.kcalFloored).
   const preview = useMemo(() => {
     const physical = profile?.physical;
     if (!physical?.weight || !physical?.height || !physical?.dob || !physical?.gender) return null;
     const age = computeAge(physical.dob);
-    return calcTargets({ ...physical, age, dietGoal, dietProfile, pace, waterGoal });
-  }, [profile?.physical, dietGoal, dietProfile, pace, waterGoal]);
+    return calcTargets({ ...physical, age, dietGoal, dietProfile, pace, waterGoal, customDeltaKcal: customDeltaNum, customProteinPerKg: customProteinNum, medicalHistory });
+  }, [profile?.physical, dietGoal, dietProfile, pace, waterGoal, customDeltaNum, customProteinNum, medicalHistory]);
 
   const handleSave = () => {
     saveProfilePatch({
-      dietGoal, pace, dietProfile, allergies: allergies.trim(),
+      dietGoal, pace, dietProfile, customDeltaKcal: customDeltaNum, customProteinPerKg: customProteinNum, allergies: allergies.trim(), medicalHistory,
       targets: { ...(profile?.targets || {}), waterGoal: Number(waterGoal) || 2000 },
     });
     onClose();
@@ -45,7 +52,7 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm no-swipe" onClick={onClose}>
       <div
         className={`relative w-full sm:max-w-md rounded-[2rem] border ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} ${t.glow} ${theme === 'dark' ? 'bg-white/[0.06]' : 'bg-white/70'} backdrop-blur-2xl max-h-[88vh] flex flex-col overflow-hidden shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
@@ -68,6 +75,11 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
                 ))}
               </div>
               <p className={`caption ${t.textMuted} mt-2`}>Natrium: <span className={t.textMain}>{preview.sodium}mg</span>{dietProfile === 'dash' && ' (diperketat mode DASH)'}</p>
+              {preview.kcalFloored && (
+                <p className="caption text-amber-500 font-bold mt-2">
+                  ⚠️ Target dipotong ke {preview.kcal}kkal (batas aman minimum) — deltamu bakal bikin asupan di bawah ambang aman kalau dituruti apa adanya.
+                </p>
+              )}
             </div>
           )}
 
@@ -89,12 +101,24 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
             <p className={`h3 ${t.textMuted} mb-2`}>Kecepatan {dietGoal === 'maintenance' ? '(nonaktif saat Maintenance)' : ''}</p>
             <div className="flex flex-col gap-2">
               {PACES.map((p) => (
-                <Card key={p.id} selected={pace === p.id} onClick={() => setPace(p.id)}>
+                <Card key={p.id} selected={!customDeltaKcal && pace === p.id} onClick={() => { setPace(p.id); setCustomDeltaKcal(''); }}>
                   <p className={`font-black text-sm ${t.textMain}`}>{p.label}</p>
                   <p className={`caption font-medium mt-0.5 ${t.textMuted}`}>{p.desc}</p>
                 </Card>
               ))}
             </div>
+
+            <p className={`caption font-bold ${t.textMuted} mt-3 mb-1.5 uppercase tracking-wider`}>Atau custom (kkal/hari)</p>
+            <SwipeInput
+              value={customDeltaKcal === '' ? '' : (dietGoal === 'cutting' ? -customDeltaKcal : customDeltaKcal)}
+              onChange={(v) => setCustomDeltaKcal(v === '' ? '' : Math.abs(Number(v)))}
+              min={dietGoal === 'cutting' ? -3000 : 0} max={dietGoal === 'cutting' ? 0 : 3000} step={50}
+              placeholder={dietGoal === 'cutting' ? 'Contoh: -500' : 'Contoh: 500'}
+              className={`w-full ${t.inputBg} ${t.textMain} p-3 rounded-xl outline-none font-black text-lg`}
+            />
+            <p className={`caption ${t.textMuted} mt-1.5`}>
+              Rentang wajar: <span className={t.textMain}>{dietGoal === 'cutting' ? '250–1000kkal' : '250–500kkal'}</span>
+            </p>
           </div>
 
           <div>
@@ -109,6 +133,24 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
             </div>
           </div>
 
+          {dietProfile === 'muscle_gain' && (
+            <div>
+              <p className={`h3 ${t.textMuted} mb-2`}>Target Protein (g/kg BB)</p>
+              <div className="relative">
+                <SwipeInput
+                  value={customProteinPerKg === '' ? 2.0 : Number(customProteinPerKg)}
+                  onChange={(v) => setCustomProteinPerKg(v === '' ? '' : Number(v))}
+                  min={1.0} max={3.0} step={0.1}
+                  className={`w-full ${t.inputBg} ${t.textMain} p-3 rounded-xl outline-none font-black text-lg pr-16`}
+                />
+                <span className={`absolute right-4 top-1/2 -translate-y-1/2 caption font-bold ${t.textMuted}`}>g/kg</span>
+              </div>
+              <p className={`caption ${t.textMuted} mt-1.5`}>
+                Normalnya: <span className={t.textMain}>1.6 – 2.2 g/kg</span> untuk hipertrofi otot.
+              </p>
+            </div>
+          )}
+
           <div>
             <p className={`h3 ${t.textMuted} mb-2`}>Target Air Minum / Hari</p>
             <div className="relative">
@@ -118,6 +160,22 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
                 className={`w-full ${t.inputBg} ${t.textMain} p-3 rounded-xl outline-none font-black text-lg pr-16`}
               />
               <span className={`absolute right-4 top-1/2 -translate-y-1/2 caption font-bold ${t.textMuted}`}>ml/hari</span>
+            </div>
+          </div>
+
+          <div>
+            <p className={`h3 ${t.textMuted} mb-2`}>Riwayat Medis</p>
+            <div className="flex flex-wrap gap-2">
+              {['Hipertensi', 'Diabetes/Prediabetes', 'Asam Urat', 'Stroke', 'CKD (Gagal Ginjal)', 'PCOS', 'Penyakit Jantung', 'Kolesterol Tinggi', 'Kanker'].map(cond => {
+                const isSelected = medicalHistory.includes(cond);
+                return (
+                  <button key={cond}
+                    onClick={() => setMedicalHistory(prev => isSelected ? prev.filter(c => c !== cond) : [...prev, cond])}
+                    className={`px-3 py-1.5 rounded-full border text-sm transition-all ${isSelected ? `${t.bgAccent} ${t.borderAccent} text-white` : `${theme === 'dark' ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'} ${t.textMuted}`}`}>
+                    {cond}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

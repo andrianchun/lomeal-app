@@ -284,7 +284,7 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
       )}
 
       {cropSourceUrl && (
-        <div className="fixed inset-0 z-[2000] bg-black flex flex-col">
+        <div className="fixed inset-0 z-[2000] bg-black flex flex-col no-swipe">
           <div className="flex items-center justify-between p-4 text-white">
             <button onClick={closeCropper} disabled={isUploading} className="p-2 disabled:opacity-40"><X size={22} /></button>
             <h3 className="font-black text-sm">Atur Foto Profil</h3>

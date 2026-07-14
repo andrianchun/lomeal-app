@@ -42,7 +42,7 @@ export default function NotificationPanel({ user, isDark, t, onClose, onNotifCli
   };
 
   const modalContent = (
-    <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={onClose}>
+    <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300 no-swipe" onClick={onClose}>
       <div
         className={`w-full max-w-sm glass-card ${t?.bgCard || (isDark ? 'bg-white/[0.045]' : 'bg-white/60')} rounded-3xl flex flex-col max-h-[85vh] shadow-2xl animate-in zoom-in-95 border ${t?.border || (isDark ? 'border-white/10' : 'border-black/8')}`}
         onClick={(e) => e.stopPropagation()}

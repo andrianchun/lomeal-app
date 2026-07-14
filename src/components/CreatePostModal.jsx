@@ -82,7 +82,7 @@ export default function CreatePostModal({ user, onClose, theme, t, initialFiles 
   };
 
   return (
-    <div className="fixed inset-0 z-[999] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[999] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-300 no-swipe">
       <div className={`w-full sm:max-w-xl ${t?.bgCard || (isDark ? 'bg-slate-900/80 border border-white/10' : 'bg-white/90 border border-black/10')} backdrop-blur-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] flex flex-col max-h-[85vh] shadow-2xl animate-in slide-in-from-bottom-10`}>
         <div className="p-5 flex items-center justify-between shrink-0">
           <button onClick={() => onClose()} className={`p-2.5 rounded-full ${t?.btnBg || 'bg-white/10 text-white'} transition-colors`}>

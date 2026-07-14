@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Camera, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Trash2, Sparkles } from 'lucide-react';
+import { Camera, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Trash2, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda } from 'lucide-react';
 import RingChart from '../components/RingChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT } from '../data/constants';
@@ -8,6 +8,14 @@ import { MACRO_COLORS } from '../theme';
 import { parseFoodText, analyzeFoodPhoto, compressImageTo100KB } from '../utils/aiFood';
 import { makeEntry, checkAndCountAiUsage } from '../utils/foodLog';
 import { uploadToCloudinary } from '../utils/cloudinary';
+
+const ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus };
+const COLORS = [
+  { id: 'sky', bg: 'bg-sky-500' }, { id: 'blue', bg: 'bg-blue-500' }, { id: 'indigo', bg: 'bg-indigo-500' },
+  { id: 'purple', bg: 'bg-purple-500' }, { id: 'pink', bg: 'bg-pink-500' }, { id: 'rose', bg: 'bg-rose-500' },
+  { id: 'orange', bg: 'bg-orange-500' }, { id: 'amber', bg: 'bg-amber-600' }, { id: 'emerald', bg: 'bg-emerald-500' },
+  { id: 'zinc', bg: 'bg-zinc-600' },
+];
 
 /**
  * TAB 2: CATAT — Ruang Kerja Utama (Fase 5 blueprint).
@@ -25,8 +33,12 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
   const [aiTargetSession, setAiTargetSession] = useState('lunch');
   const [waterEdit, setWaterEdit] = useState(false);
   const [listening, setListening] = useState(false);
+  const [rackExpanded, setRackExpanded] = useState(false);
   const fileRef = useRef(null);
   const recogRef = useRef(null);
+
+  const drinkTemplates = profile?.drinkTemplates || [];
+  const medicines = profile?.medicines || [];
 
   const day = daysMap[selectedYmd] || { meals: {}, water: 0 };
   const totals = useMemo(() => computeDayTotals(day), [day]);
@@ -217,7 +229,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
         })}
       </div>
 
-      {/* ===== QUICK STATS + WATER TRACKER ===== */}
+      {/* ===== QUICK STATS ===== */}
       <div className={`mt-3 rounded-3xl border ${t.border} ${t.bgCard} p-4 flex gap-4 anim-rise`}>
         {/* Mini bar chart Aktual vs Target */}
         <div className="flex gap-2 flex-1">
@@ -226,25 +238,59 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
           <MiniBar label="K" value={totals.carbs} target={targets.carbs} color={MACRO_COLORS.carbs.hex} />
           <MiniBar label="L" value={totals.fat} target={targets.fat} color={MACRO_COLORS.fat.hex} />
         </div>
-        {/* Interactive Water Tracker: tap = +200ml, pensil = presisi */}
-        <div className={`w-px ${t.bgSunken}`} />
-        <div className="flex flex-col items-center justify-center">
-          <button onClick={() => addWater(WATER_STEP_ML)} className="relative active:scale-90 transition-transform">
-            <GlassWater size={34} className={water >= (waterGoal || 2000) ? 'text-sky-400' : t.textMuted} strokeWidth={1.7} />
-            <span className="absolute -top-1 -right-2 text-[9px] font-black text-sky-400">+{WATER_STEP_ML}</span>
+      </div>
+
+      {/* ===== RAK SUPLEMEN & OBAT ===== */}
+      <div className="mt-3 flex flex-col gap-2">
+        <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+          <button onClick={() => setRackExpanded(!rackExpanded)} className={`shrink-0 flex flex-col items-center justify-center w-14 h-16 rounded-2xl border ${t.border} ${t.bgCard} active:scale-95 transition-all`}>
+             {rackExpanded ? <ChevronLeft size={20} className={t.textMuted}/> : <ChevronRight size={20} className={t.textMuted}/>}
           </button>
-          {waterEdit ? (
-            <input autoFocus type="number" inputMode="numeric" defaultValue={water}
-              onBlur={(e) => { persistDay({ ...day, water: Number(e.target.value) || 0 }); setWaterEdit(false); }}
-              onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-              className={`w-16 mt-1 text-center caption bg-transparent border-b ${t.border} outline-none no-spinners ${t.textMain}`} />
-          ) : (
-            <button onClick={() => setWaterEdit(true)} className={`flex items-center gap-1 mt-1 caption font-bold ${t.textMain}`}>
-              {water} ml <Pencil size={9} className={t.textMuted} />
-            </button>
-          )}
-          <span className={`caption ${t.textMuted}`}>/{waterGoal || 2000}ml</span>
+          
+          <button onClick={() => addWater(WATER_STEP_ML)} className={`shrink-0 flex flex-col items-center justify-center w-16 h-16 rounded-2xl border border-transparent bg-sky-500/10 active:scale-95 transition-all relative`}>
+            <GlassWater size={24} className="text-sky-500 mb-1" />
+            <span className="text-[9px] font-bold text-sky-500">+{WATER_STEP_ML}ml</span>
+            {water > 0 && <span className="absolute -top-1 -right-1 bg-sky-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full">{water}</span>}
+          </button>
+          
+          {rackExpanded && drinkTemplates.map(drink => {
+            const IconComp = ICONS[drink.icon] || CupSoda;
+            const bgClass = COLORS.find(c => c.id === drink.color)?.bg || 'bg-zinc-500';
+            return (
+              <button key={drink.id} onClick={() => {
+                const meals = { ...(day.meals || {}) };
+                meals['drink'] = [...(meals['drink'] || []), makeEntry({ name: drink.name, grams: 1, unit: 'porsi', nutrition: drink.nutrition, source: 'manual' })];
+                persistDay({ ...day, meals });
+                showAlert(`${drink.name} ditambahkan ke sesi Minuman!`);
+              }} className={`shrink-0 flex flex-col items-center justify-center w-16 h-16 rounded-2xl border border-transparent text-white active:scale-95 transition-all ${bgClass}`}>
+                <IconComp size={22} className="mb-1" />
+                <span className="text-[9px] font-bold px-1 text-center truncate w-full">{drink.name}</span>
+              </button>
+            )
+          })}
         </div>
+
+        {medicines.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+            <div className={`shrink-0 flex items-center justify-center w-14 h-16 rounded-2xl border ${t.border} ${t.bgCard}`}>
+              <Pill size={20} className={t.textMuted} />
+            </div>
+            {medicines.map(med => {
+              const IconComp = ICONS[med.icon] || Pill;
+              const textClass = COLORS.find(c => c.id === med.color)?.bg.replace('bg-', 'text-') || 'text-zinc-500';
+              const isChecked = (day.medChecks || {})[med.id];
+              return (
+                <button key={med.id} onClick={() => {
+                  const medChecks = { ...(day.medChecks || {}), [med.id]: !isChecked };
+                  persistDay({ ...day, medChecks });
+                }} className={`shrink-0 flex flex-col items-center justify-center w-16 h-16 rounded-2xl border transition-all ${isChecked ? `${t.bgAccent} border-transparent text-white` : `${t.bgCard} ${t.border} ${t.textMuted}`}`}>
+                  {isChecked ? <Check size={22} className="mb-1" /> : <IconComp size={22} className={`mb-1 ${textClass}`} />}
+                  <span className="text-[9px] font-bold px-1 text-center truncate w-full">{med.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* ===== THE MEAL GRID (2 kolom dinamis) ===== */}
@@ -291,7 +337,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
 
       {/* ===== SHEET KONFIRMASI HASIL AI ===== */}
       {aiResult && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setAiResult(null)}>
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setAiResult(null)}>
           <div onClick={(e) => e.stopPropagation()}
             className={`w-full sm:max-w-md max-h-[85vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]' : 'bg-white'} p-4 anim-rise`}>
             <div className="flex items-center gap-2 mb-3">
@@ -348,7 +394,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
 
       {/* ===== SHEET DETAIL SESI (edit/hapus entri) ===== */}
       {detailSession && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDetailSession(null)}>
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setDetailSession(null)}>
           <div onClick={(e) => e.stopPropagation()}
             className={`w-full sm:max-w-md max-h-[80vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]' : 'bg-white'} p-4 anim-rise`}>
             <div className="flex items-center justify-between mb-3">

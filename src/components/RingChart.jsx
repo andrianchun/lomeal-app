@@ -35,8 +35,8 @@ const RingChart = ({ size = 120, stroke = 10, progress = null, color = '#22c55e'
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
       {/* Backdrop kaca di belakang ring — pola sama kayak ring SCORE Komposisi Tubuh Logym */}
       {glass && (
-        <div className="absolute rounded-full backdrop-blur-md border border-white/10 z-0"
-          style={{ inset: stroke, backgroundColor: 'rgba(0,0,0,0.35)' }} />
+        <div className="absolute inset-0 rounded-full backdrop-blur-md overflow-hidden z-0"
+          style={{ backgroundColor: 'rgba(0,0,0,0.35)' }} />
       )}
       <svg className="relative z-10" width={size} height={size}>
         {/* Track titik-titik (bukan garis solid) — pola sama kayak ring SCORE di Logym */}

@@ -1,17 +1,17 @@
 // src/components/SocialFeed.jsx — versi ringkas dari lyfit.app/src/pages/CommunityTab.jsx
-// (tanpa search user, leaderboard, edit post, image lightbox — lihat "sengaja belum
-// digarap" di rencana). Filter Semua/Diikuti, like, komentar, hapus post sendiri, lapor.
+// (tanpa search user, edit post, image lightbox — lihat "sengaja belum digarap" di rencana).
+// Filter Semua/Diikuti/Teman, halo leaderboard top-10, like, komentar, hapus post sendiri, lapor.
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Heart, MessageCircle, Loader2, Plus, MoreHorizontal, Trash2, Flag, Send, Sparkles } from 'lucide-react';
 import {
   getGlobalFeed, getFollowingFeed, toggleLike, deletePost,
-  addComment, getComments,
+  addComment, getComments, getWeeklyLeaderboard,
 } from '../utils/communityApi';
-import { getFollowingIds } from '../utils/followApi';
+import { getFollowingIds, getFollowerList } from '../utils/followApi';
 import { containsBadWords, reportPost, getLocalHiddenPosts } from '../utils/moderationApi';
 import CreatePostModal from './CreatePostModal';
 
-const FILTERS = ['Semua', 'Diikuti'];
+const FILTERS = ['Semua', 'Diikuti', 'Teman'];
 
 const timeAgo = (ts) => {
   if (!ts) return '';
@@ -35,6 +35,8 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
   const [feed, setFeed] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [followingIds, setFollowingIds] = useState([]);
+  const [followerIds, setFollowerIds] = useState([]);
+  const [leaderboard, setLeaderboard] = useState([]);
   const [isCreating, setIsCreating] = useState(false);
   const [menuOpen, setMenuOpen] = useState(null);
   const [expandedComments, setExpandedComments] = useState({});
@@ -44,15 +46,33 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
   const isDark = theme === 'dark';
   const hiddenIds = getLocalHiddenPosts();
 
+  // Halo top-10 dibaca sekali per sesi (leaderboard mingguan, collection bersama sama Logym).
+  useEffect(() => { getWeeklyLeaderboard().then(setLeaderboard); }, []);
+
   const loadFeed = useCallback(async () => {
     setIsLoading(true);
     try {
-      let ids = followingIds;
-      if (filter === 'Diikuti' && ids.length === 0 && logymUser) {
-        ids = await getFollowingIds(logymUser.uid);
-        setFollowingIds(ids);
+      let posts;
+      if (filter === 'Diikuti' || filter === 'Teman') {
+        let following = followingIds;
+        if (following.length === 0 && logymUser) {
+          following = await getFollowingIds(logymUser.uid);
+          setFollowingIds(following);
+        }
+        if (filter === 'Teman') {
+          let followers = followerIds;
+          if (followers.length === 0 && logymUser) {
+            followers = (await getFollowerList(logymUser.uid)).map((f) => f.uid);
+            setFollowerIds(followers);
+          }
+          const mutualIds = following.filter((id) => followers.includes(id));
+          posts = mutualIds.length > 0 ? await getFollowingFeed(mutualIds) : [];
+        } else {
+          posts = await getFollowingFeed(following);
+        }
+      } else {
+        posts = await getGlobalFeed();
       }
-      const posts = filter === 'Diikuti' ? await getFollowingFeed(ids) : await getGlobalFeed();
       setFeed(posts.filter((p) => !p.isHidden && !hiddenIds.includes(p.id)));
     } catch (e) {
       console.error(e);
@@ -117,6 +137,29 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
     setFeed((prev) => prev.filter((p) => p.id !== post.id));
   };
 
+  // Avatar + halo gradient pulsing buat member top-10 leaderboard mingguan — pola sama
+  // kayak renderAvatar CommunityTab Logym (animate-pulse bawaan Tailwind, bukan
+  // animate-pulse-slow custom Logym yang ternyata gak pernah didefinisikan/no-op).
+  const renderAvatar = (userName, userPhoto, userId) => {
+    const isTopTen = leaderboard.some((u) => u.id === userId);
+    return (
+      <div className="shrink-0 relative">
+        {isTopTen && (
+          <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-cyan-300 via-blue-500 to-indigo-600 animate-pulse opacity-80 blur-[2px]" />
+        )}
+        <div className={`relative rounded-full ${isTopTen ? `ring-2 ring-blue-400 p-[2px] ${isDark ? 'bg-slate-800' : 'bg-white'}` : ''}`}>
+          {userPhoto ? (
+            <img src={userPhoto} alt="" className={`w-9 h-9 rounded-full object-cover ${!isTopTen ? `ring-2 ${t.ringAccent} ring-opacity-20` : ''}`} />
+          ) : (
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center font-black ${!isTopTen ? `${t.bgAccentSoft} ${t.textAccent} ring-2 ${t.ringAccent} ring-opacity-20` : 'bg-blue-100 text-blue-600'}`}>
+              {(userName || '?').charAt(0).toUpperCase()}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
@@ -129,12 +172,6 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
             {f}
           </button>
         ))}
-        <button
-          onClick={() => (logymUser ? setIsCreating(true) : showAlert('Sambungkan akun dulu lewat tab Profil (bisa langsung bikin identitas baru, gak perlu akun Logym yang sudah ada).'))}
-          className={`ml-auto flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold ${t.bgAccentSoft} ${t.textAccent}`}
-        >
-          <Plus size={14} /> Post
-        </button>
       </div>
 
       <div className="flex items-center gap-1.5">
@@ -161,15 +198,9 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
           const liked = logymUser && (post.likedBy || []).includes(logymUser.uid);
           const isMine = logymUser && post.userId === logymUser.uid;
           return (
-            <div key={post.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4`}>
+            <div key={post.id} className={`pb-5 border-b ${t.border}`}>
               <div className="flex items-start gap-3">
-                {post.userPhoto ? (
-                  <img src={post.userPhoto} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
-                ) : (
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black shrink-0 ${t.bgAccentSoft} ${t.textAccent}`}>
-                    {(post.userName || '?').charAt(0).toUpperCase()}
-                  </div>
-                )}
+                {renderAvatar(post.userName, post.userPhoto, post.userId)}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <p className={`font-black text-sm ${t.textMain}`}>{post.userName || 'Anonim'}</p>
@@ -205,9 +236,16 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
               {post.text && <p className={`text-sm mt-3 leading-relaxed whitespace-pre-wrap ${t.textMain}`}>{post.text}</p>}
 
               {post.imageUrls?.length > 0 && (
-                <div className="flex gap-2 overflow-x-auto mt-3 hide-scrollbar snap-x">
+                <div
+                  className="overflow-x-auto hide-scrollbar mt-3 gap-1.5"
+                  style={{ display: 'flex', touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch' }}
+                  onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
+                >
                   {post.imageUrls.map((url, i) => (
-                    <img key={i} src={url} alt="" className="h-48 w-auto rounded-2xl object-cover snap-center shrink-0" />
+                    <div key={i} style={{ minWidth: post.imageUrls.length === 1 ? '100%' : '85%', height: '240px' }}
+                      className={`shrink-0 overflow-hidden ${post.imageUrls.length === 1 ? 'rounded-2xl' : i === 0 ? 'rounded-l-2xl' : ''} ${i === post.imageUrls.length - 1 && post.imageUrls.length > 1 ? 'rounded-r-2xl' : ''}`}>
+                      <img src={url} alt="" className="w-full h-full object-cover object-top block" loading="lazy" />
+                    </div>
                   ))}
                 </div>
               )}
@@ -249,6 +287,14 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
           );
         })
       )}
+
+      {/* FAB compose — pola sama kayak CommunityTab Logym */}
+      <button
+        onClick={() => (logymUser ? setIsCreating(true) : showAlert('Sambungkan akun dulu lewat tab Profil (bisa langsung bikin identitas baru, gak perlu akun Logym yang sudah ada).'))}
+        className={`fixed bottom-24 right-4 z-50 w-14 h-14 rounded-full ${t.bgAccent} shadow-xl ${t.shadowAccent} flex justify-center items-center active:scale-95 transition-all`}
+      >
+        <Plus size={28} />
+      </button>
 
       {isCreating && (
         <CreatePostModal

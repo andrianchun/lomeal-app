@@ -1,7 +1,7 @@
 // src/pages/SettingsPage.jsx — port struktur 3-tab dari lyfit.app/src/modals/SettingsModal.jsx
 // (Preferensi/FAQ/Lanjutan), diadaptasi untuk Lomeal. Field yang dilewati (Jarak km/mi,
 // Apple Health, Kepribadian/Memori AI Coach BELUM punya chat-consumer) dijelaskan inline.
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X, Moon, Sun, Globe, Volume2, VolumeX, Timer, Download, Upload, CalendarDays,
   Bell, BellOff, Clock, Activity, Scale, Ruler, Thermometer, Trash2, Plus,
@@ -86,6 +86,25 @@ const SettingsPage = ({
 }) => {
   const [activeTab, setActiveTab] = useState('preferensi');
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
+
+  // Swipe kiri/kanan pindah tab Preferensi/FAQ/Lanjutan — pola sama kayak swipe lokal
+  // ProfileModal Logym (modal ini udah .no-swipe jadi gak bentrok sama swipe global App.jsx).
+  const SETTINGS_TABS = ['preferensi', 'faq', 'lanjutan'];
+  const swipeRef = useRef({ x: 0, y: 0 });
+  const handleSwipeStart = (e) => {
+    if (e.target.closest('input[type="range"]')) return;
+    swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const handleSwipeEnd = (e) => {
+    if (e.target.closest('input[type="range"]')) return;
+    const dx = e.changedTouches[0].clientX - swipeRef.current.x;
+    const dy = e.changedTouches[0].clientY - swipeRef.current.y;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      const idx = SETTINGS_TABS.indexOf(activeTab);
+      if (dx < 0 && idx < SETTINGS_TABS.length - 1) setActiveTab(SETTINGS_TABS[idx + 1]);
+      else if (dx > 0 && idx > 0) setActiveTab(SETTINGS_TABS[idx - 1]);
+    }
+  };
   const language = settings.language || 'ID';
   const lang = getLang(language);
   const faqItems = language === 'EN' ? FAQ_ITEMS_EN : FAQ_ITEMS_ID;
@@ -93,7 +112,8 @@ const SettingsPage = ({
   const userApiKeys = settings.userApiKeys || [];
 
   return (
-    <div className={`fixed inset-0 z-[999] ${t.bgApp} flex flex-col animate-in slide-in-from-bottom-full duration-300`}>
+    <div className={`fixed inset-0 z-[999] ${t.bgApp} flex flex-col animate-in slide-in-from-bottom-full duration-300 no-swipe`}
+      onTouchStart={handleSwipeStart} onTouchEnd={handleSwipeEnd}>
       <div className={`relative px-4 pt-4 pb-4 border-b ${t.border} shrink-0 flex items-center justify-between`}>
         <h1 className={`text-2xl font-black ${t.textMain} tracking-tight`}>{lang.settings}</h1>
         <button onClick={onClose} className={`p-2 rounded-full ${t.btnBg}`}>

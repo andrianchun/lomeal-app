@@ -1,21 +1,34 @@
 import React, { useMemo, useState } from 'react';
-import { ChefHat, Plus, Trash2, X, Search, CalendarPlus, Share2, Loader2 } from 'lucide-react';
+import { ChefHat, Plus, Trash2, X, Search, CalendarPlus, Share2, Loader2, Pill, GlassWater, CupSoda, Coffee, Beaker, Syringe, Tablets, ShieldPlus } from 'lucide-react';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { EMPTY_NUTRITION, addNutrition, scaleNutrition } from '../data/nutrition';
 import { MEAL_SESSIONS, getLocalYMD, DAY_NAMES_ID } from '../data/constants';
 import { makeEntry } from '../utils/foodLog';
+import SupplementBuilder from '../components/SupplementBuilder';
+import MedicineBuilder from '../components/MedicineBuilder';
+
+const ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus };
+const COLORS = [
+  { id: 'sky', bg: 'bg-sky-500' }, { id: 'blue', bg: 'bg-blue-500' }, { id: 'indigo', bg: 'bg-indigo-500' },
+  { id: 'purple', bg: 'bg-purple-500' }, { id: 'pink', bg: 'bg-pink-500' }, { id: 'rose', bg: 'bg-rose-500' },
+  { id: 'orange', bg: 'bg-orange-500' }, { id: 'amber', bg: 'bg-amber-600' }, { id: 'emerald', bg: 'bg-emerald-500' },
+  { id: 'zinc', bg: 'bg-zinc-600' },
+];
 
 /**
- * TAB 4: RESEP & PROGRAM MEAL PREP — "Orchestrator" (Fase 7 blueprint).
- * Recipe Builder: rakit resep dari bahan DB (jumlah + portioning) → estimasi
- * nutrisi akhir otomatis. Meal Prep Assigner: jadwalkan resep ke tanggal2 di
- * kalender (contoh: masak Minggu → auto isi lunch Senin–Jumat).
+ * TAB 4: RENCANA & PROGRAM
  */
-const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showConfirm }) => {
+const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showConfirm, profile, saveProfilePatch }) => {
+  const [activeTab, setActiveTab] = useState('resep'); // 'resep', 'suplemen', 'obat'
   const [editing, setEditing] = useState(null);  // draft resep di builder
+  const [editingSupplement, setEditingSupplement] = useState(null);
+  const [editingMedicine, setEditingMedicine] = useState(null);
   const [assigning, setAssigning] = useState(null); // resep yang sedang dijadwalkan
   const [ingSearch, setIngSearch] = useState('');
   const [shareBusy, setShareBusy] = useState(null);
+
+  const drinkTemplates = profile?.drinkTemplates || [];
+  const medicines = profile?.medicines || [];
 
   const ingResults = useMemo(() => ingSearch ? searchFoods(ingSearch, customFoods).slice(0, 8) : [], [ingSearch, customFoods]);
 
@@ -85,7 +98,7 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
 
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
 
-  // ============ BUILDER VIEW ============
+  // ============ BUILDER VIEWS ============
   if (editing) return (
     <div className="max-w-2xl mx-auto px-4 pt-4 pb-32 space-y-3">
       <div className="flex items-center justify-between">
@@ -173,16 +186,50 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
     </div>
   );
 
+  if (editingSupplement) return (
+    <SupplementBuilder t={t} theme={theme} editing={editingSupplement} setEditing={setEditingSupplement}
+      customFoods={customFoods}
+      onSave={(item) => {
+        const others = drinkTemplates.filter(d => d.id !== item.id);
+        saveProfilePatch({ drinkTemplates: [item, ...others] });
+        setEditingSupplement(null);
+      }} />
+  );
+
+  if (editingMedicine) return (
+    <MedicineBuilder t={t} editing={editingMedicine} setEditing={setEditingMedicine}
+      onSave={(item) => {
+        const others = medicines.filter(m => m.id !== item.id);
+        saveProfilePatch({ medicines: [item, ...others] });
+        setEditingMedicine(null);
+      }} />
+  );
+
   // ============ LIST VIEW ============
   return (
     <div className="max-w-2xl mx-auto px-4 pt-4 pb-32">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className={`h1 ${t.textMain}`}>Katalog Resep</h1>
-          <p className={`body-md font-medium ${t.textMuted}`}>Rakit sekali, catat berulang kali.</p>
-        </div>
-        <button onClick={newRecipe} className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
+      <div className={`flex items-center gap-1.5 mb-5 p-1.5 rounded-2xl ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'}`}>
+        {[
+          { id: 'resep', label: 'Resep' },
+          { id: 'suplemen', label: 'Suplemen' },
+          { id: 'obat', label: 'Obat' },
+        ].map(tb => (
+          <button key={tb.id} onClick={() => setActiveTab(tb.id)}
+            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === tb.id ? `${t.bgCard} shadow-sm text-emerald-500` : t.textMuted}`}>
+            {tb.label}
+          </button>
+        ))}
       </div>
+
+      {activeTab === 'resep' && (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className={`h1 ${t.textMain}`}>Katalog Resep</h1>
+              <p className={`body-md font-medium ${t.textMuted}`}>Rakit sekali, catat berulang kali.</p>
+            </div>
+            <button onClick={newRecipe} className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
+          </div>
 
       {recipes.length === 0 && (
         <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
@@ -218,10 +265,94 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
           </div>
         ))}
       </div>
+      </>
+      )}
+
+      {activeTab === 'suplemen' && (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className={`h1 ${t.textMain}`}>Suplemen & Minuman</h1>
+              <p className={`body-md font-medium ${t.textMuted}`}>Template kustom untuk Rak Minuman.</p>
+            </div>
+            <button onClick={() => setEditingSupplement({ id: `ds_${Date.now()}`, name: '', icon: 'CupSoda', color: 'sky', ingredients: [], nutrition: { ...EMPTY_NUTRITION } })} 
+                    className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
+          </div>
+
+          {drinkTemplates.length === 0 && (
+            <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
+              <CupSoda size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
+              <p className={`body-md ${t.textMuted}`}>Belum ada suplemen kustom. Klik + untuk membuat minuman pertamamu (misal: Jus Dada Ayam).</p>
+            </div>
+          )}
+
+          <div className="space-y-2.5">
+            {drinkTemplates.map(r => {
+              const IconComp = ICONS[r.icon] || CupSoda;
+              const bgClass = COLORS.find(c => c.id === r.color)?.bg || 'bg-zinc-500';
+              return (
+                <div key={r.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise flex items-center gap-4`}>
+                  <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-white ${bgClass}`}>
+                    <IconComp size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <p className={`h2 ${t.textMain}`}>{r.name}</p>
+                    <p className={`caption mt-0.5 ${t.textMuted}`}>{Math.round(r.nutrition?.kcal || 0)} kkal · {Math.round(r.nutrition?.protein || 0)}g P</p>
+                  </div>
+                  <button onClick={async () => {
+                    if (await showConfirm(`Hapus minuman "${r.name}"?`)) saveProfilePatch({ drinkTemplates: drinkTemplates.filter(x => x.id !== r.id) });
+                  }} className="p-2 text-red-400"><Trash2 size={16} /></button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {activeTab === 'obat' && (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className={`h1 ${t.textMain}`}>Jadwal Obat</h1>
+              <p className={`body-md font-medium ${t.textMuted}`}>Daftar pengobatan rutin harian.</p>
+            </div>
+            <button onClick={() => setEditingMedicine({ id: `med_${Date.now()}`, name: '', icon: 'Pill', color: 'rose', signa: '', note: '' })} 
+                    className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
+          </div>
+
+          {medicines.length === 0 && (
+            <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
+              <Pill size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
+              <p className={`body-md ${t.textMuted}`}>Tidak ada jadwal obat. Tambahkan obat rutin jika ada.</p>
+            </div>
+          )}
+
+          <div className="space-y-2.5">
+            {medicines.map(r => {
+              const IconComp = ICONS[r.icon] || Pill;
+              const bgClass = COLORS.find(c => c.id === r.color)?.bg || 'bg-zinc-500';
+              return (
+                <div key={r.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise flex items-center gap-4`}>
+                  <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-white ${bgClass}`}>
+                    <IconComp size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <p className={`h2 ${t.textMain}`}>{r.name}</p>
+                    <p className={`caption mt-0.5 ${t.textMuted}`}>Signa: <span className="font-bold text-white">{r.signa}</span> {r.note && `(${r.note})`}</p>
+                  </div>
+                  <button onClick={async () => {
+                    if (await showConfirm(`Hapus obat "${r.name}"?`)) saveProfilePatch({ medicines: medicines.filter(x => x.id !== r.id) });
+                  }} className="p-2 text-red-400"><Trash2 size={16} /></button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* ===== MEAL PREP ASSIGNER SHEET ===== */}
       {assigning && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setAssigning(null)}>
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setAssigning(null)}>
           <div onClick={(e) => e.stopPropagation()}
             className={`w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]' : 'bg-white'} p-4 anim-rise`}>
             <h2 className={`h2 ${t.textMain} mb-1`}>Jadwalkan "{assigning.name}"</h2>

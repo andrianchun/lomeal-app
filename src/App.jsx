@@ -23,6 +23,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import useDialog from './hooks/useDialog';
 
 const MEAL_REMINDER_ID = 1001;
+const TAB_ORDER = ['dashboard', 'log', 'history', 'recipes', 'fooddb'];
 
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
@@ -53,6 +54,25 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const todayYmd = getLocalYMD();
   const path = location.pathname.substring(1) || 'dashboard';
   const setActiveTab = (tabId) => navigate(`/${tabId}`);
+
+  // Swipe kiri/kanan buat pindah tab utama — pola sama kayak App.jsx Logym. Elemen yang gak
+  // boleh kesenggol (grafik, modal, dst) ditandai `.no-swipe` atau stopPropagation lokal.
+  const swipeStartRef = useRef({ x: 0, y: 0 });
+  const isSwipeGuarded = (e) => e.target.closest('input[type="range"]') || e.target.closest('[role="dialog"]') || e.target.closest('.no-swipe');
+  const handleSwipeStart = (e) => {
+    if (isSwipeGuarded(e)) return;
+    swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const handleSwipeEnd = (e) => {
+    if (isSwipeGuarded(e)) return;
+    const dx = e.changedTouches[0].clientX - swipeStartRef.current.x;
+    const dy = e.changedTouches[0].clientY - swipeStartRef.current.y;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      const idx = TAB_ORDER.indexOf(path);
+      if (dx < 0 && idx < TAB_ORDER.length - 1) setActiveTab(TAB_ORDER[idx + 1]);
+      else if (dx > 0 && idx > 0) setActiveTab(TAB_ORDER[idx - 1]);
+    }
+  };
 
   useEffect(() => {
     document.body.className = `${t.bgApp} ${t.textMain}`;
@@ -102,7 +122,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     // Kalori-dimakan HARI INI juga dikirim ke Logym (field lomealSync, namespace
     // sendiri) — biar Logym punya akses ke data ini kalau nanti mau ditampilkan.
     if (logymUser && ymd === todayYmd) {
-      pushDailyTotalsToLogym(logymUser.uid, ymd, computeDayTotals(dayData)).catch(() => {});
+      const mealsCount = Object.entries(dayData?.meals || {}).filter(([k, e]) => ['breakfast', 'lunch', 'dinner'].includes(k) && e.length > 0).length;
+      pushDailyTotalsToLogym(logymUser.uid, ymd, computeDayTotals(dayData), mealsCount).catch(() => {});
     }
   }, [user, settings.healthConnectEnabled, logymUser, todayYmd, profile?.targets]);
 
@@ -202,10 +223,10 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     const physical = profile?.physical;
     if (!physical?.weight || !physical?.height || !physical?.dob || !physical?.gender) return;
     const age = computeAge(physical.dob);
-    const newTargets = calcTargets({ ...physical, age, dietGoal: profile?.dietGoal, dietProfile: profile?.dietProfile, pace: profile?.pace, waterGoal: profile?.targets?.waterGoal });
+    const newTargets = calcTargets({ ...physical, age, dietGoal: profile?.dietGoal, dietProfile: profile?.dietProfile, pace: profile?.pace, waterGoal: profile?.targets?.waterGoal, customDeltaKcal: profile?.customDeltaKcal });
     if (JSON.stringify(newTargets) === JSON.stringify(profile?.targets)) return;
     saveProfilePatch({ targets: newTargets });
-  }, [profile?.physical, profile?.dietGoal, profile?.dietProfile, profile?.pace]);
+  }, [profile?.physical, profile?.dietGoal, profile?.dietProfile, profile?.pace, profile?.customDeltaKcal]);
 
   // Target kalori/makro → Logym, biar kartu "Kalori Dimakan" Logym baca target dari sini
   // langsung (Logym gak lagi punya preset delta cutting/bulking sendiri).
@@ -322,7 +343,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   };
 
   return (
-    <div className={`min-h-screen ${t.bgApp} ${t.textMain}`}>
+    <div className={`min-h-screen ${t.bgApp} ${t.textMain}`} onTouchStart={handleSwipeStart} onTouchEnd={handleSwipeEnd}>
       <Header
         t={t}
         theme={theme}
