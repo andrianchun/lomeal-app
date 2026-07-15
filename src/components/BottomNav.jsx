@@ -9,7 +9,7 @@ const BottomNav = ({ t, activeTab, setActiveTab, soundEnabled, playSoundEffect }
     { id: 'dashboard', icon: LayoutDashboard,  label: 'Dasbor' },
     { id: 'log',       icon: UtensilsCrossed,  label: 'Catat' },
     { id: 'history',   icon: CalendarDays,     label: 'Kalender' },
-    { id: 'recipes',   icon: ChefHat,          label: 'Rencana' },
+    { id: 'program',   icon: ChefHat,          label: 'Program' },
     { id: 'fooddb',    icon: Database,         label: 'Database' },
   ];
 

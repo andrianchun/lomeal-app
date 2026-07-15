@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { X, Search, Scale, ChefHat, Plus, Minus } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { X, Search, Scale, ChefHat, Plus, Minus, Check } from 'lucide-react';
 import { searchFoods, nutritionForAmount, FOOD_CATEGORIES } from '../data/foodDatabase';
 import { scaleNutrition, NUTRIENTS } from '../data/nutrition';
 import { makeEntry } from '../utils/foodLog';
@@ -12,7 +12,7 @@ const EXTRA_NUTRIENT_FIELDS = NUTRIENTS.filter(n => !n.macro).map(n => [n.key, `
  * form gramasi pasti untuk meng-override ketika AI kurang akurat.
  * onAdd(entry) dipanggil per item yang dikonfirmasi.
  */
-const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], recipes = [], initialTab = 'db' }) => {
+const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onRemove, customFoods = [], recipes = [], initialTab = 'db', targetSession, setTargetSession, activeSessions = [], dayMeals = {} }) => {
   const [tab, setTab] = useState(initialTab); // 'db' | 'recipes' | 'manual'
   const [term, setTerm] = useState('');
   const [category, setCategory] = useState(null);
@@ -58,15 +58,39 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], rec
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm no-swipe" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center bg-black/50 backdrop-blur-sm no-swipe" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
-        className={`w-full sm:max-w-md max-h-[88vh] flex flex-col rounded-t-3xl sm:rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]' : 'bg-white'} anim-rise`}>
+        className={`w-full sm:max-w-md h-[85vh] flex flex-col rounded-t-3xl sm:rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-[0_-10px_50px_rgba(0,0,0,0.3)] anim-rise`}>
         {/* Header + tabs */}
         <div className="p-4 pb-2">
           <div className="flex items-center justify-between mb-3">
-            <h2 className={`h2 ${t.textMain}`}>Tambah Makanan</h2>
+            <h2 className={`h2 ${t.textMain}`}>Tambah Item</h2>
             <button onClick={onClose} className={`p-2 rounded-xl ${t.btnBg}`}><X size={16} className={t.textMuted} /></button>
           </div>
+          
+          {activeSessions.length > 0 && setTargetSession && (
+            <div className={`mb-3 flex items-center justify-between px-3 py-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
+              <span className={`caption font-bold ${t.textMuted}`}>Target Sesi:</span>
+              <select value={targetSession || ''} onChange={(e) => setTargetSession(e.target.value)} 
+                 className={`bg-transparent outline-none body-md font-bold ${t.textMain}`}>
+                 {activeSessions.map(s => (
+                   <option key={s.id} value={s.id} className="text-black">{s.emoji} {s.label}</option>
+                 ))}
+              </select>
+            </div>
+          )}
+
+          {targetSession && (dayMeals[targetSession] || []).length > 0 && (
+             <div className="mb-3 flex gap-2 overflow-x-auto hide-scrollbar">
+                {dayMeals[targetSession].map(e => (
+                   <button key={e.id} onClick={() => onRemove && onRemove(e.id)} className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-green-500/30 bg-green-500/10`}>
+                     <X size={12} className="text-green-500" />
+                     <span className={`caption font-medium text-green-700 dark:text-green-400 max-w-[120px] truncate`}>{e.name}</span>
+                   </button>
+                ))}
+             </div>
+          )}
+
           <div className={`flex rounded-2xl p-1 ${t.bgSunken}`}>
             {[['db', 'Database', Search], ['recipes', 'Resep', ChefHat], ['manual', 'Manual', Scale]].map(([id, label, Icon]) => (
               <button key={id} onClick={() => setTab(id)}
@@ -177,7 +201,7 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], rec
                   </div>
                 ))}
               </div>
-              <p className={`caption font-medium ${t.textMuted}`}>Isi nilai TOTAL untuk porsi yang kamu makan (bukan per 100g).</p>
+              <p className={`caption font-medium ${t.textMuted} mb-2`}>Isi nilai TOTAL untuk porsi yang kamu makan (bukan per 100g).</p>
               <button disabled={!manual.name || !manual.kcal} onClick={confirmManual}
                 className={`w-full py-3 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40`}>Tambahkan</button>
             </div>

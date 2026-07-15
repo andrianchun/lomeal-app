@@ -4,11 +4,12 @@ import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth';
 import { auth } from './firebase';
 import { authLogym, bridgeToLogym } from './firebaseLogym';
 import { buildTheme } from './theme';
-import { getLocalYMD, getMonthKey, computeAge } from './data/constants';
+import { getLocalYMD, getMonthKey, computeAge, MEAL_SESSIONS, DEFAULT_SESSION_TIMES } from './data/constants';
 import {
   subscribeLomealProfile, saveLomealProfile,
   subscribeMonth, saveDay as saveDayFs,
   subscribeRecipes, saveRecipes,
+  subscribeMealPreps, saveMealPreps,
   subscribeCustomFoods, saveCustomFoods,
   deleteAllUserData,
 } from './utils/foodLog';
@@ -32,7 +33,7 @@ import OnboardingFlow from './pages/OnboardingFlow';
 import DashboardTab from './pages/DashboardTab';
 import LogTab from './pages/LogTab';
 import HistoryTab from './pages/HistoryTab';
-import RecipesTab from './pages/RecipesTab';
+import ProgramTab from './pages/ProgramTab';
 import FoodDbTab from './pages/FoodDbTab';
 import SocialHub from './pages/SocialHub';
 import SettingsPage from './pages/SettingsPage';
@@ -147,15 +148,18 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
   // --- Resep & custom foods ---
   const [recipes, setRecipes] = useState([]);
+  const [mealPreps, setMealPreps] = useState([]);
   const [customFoods, setCustomFoods] = useState([]);
   useEffect(() => {
     if (!user) return;
     const unsub1 = subscribeRecipes(user.uid, setRecipes);
     const unsub2 = subscribeCustomFoods(user.uid, setCustomFoods);
-    return () => { unsub1(); unsub2(); };
+    const unsub3 = subscribeMealPreps(user.uid, setMealPreps);
+    unsubsRef.current.recipes = unsub1;
+    unsubsRef.current.customFoods = unsub2;
+    unsubsRef.current.mealPreps = unsub3;
+    return () => { unsub1(); unsub2(); unsub3(); };
   }, [user]);
-  const saveRecipesFn = useCallback((items) => saveRecipes(user.uid, items), [user]);
-  const saveCustomFoodsFn = useCallback((items) => saveCustomFoods(user.uid, items), [user]);
 
   // Share resep ke Social Feed (post type:'recipe') — butuh identitas Logym (lihat firebaseLogym.js).
   const shareRecipe = useCallback(async (recipe) => {
@@ -183,6 +187,29 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logymUser]);
+
+  // Sinkronisasi berat/tinggi terbaru dari histori harian Logym (karena Logym 
+  // menyimpan data timbangan/progress ke riwayat harian, bukan profil statisnya).
+  useEffect(() => {
+    if (!lyfitYearData || !profile?.physical) return;
+    let latestWeight = null;
+    let latestHeight = null;
+    
+    // Sort tanggal dari awal tahun ke hari ini
+    Object.keys(lyfitYearData).sort().forEach(ymd => {
+      const bio = lyfitYearData[ymd]?.bioData;
+      if (bio?.weight) latestWeight = Number(bio.weight);
+      if (bio?.height) latestHeight = Number(bio.height);
+    });
+    
+    const patch = {};
+    if (latestWeight && latestWeight !== profile.physical.weight) patch.weight = latestWeight;
+    if (latestHeight && latestHeight !== profile.physical.height) patch.height = latestHeight;
+    
+    if (Object.keys(patch).length > 0) {
+      saveProfilePatch({ physical: { ...profile.physical, ...patch } });
+    }
+  }, [lyfitYearData, profile?.physical, saveProfilePatch]);
 
   // --- Sinkron biometrik 2-arah dengan Logym (gender/dob/height/weight) ---
   // Lomeal TIDAK PERNAH sentuh kode Logym — 2 arah dicapai lewat listener
@@ -243,10 +270,19 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     const physical = profile?.physical;
     if (!physical?.weight || !physical?.height || !physical?.dob || !physical?.gender) return;
     const age = computeAge(physical.dob);
-    const newTargets = calcTargets({ ...physical, age, dietGoal: profile?.dietGoal, dietProfile: profile?.dietProfile, pace: profile?.pace, waterGoal: profile?.targets?.waterGoal, customDeltaKcal: profile?.customDeltaKcal });
+    const newTargets = calcTargets({ 
+      ...physical, age, 
+      dietGoal: profile?.dietGoal, 
+      dietProfile: profile?.dietProfile, 
+      pace: profile?.pace, 
+      waterGoal: profile?.targets?.waterGoal, 
+      customDeltaKcal: profile?.customDeltaKcal,
+      customProteinPerKg: profile?.customProteinPerKg,
+      medicalHistory: profile?.medicalHistory 
+    });
     if (JSON.stringify(newTargets) === JSON.stringify(profile?.targets)) return;
     saveProfilePatch({ targets: newTargets });
-  }, [profile?.physical, profile?.dietGoal, profile?.dietProfile, profile?.pace, profile?.customDeltaKcal]);
+  }, [profile?.physical, profile?.dietGoal, profile?.dietProfile, profile?.pace, profile?.customDeltaKcal, profile?.customProteinPerKg, profile?.medicalHistory, profile?.targets?.waterGoal]);
 
   // Target kalori/makro → Logym, biar kartu "Kalori Dimakan" Logym baca target dari sini
   // langsung (Logym gak lagi punya preset delta cutting/bulking sendiri).
@@ -291,29 +327,63 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   // --- Pengingat Catat Makan (LocalNotifications, cuma aktif di APK Android/iOS) ---
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
+    
+    let listener = null;
+    LocalNotifications.addListener('localNotificationActionPerformed', () => {
+      navigate('/log');
+    }).then(l => listener = l);
+
     (async () => {
       try {
-        if (settings.reminderEnabled) {
-          await LocalNotifications.requestPermissions();
-          const [hour, minute] = (settings.reminderTime || '19:00').split(':').map(Number);
-          await LocalNotifications.schedule({
-            notifications: [{
-              id: MEAL_REMINDER_ID,
-              title: 'Lomeal',
-              body: 'Sudah catat makananmu hari ini belum? 🍽️',
-              schedule: { on: { hour, minute }, repeats: true, allowWhileIdle: true },
-            }],
+        await LocalNotifications.requestPermissions();
+        const pending = await LocalNotifications.getPending();
+        if (pending.notifications.length > 0) {
+            await LocalNotifications.cancel({ notifications: pending.notifications });
+        }
+        
+        const notifs = [];
+        let notifId = 2000;
+        
+        for (let i = 0; i < 7; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() + i);
+          const ymd = getLocalYMD(d);
+          const dayData = daysMap[ymd] || {};
+          
+          MEAL_SESSIONS.forEach(s => {
+            if (s.id === 'drink') return;
+            const reminderEnabled = dayData.reminders?.[s.id] ?? (settings.reminderEnabled ?? false);
+            if (!reminderEnabled) return;
+            
+            const timeStr = dayData.sessionTimes?.[s.id] || settings.defaultSessionTimes?.[s.id] || DEFAULT_SESSION_TIMES[s.id] || '12:00';
+            const [hour, minute] = timeStr.split(':').map(Number);
+            const targetTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute);
+            
+            if (targetTime.getTime() > Date.now()) {
+              notifs.push({
+                id: notifId++,
+                title: 'Lomeal',
+                body: `Waktunya ${s.label.toLowerCase()}! Jangan lupa dicatat ya 🍽️`,
+                schedule: { at: targetTime, allowWhileIdle: true },
+              });
+            }
           });
-        } else {
-          await LocalNotifications.cancel({ notifications: [{ id: MEAL_REMINDER_ID }] });
+        }
+        
+        if (notifs.length > 0) {
+          await LocalNotifications.schedule({ notifications: notifs.slice(0, 60) });
         }
       } catch (e) { console.warn('Gagal atur pengingat:', e); }
     })();
-  }, [settings.reminderEnabled, settings.reminderTime]);
+    
+    return () => {
+      if (listener) listener.remove();
+    }
+  }, [settings.reminderEnabled, settings.defaultSessionTimes, daysMap, navigate]);
 
   // --- Backup & Restore ---
   const exportData = () => {
-    const payload = { exportedAt: new Date().toISOString(), profile, daysMap, recipes, customFoods };
+    const payload = { exportedAt: new Date().toISOString(), profile, daysMap, recipes, customFoods, mealPreps };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -330,8 +400,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       const data = JSON.parse(text);
       if (!(await showConfirm('Ini akan menimpa profil, resep, dan bahan custom saat ini dengan isi file backup. Lanjutkan?', { danger: true }))) return;
       if (data.profile) await saveProfilePatch(data.profile);
-      if (data.recipes) await saveRecipesFn(data.recipes);
-      if (data.customFoods) await saveCustomFoodsFn(data.customFoods);
+      if (data.recipes) await saveRecipes(user.uid, data.recipes);
+      if (data.mealPreps) await saveMealPreps(user.uid, data.mealPreps);
+      if (data.customFoods) await saveCustomFoods(user.uid, data.customFoods);
       if (data.daysMap) {
         for (const [ymd, dayData] of Object.entries(data.daysMap)) {
           await saveDayFs(user.uid, ymd, dayData);
@@ -355,7 +426,10 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const commonProps = {
     t, theme, user, logymUser, profile, daysMap, todayYmd,
     saveDay, ensureMonth, saveProfilePatch,
-    recipes, customFoods, saveRecipesFn, saveCustomFoodsFn, shareRecipe,
+    recipes, saveRecipesFn: (items) => saveRecipes(user.uid, items),
+    mealPreps, saveMealPrepsFn: (items) => saveMealPreps(user.uid, items),
+    customFoods, saveCustomFoodsFn: (items) => saveCustomFoods(user.uid, items),
+    shareRecipe,
     aiKey: effectiveAiKeys,
     waterGoal: profile?.targets?.waterGoal,
     lyfitToday: dashboardLyfitToday,
@@ -380,8 +454,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
         <Route path="/dashboard" element={<DashboardTab {...commonProps} />} />
         <Route path="/log" element={<LogTab {...commonProps} />} />
         <Route path="/history" element={<HistoryTab {...commonProps} />} />
-        <Route path="/recipes" element={<RecipesTab {...commonProps} />} />
+        <Route path="/program" element={<ProgramTab {...commonProps} />} />
         <Route path="/fooddb" element={<FoodDbTab {...commonProps} />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
 
       <BottomNav t={t} activeTab={path} setActiveTab={setActiveTab} />

@@ -29,6 +29,18 @@ export const MEAL_SESSIONS = [
   { id: 'drink',     label: 'Minuman',      emoji: '🥤' },
 ];
 
+export const DEFAULT_ACTIVE_SESSIONS = ['breakfast', 'lunch', 'dinner', 'drink'];
+
+export const DEFAULT_SESSION_TIMES = {
+  breakfast: '07:00',
+  snack: '10:00',
+  lunch: '12:00',
+  snack2: '15:00',
+  dinner: '19:00',
+  snack3: '21:00',
+  drink: '23:59'
+};
+
 export const WATER_STEP_ML = 200;    // satu tap = +200ml (blueprint Tab 2)
 export const WATER_GOAL_ML = 2000;
 

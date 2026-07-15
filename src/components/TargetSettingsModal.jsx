@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { X } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Calculator } from 'lucide-react';
 import { DIET_PROFILES, DIET_GOALS, PACES, calcTargets } from '../data/nutrition';
 import { computeAge } from '../data/constants';
 import SwipeInput from './SwipeInput';
@@ -21,6 +21,11 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
   const [medicalHistory, setMedicalHistory] = useState(profile?.medicalHistory || []);
   const [customProteinPerKg, setCustomProteinPerKg] = useState(profile?.customProteinPerKg ?? '');
 
+  const [waterCalcOpen, setWaterCalcOpen] = useState(false);
+  const [waterWeather, setWaterWeather] = useState('normal');
+  const [waterActivity, setWaterActivity] = useState('light');
+  const [waterCondition, setWaterCondition] = useState('none');
+
   const customDeltaNum = customDeltaKcal === '' ? null : Number(customDeltaKcal);
   const customProteinNum = customProteinPerKg === '' ? null : Number(customProteinPerKg);
 
@@ -33,6 +38,36 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
     const age = computeAge(physical.dob);
     return calcTargets({ ...physical, age, dietGoal, dietProfile, pace, waterGoal, customDeltaKcal: customDeltaNum, customProteinPerKg: customProteinNum, medicalHistory });
   }, [profile?.physical, dietGoal, dietProfile, pace, waterGoal, customDeltaNum, customProteinNum, medicalHistory]);
+
+  React.useEffect(() => {
+    if (!waterCalcOpen) return;
+    const bb = profile?.physical?.weight || 60;
+    const usia = computeAge(profile?.physical?.dob) || 30;
+    
+    if (medicalHistory.includes('CKD (Gagal Ginjal)')) {
+      setWaterGoal(1000);
+      return;
+    }
+    
+    let base = bb * (usia > 55 ? 30 : 35);
+    
+    if (waterWeather === 'hot') base += 300;
+    if (waterWeather === 'very_hot') base += 500;
+    
+    if (waterActivity === 'moderate') base += 300;
+    if (waterActivity === 'heavy') base += 600;
+    
+    if (waterCondition === 'pregnancy') base += 300;
+    if (waterCondition === 'breastfeeding') base += 700;
+    if (waterCondition === 'fever') base += 200;
+    
+    // Pastikan batas aman minimum untuk orang dewasa (bukan CKD) adalah 1200ml, 
+    // agar lebih alami bagi pengguna bertubuh mungil tanpa memaksa over-hydration.
+    let finalTarget = Math.round(base / 100) * 100;
+    if (finalTarget < 1200) finalTarget = 1200;
+    
+    setWaterGoal(finalTarget);
+  }, [waterCalcOpen, waterWeather, waterActivity, waterCondition, profile?.physical, medicalHistory]);
 
   const handleSave = () => {
     saveProfilePatch({
@@ -161,6 +196,41 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
               />
               <span className={`absolute right-4 top-1/2 -translate-y-1/2 caption font-bold ${t.textMuted}`}>ml/hari</span>
             </div>
+            <button onClick={() => setWaterCalcOpen(!waterCalcOpen)} className={`w-full flex items-center justify-center gap-1.5 p-2.5 ${theme === 'dark' ? 'bg-emerald-500/20' : 'bg-emerald-500/10'} text-emerald-500 text-xs font-bold uppercase tracking-wide ${waterCalcOpen ? 'rounded-t-2xl rounded-b-none mt-1' : 'rounded-2xl mt-1'}`}>
+              <Calculator size={15} /> Kalkulator Air {waterCalcOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+            
+            {waterCalcOpen && (
+              <div className={`p-4 rounded-b-2xl rounded-t-none border-x border-b ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} space-y-4`}>
+                 {medicalHistory.includes('CKD (Gagal Ginjal)') && (
+                   <p className="caption text-red-500 font-bold mb-1">⚠️ Kondisi CKD terdeteksi. Target air dibatasi (~1000ml).</p>
+                 )}
+                 <div>
+                   <p className={`text-[10px] uppercase font-bold ${t.textMuted} mb-1.5 tracking-wide`}>Cuaca</p>
+                   <div className="flex gap-2">
+                     {[{id:'normal', l:'Normal'}, {id:'hot', l:'Panas'}, {id:'very_hot', l:'Sangat Panas'}].map(o => (
+                       <button key={o.id} onClick={() => setWaterWeather(o.id)} className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all ${waterWeather === o.id ? `${t.bgAccent} ${t.borderAccent} text-white shadow-md` : `${theme === 'dark' ? 'bg-black/20 border-white/10' : 'bg-white border-black/10'} ${t.textMuted}`}`}>{o.l}</button>
+                     ))}
+                   </div>
+                 </div>
+                 <div>
+                   <p className={`text-[10px] uppercase font-bold ${t.textMuted} mb-1.5 tracking-wide`}>Aktivitas</p>
+                   <div className="flex gap-2">
+                     {[{id:'light', l:'Ringan'}, {id:'moderate', l:'Sedang'}, {id:'heavy', l:'Berat'}].map(o => (
+                       <button key={o.id} onClick={() => setWaterActivity(o.id)} className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all ${waterActivity === o.id ? `${t.bgAccent} ${t.borderAccent} text-white shadow-md` : `${theme === 'dark' ? 'bg-black/20 border-white/10' : 'bg-white border-black/10'} ${t.textMuted}`}`}>{o.l}</button>
+                     ))}
+                   </div>
+                 </div>
+                 <div>
+                   <p className={`text-[10px] uppercase font-bold ${t.textMuted} mb-1.5 tracking-wide`}>Kondisi Khusus</p>
+                   <div className="flex flex-wrap gap-2">
+                     {[{id:'none', l:'Tidak Ada'}, {id:'pregnancy', l:'Hamil'}, {id:'breastfeeding', l:'Menyusui'}, {id:'fever', l:'Demam'}].map(o => (
+                       <button key={o.id} onClick={() => setWaterCondition(o.id)} className={`px-3 py-2 text-xs font-bold rounded-xl border transition-all ${waterCondition === o.id ? `${t.bgAccent} ${t.borderAccent} text-white shadow-md` : `${theme === 'dark' ? 'bg-black/20 border-white/10' : 'bg-white border-black/10'} ${t.textMuted}`}`}>{o.l}</button>
+                     ))}
+                   </div>
+                 </div>
+              </div>
+            )}
           </div>
 
           <div>

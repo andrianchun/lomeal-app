@@ -18,7 +18,7 @@ const COLORS = [
 /**
  * TAB 4: RENCANA & PROGRAM
  */
-const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showConfirm, profile, saveProfilePatch }) => {
+const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showConfirm, profile, saveProfilePatch }) => {
   const [activeTab, setActiveTab] = useState('resep'); // 'resep', 'suplemen', 'obat'
   const [editing, setEditing] = useState(null);  // draft resep di builder
   const [editingSupplement, setEditingSupplement] = useState(null);
@@ -64,11 +64,94 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
   const [assignSession, setAssignSession] = useState('lunch');
   const [assignWeeks, setAssignWeeks] = useState(1);
 
+  const getAvailableStock = (b) => {
+    let scheduledUneaten = 0;
+    Object.values(daysMap).forEach(day => {
+      if (!day.meals) return;
+      Object.values(day.meals).flat().forEach(e => {
+        if (e.batchId === b.id && !e.isEaten) scheduledUneaten++;
+      });
+    });
+    return b.remainingPortions - scheduledUneaten;
+  };
+
+  const startCook = async (r) => {
+    if (!(await showConfirm(`Mulai masak "${r.name}" (${r.portions} porsi)? Stok akan ditambahkan ke Kulkas.`))) return;
+    
+    const existingIndex = mealPreps.findIndex(b => b.recipeId === r.id);
+    if (existingIndex >= 0) {
+      const existing = mealPreps[existingIndex];
+      const updatedBatch = {
+        ...existing,
+        initialPortions: existing.initialPortions + r.portions,
+        remainingPortions: existing.remainingPortions + r.portions,
+        totalGrams: (existing.totalGrams || 0) + (r.totalGrams || 0),
+        perPortion: r.perPortion,
+      };
+      const newMealPreps = [...mealPreps];
+      newMealPreps[existingIndex] = updatedBatch;
+      saveMealPrepsFn(newMealPreps);
+    } else {
+      const newBatch = {
+        id: `b_${Date.now()}`,
+        recipeId: r.id,
+        name: r.name,
+        initialPortions: r.portions,
+        remainingPortions: r.portions,
+        perPortion: r.perPortion,
+        totalGrams: r.totalGrams,
+        createdAt: new Date().toISOString(),
+      };
+      saveMealPrepsFn([newBatch, ...mealPreps]);
+    }
+    showAlert(`Berhasil memasak ${r.portions} porsi ${r.name}! 👨‍🍳`);
+  };
+
+  const deleteBatch = async (b) => {
+    if (!(await showConfirm(`Buang sisa stok "${b.name}"? Ini juga akan menghapus jadwal masa depan yang belum dimakan.`))) return;
+    
+    saveMealPrepsFn(mealPreps.filter(x => x.id !== b.id));
+    
+    let deletedCount = 0;
+    const newDaysMap = { ...daysMap };
+    let changed = false;
+    
+    Object.entries(newDaysMap).forEach(([ymd, day]) => {
+      if (!day.meals) return;
+      const meals = { ...day.meals };
+      let dayChanged = false;
+      Object.keys(meals).forEach(session => {
+        const originalLen = meals[session].length;
+        meals[session] = meals[session].filter(e => e.batchId !== b.id || e.isEaten);
+        if (meals[session].length !== originalLen) {
+          deletedCount += (originalLen - meals[session].length);
+          dayChanged = true;
+        }
+      });
+      if (dayChanged) {
+        newDaysMap[ymd] = { ...day, meals };
+        saveDay(ymd, newDaysMap[ymd]);
+        changed = true;
+      }
+    });
+    
+    showAlert(`Sisa stok dibuang. ${deletedCount} jadwal terhapus.`);
+  };
+
   const runAssign = () => {
-    const recipe = assigning;
+    const batch = assigning;
     const today = new Date();
+    
+    const maxAllowed = getAvailableStock(batch);
+    if (maxAllowed <= 0) {
+      showAlert(`Stok tidak cukup! Sisa stok yang belum dijadwalkan: 0 porsi.`);
+      setAssigning(null);
+      return;
+    }
+
     let count = 0;
-    for (let i = 0; i < assignWeeks * 7 + 1; i++) {
+    for (let i = 0; i < 365; i++) {
+      if (count >= maxAllowed) break;
       const d = new Date(); d.setDate(today.getDate() + i);
       if (!assignDays.includes(d.getDay())) continue;
       const ymd = getLocalYMD(d);
@@ -78,15 +161,20 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
       meals[assignSession] = [
         ...(meals[assignSession] || []),
         makeEntry({
-          name: `${recipe.name} (1 porsi)`, grams: Math.round((recipe.totalGrams || 0) / recipe.portions),
-          unit: 'g', nutrition: recipe.perPortion, recipeId: recipe.id, source: 'recipe', planned: true,
+          name: `${batch.name} (1 porsi)`, 
+          grams: Math.round((batch.totalGrams || 0) / batch.initialPortions),
+          unit: 'g', nutrition: batch.perPortion, 
+          recipeId: batch.recipeId, 
+          batchId: batch.id,
+          source: 'recipe', planned: true,
+          isMealPrep: true
         }),
       ];
       saveDay(ymd, { ...day, meals });
       count++;
     }
     setAssigning(null);
-    showAlert(`Resep dijadwalkan ke ${count} hari di Tab Histori 📅`);
+    showAlert(`Meal Prep dijadwalkan ke ${count} hari! 📅`);
   };
 
   const doShare = async (r) => {
@@ -210,7 +298,7 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
     <div className="max-w-2xl mx-auto px-4 pt-4 pb-32">
       <div className={`flex items-center gap-1.5 mb-5 p-1.5 rounded-2xl ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'}`}>
         {[
-          { id: 'resep', label: 'Resep' },
+          { id: 'resep', label: 'Meal Prep' },
           { id: 'suplemen', label: 'Suplemen' },
           { id: 'obat', label: 'Obat' },
         ].map(tb => (
@@ -223,10 +311,50 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
 
       {activeTab === 'resep' && (
         <>
+          {/* KULKAS (STOK MEAL PREP) */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className={`h2 ${t.textMain}`}>Kulkas (Meal Prep)</h2>
+                <p className={`caption font-medium ${t.textMuted}`}>Stok makanan siap saji yang belum habis.</p>
+              </div>
+            </div>
+            {mealPreps.length === 0 && (
+              <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-6 text-center`}>
+                <ChefHat size={28} className={`mx-auto mb-2 ${t.textMuted}`} />
+                <p className={`caption ${t.textMuted}`}>Kulkas kosong. Masak resep di bawah untuk mengisi stok.</p>
+              </div>
+            )}
+            <div className="space-y-2.5">
+              {mealPreps.map(b => (
+                <div key={b.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise`}>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className={`h2 ${t.textMain}`}>{b.name}</p>
+                      <p className={`caption font-medium mt-0.5 ${t.textMuted}`}>
+                        Dimakan: <span className={`font-bold ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{b.initialPortions - b.remainingPortions}</span> / {b.initialPortions} porsi · Sisa: <span className={b.remainingPortions > 0 ? 'text-emerald-500 font-bold' : 'text-red-500 font-bold'}>{b.remainingPortions}</span>
+                      </p>
+                    </div>
+                    <button onClick={() => deleteBatch(b)} className="p-2 text-red-400"><Trash2 size={14} /></button>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={() => setAssigning(b)} disabled={b.remainingPortions <= 0}
+                      className={`flex-1 py-2.5 rounded-xl ${t.bgAccentSoft} border ${t.borderAccentSoft} ${t.textAccent} caption flex items-center justify-center gap-1.5 disabled:opacity-40`}>
+                      <CalendarPlus size={13} /> Jadwalkan
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <hr className={`border-t ${t.border} mb-6`} />
+
+          {/* BUKU RESEP */}
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className={`h1 ${t.textMain}`}>Katalog Resep</h1>
-              <p className={`body-md font-medium ${t.textMuted}`}>Rakit sekali, catat berulang kali.</p>
+              <h1 className={`h1 ${t.textMain}`}>Buku Resep</h1>
+              <p className={`body-md font-medium ${t.textMuted}`}>Template masakan andalan Anda.</p>
             </div>
             <button onClick={newRecipe} className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
           </div>
@@ -252,9 +380,9 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
             </div>
             <p className={`caption font-medium mt-1 ${t.textMuted} truncate`}>{r.ingredients.map(i => i.name).join(', ')}</p>
             <div className="flex gap-2 mt-3">
-              <button onClick={() => setAssigning(r)}
+              <button onClick={() => startCook(r)}
                 className={`flex-1 py-2.5 rounded-xl ${t.bgAccentSoft} border ${t.borderAccentSoft} ${t.textAccent} caption flex items-center justify-center gap-1.5`}>
-                <CalendarPlus size={13} /> Jadwalkan (Meal Prep)
+                <ChefHat size={13} /> Mulai Masak
               </button>
               <button onClick={() => setEditing(r)} className={`px-4 py-2.5 rounded-xl border ${t.border} ${t.btnBg} caption ${t.textMain}`}>Edit</button>
               <button onClick={() => doShare(r)} disabled={shareBusy === r.id}
@@ -350,22 +478,30 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
         </>
       )}
 
-      {/* ===== MEAL PREP ASSIGNER SHEET ===== */}
+      {/* ===== MEAL PREP ASSIGNER MODAL ===== */}
       {assigning && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setAssigning(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setAssigning(null)}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]' : 'bg-white'} p-4 anim-rise`}>
-            <h2 className={`h2 ${t.textMain} mb-1`}>Jadwalkan "{assigning.name}"</h2>
-            <p className={`caption font-medium ${t.textMuted} mb-3`}>1 porsi otomatis mengisi sesi terpilih pada hari-hari ini (mulai besok).</p>
-            <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Hari:</p>
-            <div className="flex gap-1.5 mb-3">
+            className={`w-full max-w-sm rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]/80 backdrop-blur-xl' : 'bg-white/80 backdrop-blur-xl'} p-5 anim-rise`}>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className={`h2 ${t.textMain}`}>Jadwalkan "{assigning.name}"</h2>
+              <button onClick={() => setAssigning(null)} className={`p-1.5 rounded-xl ${t.btnBg} ${t.textMuted}`}><X size={16} /></button>
+            </div>
+            
+            <p className={`caption font-medium ${t.textMuted} mb-4`}>
+              Sistem akan otomatis mengisi jadwal makan Anda hingga sisa stok yang tersedia (<strong>{getAvailableStock(assigning)} porsi</strong>) habis.
+            </p>
+            
+            <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Pilih Hari:</p>
+            <div className="flex gap-1.5 mb-4">
               {DAY_NAMES_ID.map((d, i) => (
                 <button key={i} onClick={() => setAssignDays(ds => ds.includes(i) ? ds.filter(x => x !== i) : [...ds, i])}
                   className={`flex-1 py-2 rounded-xl caption border ${assignDays.includes(i) ? `${t.bgAccent} border-transparent text-white` : `${t.border} ${t.textMuted}`}`}>{d}</button>
               ))}
             </div>
-            <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Sesi:</p>
-            <div className="flex gap-1.5 overflow-x-auto hide-scrollbar mb-3">
+            
+            <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Sesi Makan:</p>
+            <div className="flex gap-1.5 overflow-x-auto hide-scrollbar mb-5">
               {MEAL_SESSIONS.map(s => (
                 <button key={s.id} onClick={() => setAssignSession(s.id)}
                   className={`shrink-0 px-3 py-2 rounded-xl border caption ${assignSession === s.id ? `${t.bgAccentSoft} ${t.borderAccentSoft} ${t.textAccent}` : `${t.border} ${t.textMuted}`}`}>
@@ -373,15 +509,9 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
                 </button>
               ))}
             </div>
-            <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Untuk:</p>
-            <div className="flex gap-1.5 mb-4">
-              {[[1, '1 minggu'], [2, '2 minggu'], [4, '1 bulan']].map(([w, label]) => (
-                <button key={w} onClick={() => setAssignWeeks(w)}
-                  className={`flex-1 py-2 rounded-xl caption border ${assignWeeks === w ? `${t.bgAccent} border-transparent text-white` : `${t.border} ${t.textMuted}`}`}>{label}</button>
-              ))}
-            </div>
-            <button disabled={assignDays.length === 0} onClick={runAssign}
-              className={`w-full py-3 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40`}>Terapkan ke Kalender</button>
+            
+            <button disabled={assignDays.length === 0 || getAvailableStock(assigning) <= 0} onClick={runAssign}
+              className={`w-full py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40`}>Terapkan ke Kalender</button>
           </div>
         </div>
       )}
@@ -389,4 +519,4 @@ const RecipesTab = ({ t, theme, recipes, saveRecipesFn, customFoods, daysMap, sa
   );
 };
 
-export default RecipesTab;
+export default ProgramTab;

@@ -46,6 +46,12 @@ export const subscribeRecipes = (uid, cb) =>
 export const saveRecipes = (uid, items) =>
   setDoc(flDoc(uid, 'recipes'), { items }, { merge: false });
 
+export const subscribeMealPreps = (uid, cb) =>
+  onSnapshot(flDoc(uid, 'meal_preps'), (snap) => cb(snap.exists() ? (snap.data().items || []) : []));
+
+export const saveMealPreps = (uid, items) =>
+  setDoc(flDoc(uid, 'meal_preps'), { items }, { merge: false });
+
 export const subscribeCustomFoods = (uid, cb) =>
   onSnapshot(flDoc(uid, 'custom_foods'), (snap) => cb(snap.exists() ? (snap.data().items || []) : []));
 

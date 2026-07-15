@@ -257,11 +257,16 @@ export const getSmartWarnings = (totals, targets, dietProfile, profile, lyfitTod
 };
 
 // Total nutrisi satu hari log: jumlahkan semua entri di semua sesi makan
-export const computeDayTotals = (day) => {
+export const computeDayTotals = (day, defaultEaten = true) => {
   let totals = { ...EMPTY_NUTRITION };
   if (!day?.meals) return totals;
   Object.values(day.meals).forEach((entries) => {
-    (entries || []).forEach((e) => { totals = addNutrition(totals, e.nutrition); });
+    (entries || []).forEach((e) => { 
+      const eaten = e.isEaten !== undefined ? e.isEaten : defaultEaten;
+      if (eaten) {
+        totals = addNutrition(totals, e.nutrition); 
+      }
+    });
   });
   return totals;
 };

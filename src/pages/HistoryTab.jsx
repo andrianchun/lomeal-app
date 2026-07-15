@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, ImageDown, Loader2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, ImageDown, Loader2, X, Bell, BellOff, Clock } from 'lucide-react';
 import FoodPickerModal from '../components/FoodPickerModal';
-import { MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, getMonthKey } from '../data/constants';
+import { MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, getMonthKey, DEFAULT_SESSION_TIMES } from '../data/constants';
 import { computeDayTotals } from '../data/nutrition';
 import { STATUS } from '../theme';
 import { generateWeeklyEvaluation } from '../utils/aiFood';
@@ -90,6 +90,22 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
     const meals = { ...(day.meals || {}) };
     meals[sessionId] = [...(meals[sessionId] || []), entry];
     saveDay(ymd, { ...day, meals });
+  };
+
+  const setSessionTime = (ymd, sessionId, timeStr) => {
+    const day = daysMap[ymd] || { meals: {} };
+    const sessionTimes = { ...(day.sessionTimes || {}) };
+    sessionTimes[sessionId] = timeStr;
+    saveDay(ymd, { ...day, sessionTimes });
+  };
+
+  const toggleReminder = (ymd, sessionId) => {
+    const day = daysMap[ymd] || { meals: {} };
+    const reminders = { ...(day.reminders || {}) };
+    const currentStatus = reminders[sessionId] ?? profile?.settings?.reminderEnabled ?? false;
+    reminders[sessionId] = !currentStatus;
+    saveDay(ymd, { ...day, reminders });
+    showAlert(reminders[sessionId] ? `Pengingat aktif untuk ${MEAL_SESSIONS.find(s=>s.id===sessionId)?.label}` : 'Pengingat dimatikan');
   };
 
   // ---------- Evaluasi Mingguan (Gemini, HANYA manual trigger) ----------
@@ -183,10 +199,22 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
                 </div>
                 {MEAL_SESSIONS.map(s => {
                   const entries = expandedDay.meals?.[s.id] || [];
+                  const sessionTime = expandedDay.sessionTimes?.[s.id] || profile?.settings?.defaultSessionTimes?.[s.id] || DEFAULT_SESSION_TIMES[s.id] || '12:00';
+                  const reminderEnabled = expandedDay.reminders?.[s.id] ?? (profile?.settings?.reminderEnabled ?? false);
+                  
                   return (
                     <div key={s.id} className="mb-2">
                       <div className="flex items-center justify-between">
-                        <p className={`caption font-bold ${t.textMuted}`}>{s.emoji} {s.label}</p>
+                        <div className="flex items-center gap-2">
+                          <p className={`caption font-bold ${t.textMuted}`}>{s.emoji} {s.label}</p>
+                          <div className={`flex items-center bg-transparent border ${t.border} rounded-md px-1.5 py-0.5`}>
+                            <Clock size={10} className={`${t.textMuted} mr-1`} />
+                            <input type="time" value={sessionTime} onChange={(e) => setSessionTime(expandedYmd, s.id, e.target.value)} className={`bg-transparent outline-none text-[10px] font-bold ${t.textMain} w-[42px] p-0 border-none no-spinners`} />
+                          </div>
+                          <button onClick={() => toggleReminder(expandedYmd, s.id)} className={`p-1 rounded-md transition-colors ${reminderEnabled ? 'bg-sky-500/10 text-sky-500' : `bg-transparent text-zinc-500 hover:${t.bgSunken}`}`}>
+                            {reminderEnabled ? <Bell size={12} /> : <BellOff size={12} />}
+                          </button>
+                        </div>
                         <button onClick={() => setPicker({ ymd: expandedYmd, session: s.id })} className={`p-1 rounded-lg ${t.textAccent}`}><Plus size={13} /></button>
                       </div>
                       {entries.map(e => (

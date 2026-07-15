@@ -41,7 +41,7 @@ export default function useDialog(isDark = false, customBgClass = null) {
   const TYPE_ICON = {
     success: <CheckCircle2 size={22} className="text-green-500 shrink-0" />,
     error:   <AlertCircle  size={22} className="text-rose-500 shrink-0" />,
-    info:    <Info         size={22} className="text-sky-500 shrink-0" />,
+    info:    <Info         size={22} className="text-emerald-500 shrink-0" />,
   };
 
   const dialog = state ? (
@@ -51,7 +51,7 @@ export default function useDialog(isDark = false, customBgClass = null) {
     >
       <div
         className={`w-full max-w-xs rounded-3xl p-5 shadow-2xl border animate-in zoom-in-95 duration-200 ${
-          isDark ? `${customBgClass || 'bg-slate-900'} border-white/10` : 'bg-white border-black/8'
+          isDark ? `${customBgClass || 'bg-[#0b1f16]/80 backdrop-blur-xl'} border-white/10` : 'bg-white/80 backdrop-blur-xl border-black/8'
         }`}
         onClick={e => e.stopPropagation()}
       >
@@ -70,7 +70,7 @@ export default function useDialog(isDark = false, customBgClass = null) {
         {state.mode === 'alert' && (
           <button
             onClick={() => close()}
-            className="w-full mt-1 py-2.5 rounded-2xl font-black text-sm bg-sky-500 text-white hover:bg-sky-600 active:scale-95 transition-all"
+            className="w-full mt-1 py-2.5 rounded-2xl font-black text-sm bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 transition-all"
           >
             OK
           </button>
@@ -89,7 +89,7 @@ export default function useDialog(isDark = false, customBgClass = null) {
             <button
               onClick={() => close(true)}
               className={`flex-1 py-2.5 rounded-2xl font-black text-sm text-white active:scale-95 transition-all ${
-                state.danger ? 'bg-rose-500 hover:bg-rose-600' : 'bg-sky-500 hover:bg-sky-600'
+                state.danger ? 'bg-rose-500 hover:bg-rose-600' : 'bg-emerald-500 hover:bg-emerald-600'
               }`}
             >
               {state.confirmText}

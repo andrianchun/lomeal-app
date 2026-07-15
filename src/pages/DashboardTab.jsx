@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Flame, Activity, AlertTriangle, Pencil, Check, X, Settings, ChevronUp, ChevronDown } from 'lucide-react';
+import { Flame, Activity, AlertTriangle, Pencil, Check, X, Settings, ChevronUp, ChevronDown, Scale } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tooltip, Cell } from 'recharts';
 import RingChart from '../components/RingChart';
 import NutritionChart from '../components/NutritionChart';
 import TargetSettingsModal from '../components/TargetSettingsModal';
+import BiometricSettingsModal from '../components/BiometricSettingsModal';
 import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS } from '../data/nutrition';
 import { STATUS, statusFor, MACRO_COLORS } from '../theme';
 import { getLocalYMD } from '../data/constants';
@@ -28,6 +29,9 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
   });
 
   const [showWarnings, setShowWarnings] = useState(false);
+  const [selectedNutrientForBreakdown, setSelectedNutrientForBreakdown] = useState(null);
+  const [showTargetSettings, setShowTargetSettings] = useState(false);
+  const [showBiometricModal, setShowBiometricModal] = useState(false);
 
   // Chip profil makanan di header
   const dietMeta = DIET_PROFILES.find(d => d.id === dietProfile) || null;
@@ -47,17 +51,18 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
 
   const today = daysMap[todayYmd];
   const totals = useMemo(() => computeDayTotals(today), [today]);
-  const burnedBonus = lyfitToday?.burnedKcal || 0;
+  const bmrFloor = targets?.bmr || 0;
+  const burnedTotal = Math.max(bmrFloor, lyfitToday?.burnedKcal || 0);
 
   // Koreksi manual "Dibakar" — buat user yang nyatet olahraga di app lain (bukan Logym).
   // Nulis langsung ke bioData.activityCalories Logym (ber-flag manual), bukan disimpan lokal.
   const [editingBurn, setEditingBurn] = useState(false);
   const [burnInput, setBurnInput] = useState('');
-  const [showTargetSettings, setShowTargetSettings] = useState(false);
   const handleSaveBurnOverride = async () => {
-    const val = Number(burnInput);
+    let val = Number(burnInput);
     setEditingBurn(false);
-    if (!logymUser || !Number.isFinite(val) || val < 0) return;
+    if (!Number.isFinite(val)) return;
+    if (val < bmrFloor) val = bmrFloor;
     await pushActivityOverrideToLogym(logymUser.uid, todayYmd, val);
   };
 
@@ -73,13 +78,13 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
   // Kalau tidak ada data Logym, fallback ke targets.kcal (behavior lama).
   const baseTdee = targets.tdee || targets.kcal || 0;
   const programDelta = (targets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
-  const allowance = burnedBonus > 0
-    ? Math.max(0, burnedBonus + programDelta)
+  const allowance = burnedTotal > 0
+    ? Math.max(0, burnedTotal + programDelta)
     : (targets.kcal || 0);
 
   const remaining = Math.round(allowance - displayKcal);
   const ringProgress = allowance > 0 ? Math.min(1, displayKcal / allowance) : 0;
-  const balance = getEnergyBalance(displayKcal, targets.tdee || targets.kcal || 0, burnedBonus);
+  const balance = getEnergyBalance(displayKcal, targets.tdee || targets.kcal || 0, burnedTotal);
   const ringColor = remaining < 0 ? STATUS.danger.hex : ringProgress >= 0.85 ? STATUS.warn.hex : STATUS.ok.hex;
 
   const warnings = useMemo(() => getSmartWarnings(totals, targets, dietProfile), [totals, targets, dietProfile]);
@@ -138,9 +143,9 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
         <div className={`absolute inset-x-0 top-5 bottom-0 rounded-3xl border ${t.border} ${t.bgCard} ${t.glow} z-0`} />
 
         {/* Coach: di ATAS latar kartu (gak keblur kaca) — ring di layer konten (z-20) yang nutupin
-            sebagian kalau overlap, pola sama kayak ring SCORE Komposisi Tubuh Logym. */}
+            sebagian kalau overlap, pola sama kayak ring SCORE Komposisi Tubuh Logym. Digeser dikit ke kiri (right-2) agar tidak menutupi tombol biometrik */}
         <div
-          className="absolute -right-10 -top-6 w-72 h-[22rem] z-10 pointer-events-none overflow-hidden"
+          className="absolute right-0 -top-6 w-72 h-[22rem] z-10 pointer-events-none overflow-hidden"
           style={{
             maskImage: 'linear-gradient(to bottom, black 70%, transparent 95%)',
             WebkitMaskImage: 'linear-gradient(to bottom, black 70%, transparent 95%)',
@@ -150,7 +155,10 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
         </div>
 
         <div className="relative z-20 p-5">
-          <div className="absolute top-8 right-5 z-30">
+          <div className="absolute top-8 right-5 z-30 flex items-center gap-2">
+            <button onClick={() => setShowBiometricModal(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`} aria-label="Profil Biometrik">
+              <Scale size={15} />
+            </button>
             <button onClick={() => setShowTargetSettings(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`} aria-label="Target & preferensi">
               <Settings size={15} />
             </button>
@@ -180,7 +188,7 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
                   <div className="flex items-center gap-1.5">
                     <p className={`h3 ${t.textMuted}`}>Kalori Dibakar</p>
                     {logymUser && !editingBurn && (
-                      <button onClick={() => { setBurnInput(String(burnedBonus || '')); setEditingBurn(true); }} className={`${t.textMuted} hover:${t.textAccent} transition-colors`} aria-label="Koreksi kalori dibakar">
+                      <button onClick={() => { setBurnInput(String(burnedTotal || '')); setEditingBurn(true); }} className={`${t.textMuted} hover:${t.textAccent} transition-colors`} aria-label="Koreksi kalori dibakar">
                         <Pencil size={12} />
                       </button>
                     )}
@@ -194,12 +202,12 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
                       <SwipeInput
                         value={burnInput === '' ? '' : Number(burnInput)}
                         onChange={(v) => setBurnInput(v === '' ? '' : String(v))}
-                        min={0} max={3000} step={10}
+                        min={0} max={6000} step={50}
                         autoFocus
                         className="w-20 text-xl text-right font-black tabular-nums bg-transparent text-sky-400 outline-none border-none p-0 m-0 mt-0.5 leading-none"
                       />
                   ) : (
-                    <p className="text-xl font-black tabular-nums text-sky-400 mt-0.5">{Number(burnedBonus).toLocaleString('id-ID')}</p>
+                    <p className="text-xl font-black tabular-nums text-sky-400 mt-0.5">{Number(burnedTotal).toLocaleString('id-ID')}</p>
                   )}
                   <p className={`caption ${t.textMuted} mt-0.5`}>Logym: {lyfitToday?.workoutCount || 0} sesi latihan</p>
                 </div>
@@ -237,13 +245,13 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
                          }
                      }, 320);
                  }}
-                 className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`}
+                 className={`no-swipe p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`}
              >
                  {isChartExpanded ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
              </button>
              <div className="w-8 flex justify-end relative">
                {warnings.length > 0 && (
-                 <button onClick={() => setShowWarnings(true)} className={`p-2 rounded-full bg-red-500/10 dark:bg-red-500/20 backdrop-blur-md shadow-sm text-red-500 border ${t.border} hover:bg-red-500/30 transition-all`}>
+                 <button onClick={() => { setShowWarnings(true); setSelectedNutrientForBreakdown(null); }} className="relative p-2 text-amber-500 bg-amber-500/10 dark:bg-amber-500/20 rounded-full hover:bg-amber-500/20 transition-all">
                    <AlertTriangle size={16} />
                  </button>
                )}
@@ -274,7 +282,7 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
                             <span className={`caption ${t.textMuted}`}>{n.label}</span>
                             <div className="flex items-center gap-2">
                                <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(pct)}% AKG</span>
-                               <span className={`caption ${t.textMain} tabular-nums`}>{Math.round(totals[n.key] || 0)}<span className={t.textMuted}>/{target}{n.unit || 'mg'}</span></span>
+                               <span className={`caption ${t.textMain} tabular-nums`}>{(totals[n.key] || 0) < 10 ? Number((totals[n.key] || 0).toFixed(2)) : Math.round(totals[n.key] || 0)}<span className={t.textMuted}>/{target}{n.unit || 'mg'}</span></span>
                             </div>
                           </div>
                           <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
@@ -330,7 +338,7 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
                      <span className={`caption ${t.textMuted}`}>Pantau defisit & surplus kalori harian</span>
                  </div>
              </div>
-             <div className="pt-0 pb-4 relative z-10">
+             <div className="pt-0 pb-4 relative z-10 no-swipe">
                  <NutritionChart
                      t={t} theme={theme} daysMap={daysMap} targets={targets}
                      lyfitYearData={lyfitToday === null && lyfitToday === undefined ? null : lyfitYearData} 
@@ -358,26 +366,90 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
         <TargetSettingsModal t={t} theme={theme} profile={profile} saveProfilePatch={saveProfilePatch} onClose={() => setShowTargetSettings(false)} />
       )}
 
+      {showBiometricModal && (
+        <BiometricSettingsModal t={t} theme={theme} profile={profile} saveProfilePatch={saveProfilePatch} logymUser={logymUser} onClose={() => setShowBiometricModal(false)} />
+      )}
+
       {showWarnings && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm no-swipe" onClick={() => setShowWarnings(false)}>
           <div
             className={`relative w-full sm:max-w-md rounded-[2rem] border ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shadow-[0_8px_32px_-10px_rgba(239,68,68,0.35)] ${theme === 'dark' ? 'bg-white/[0.06]' : 'bg-white/70'} backdrop-blur-2xl max-h-[88vh] flex flex-col overflow-hidden shadow-2xl`}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className={`flex items-center justify-center px-5 py-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'}`}>
-              <h2 className={`h3 text-red-500`}>Peringatan Nutrisi</h2>
-            </div>
-            <div className="p-5 overflow-y-auto space-y-3">
-              {warnings.map((w, i) => {
-                const s = w.level === 'danger' ? STATUS.danger : STATUS.warn;
+            {!selectedNutrientForBreakdown ? (
+              <>
+                <div className={`flex items-center justify-center px-5 py-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0`}>
+                  <h2 className={`h3 text-amber-500 flex items-center gap-2`}>
+                    <AlertTriangle size={20} />
+                    Perhatian Nutrisi
+                  </h2>
+                </div>
+                <div className="p-5 overflow-y-auto space-y-3 flex-1">
+                  {warnings.map((w, i) => {
+                    const isClickable = w.nutrient && w.nutrient !== 'diet' && w.nutrient !== 'allergy';
+                    const s = w.level === 'danger' ? STATUS.danger : STATUS.warn;
+                    return (
+                      <div 
+                        key={i} 
+                        onClick={() => isClickable ? setSelectedNutrientForBreakdown(w.nutrient) : null} 
+                        className={`flex flex-col gap-1 p-4 rounded-2xl border ${s.soft} ${s.border} ${isClickable ? 'cursor-pointer hover:opacity-80 active:scale-[0.98] transition-transform' : ''}`}
+                      >
+                        <div className="flex gap-3">
+                          <AlertTriangle size={18} className={`shrink-0 ${s.text} mt-0.5`} />
+                          <span className={`body-md font-semibold ${t.textMain}`}>{w.message}</span>
+                        </div>
+                        {isClickable && <span className="text-[11px] opacity-70 ml-8">Ketuk untuk melihat sumber makanan &rarr;</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              (() => {
+                const nut = NUTRIENTS.find(n => n.key === selectedNutrientForBreakdown);
+                const contributors = [];
+                if (today?.meals) {
+                  Object.values(today.meals).forEach(mealArr => {
+                    mealArr.forEach(item => {
+                      const amt = item.nutrition?.[selectedNutrientForBreakdown] || 0;
+                      if (amt > 0) {
+                        // Gabungkan porsi jika ada nama yang sama
+                        const existing = contributors.find(c => c.name === item.name);
+                        if (existing) {
+                          existing.amount += amt;
+                        } else {
+                          contributors.push({ name: item.name, amount: amt });
+                        }
+                      }
+                    });
+                  });
+                }
+                contributors.sort((a, b) => b.amount - a.amount);
+
                 return (
-                  <div key={i} className={`flex gap-3 p-4 rounded-2xl border ${s.soft} ${s.border}`}>
-                    <AlertTriangle size={18} className={`shrink-0 ${s.text} mt-0.5`} />
-                    <span className={`body-md font-semibold ${t.textMain}`}>{w.message}</span>
-                  </div>
+                  <>
+                    <div className={`flex items-center px-5 py-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0`}>
+                      <button onClick={() => setSelectedNutrientForBreakdown(null)} className={`p-1.5 rounded-full bg-black/5 dark:bg-white/5 ${t.textMuted} mr-2 hover:${t.textMain} transition-colors`}>
+                        <X size={16} />
+                      </button>
+                      <h2 className={`h3 ${t.textMain}`}>Sumber {nut?.label}</h2>
+                    </div>
+                    <div className="p-5 overflow-y-auto space-y-2 flex-1">
+                      {contributors.length > 0 ? contributors.map((c, i) => (
+                        <div key={i} className={`flex justify-between items-center p-3.5 rounded-xl border ${t.border} bg-black/5 dark:bg-white/5`}>
+                          <p className={`body-md font-bold ${t.textMain} truncate pr-2`}>{c.name}</p>
+                          <p className={`body-md font-black ${t.textAccent} shrink-0`}>
+                            {c.amount < 10 ? Number(c.amount.toFixed(2)) : Math.round(c.amount)}<span className="text-xs font-normal opacity-70 ml-0.5">{nut?.unit}</span>
+                          </p>
+                        </div>
+                      )) : (
+                        <p className={`body-sm ${t.textMuted} text-center py-6`}>Belum ada data sumber makanan untuk nutrisi ini.</p>
+                      )}
+                    </div>
+                  </>
                 );
-              })}
-            </div>
+              })()
+            )}
           </div>
         </div>
       )}
