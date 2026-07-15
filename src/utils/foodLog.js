@@ -13,7 +13,14 @@ const flDoc = (uid, docId) => doc(db, 'users', uid, 'food_logs', docId);
 
 // ---------- PROFIL LOMEAL (konsen, kuesioner, target, pengaturan) ----------
 export const subscribeLomealProfile = (uid, cb) =>
-  onSnapshot(flDoc(uid, 'profile'), (snap) => cb(snap.exists() ? snap.data() : null));
+  onSnapshot(flDoc(uid, 'profile'), (snap) => {
+    // Kalau snapshot dari cache lokal dan dokumen tidak ada, JANGAN langsung return null —
+    // ini bisa berarti cache baru saja dihapus (clear cache) dan data server belum sampai.
+    // Biarkan loading state di App.jsx tetap aktif (profile === undefined) sampai server membalas.
+    if (!snap.exists() && snap.metadata.fromCache) return;
+    cb(snap.exists() ? snap.data() : null);
+  });
+
 
 export const saveLomealProfile = (uid, data) =>
   setDoc(flDoc(uid, 'profile'), data, { merge: true });
