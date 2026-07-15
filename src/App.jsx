@@ -38,6 +38,7 @@ import FoodDbTab from './pages/FoodDbTab';
 import SocialHub from './pages/SocialHub';
 import SettingsPage from './pages/SettingsPage';
 import NotificationPanel from './components/NotificationPanel';
+import PwaUpdater from './components/PwaUpdater';
 import { createCommunityPost } from './utils/communityApi';
 
 const AppContent = ({ user, profile, logymUser, onLogout }) => {
@@ -460,6 +461,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       </Routes>
 
       <BottomNav t={t} activeTab={path} setActiveTab={setActiveTab} />
+
+      {/* Overlays / Modals */}
+      <PwaUpdater t={t} isDark={theme === 'dark'} />
 
       {socialOpen && (
         <SocialHub

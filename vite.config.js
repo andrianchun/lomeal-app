@@ -7,9 +7,8 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // autoUpdate: versi baru langsung aktif begitu online lagi, user tidak pernah
-      // nyangkut di build lama (dan tidak perlu prompt "reload?" yang gampang diabaikan).
-      registerType: 'autoUpdate',
+      // Ubah dari autoUpdate jadi prompt supaya bisa munculin notif update di dalam app
+      registerType: 'prompt',
       injectRegister: 'auto',
       manifest: {
         name: 'Lomeal Nutrition Tracker',
