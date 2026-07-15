@@ -111,7 +111,6 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
   // ---------- Evaluasi Mingguan (Gemini, HANYA manual trigger) ----------
   const runEvaluation = async () => {
     if (evalBusy) return;
-    if (!aiKey) { await showAlert('Masukkan Gemini API Key di Pengaturan untuk fitur evaluasi AI.'); return; }
     const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
     if (!quota.allowed) { await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
     setEvalBusy(true);

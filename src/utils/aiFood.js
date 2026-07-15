@@ -7,6 +7,8 @@
 // Semua request wajib lolos Satpam API (kuota 10/hari — dihitung di foodLog.js)
 // dan dipagari Prompt Injection Safety (menolak topik non-gizi).
 // ============================================================
+import { functions } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
 
 const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
 
@@ -50,22 +52,37 @@ async function callGeminiWithKey(apiKey, parts) {
   throw new Error(lastErr);
 }
 
-// apiKeyOrKeys: 1 string ATAU array string — kalau array, dicoba satu-satu (rotation)
-// kalau kunci pertama gagal/kena rate-limit. "OUT_OF_SCOPE" TIDAK memicu rotation
-// (itu respons valid dari AI, ganti kunci tidak akan mengubah hasilnya).
 async function callGemini(apiKeyOrKeys, parts) {
   const keys = (Array.isArray(apiKeyOrKeys) ? apiKeyOrKeys : [apiKeyOrKeys]).filter((k) => k && k.trim());
-  if (keys.length === 0) throw new Error('NO_API_KEY');
-  let lastErr = 'Unknown error';
-  for (const key of keys) {
+  if (keys.length > 0) {
+    let lastErr = 'Unknown error';
+    for (const key of keys) {
+      try {
+        return await callGeminiWithKey(key, parts);
+      } catch (err) {
+        if (err.message === 'OUT_OF_SCOPE') throw err;
+        lastErr = err.message;
+      }
+    }
+    throw new Error(lastErr);
+  } else {
+    const chatWithAI = httpsCallable(functions, 'chatWithAI');
     try {
-      return await callGeminiWithKey(key, parts);
+      const res = await chatWithAI({
+        messages: [{ role: 'user', content: parts }],
+        provider: 'google',
+        model: 'gemini-3.5-flash'
+      });
+      let text = res.data?.text || '{}';
+      text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+      const parsed = JSON.parse(text);
+      if (parsed.error === 'OUT_OF_SCOPE') throw new Error('OUT_OF_SCOPE');
+      return parsed;
     } catch (err) {
       if (err.message === 'OUT_OF_SCOPE') throw err;
-      lastErr = err.message;
+      throw new Error('Backend AI Error: ' + err.message);
     }
   }
-  throw new Error(lastErr);
 }
 
 // --- 1. Magic Prompt (teks natural → daftar makanan) ---
@@ -76,14 +93,14 @@ export const parseFoodText = (apiKey, text) =>
 export const analyzeFoodPhoto = (apiKey, base64Image, mimeType = 'image/jpeg') =>
   callGemini(apiKey, [
     { text: `${SAFETY_PREFIX}\n\nTUGAS: Identifikasi semua makanan/minuman pada foto piring ini, estimasi porsi (gram) dan gizinya. Prioritaskan masakan Indonesia.\n${FOOD_SCHEMA}` },
-    { inline_data: { mime_type: mimeType, data: base64Image } },
+    { inlineData: { mimeType: mimeType, data: base64Image } },
   ]);
 
 // --- 3. Smart Nutrition Fact Scanner (OCR label kemasan → 1 entri DB) ---
 export const scanNutritionLabel = (apiKey, base64Image, mimeType = 'image/jpeg') =>
   callGemini(apiKey, [
     { text: `${SAFETY_PREFIX}\n\nTUGAS: Baca tabel Informasi Nilai Gizi pada foto kemasan ini (OCR). Ekstrak nilai per takaran saji dan konversi ke PER 100 GRAM/ML.\nFormat balasan (JSON murni):\n{"name":"nama produk","servingSize":"takaran saji tertulis","servingGrams":number,"per100":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number,"satFat":number,"iron":number,"calcium":number,"purine":0}}\nGunakan null bila tidak tertulis, kecuali purine isi 0.` },
-    { inline_data: { mime_type: mimeType, data: base64Image } },
+    { inlineData: { mimeType: mimeType, data: base64Image } },
   ]);
 
 // --- 4. Konsultan Gemini: Evaluasi Mingguan (HANYA via tombol manual, Fase 4) ---

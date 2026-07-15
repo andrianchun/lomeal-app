@@ -188,10 +188,6 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
 
   // ---------- AI: Satpam + Magic Prompt ----------
   const guardAi = async () => {
-    if (!aiKey) {
-      await showAlert('Masukkan Gemini API Key dulu di Pengaturan untuk memakai fitur AI. Kamu tetap bisa input manual via tombol +');
-      return false;
-    }
     const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
     if (!quota.allowed) {
       await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT} request/hari). Gunakan input manual — besok kuota reset. 🙏`);

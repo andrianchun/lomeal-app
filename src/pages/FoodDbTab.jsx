@@ -105,7 +105,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (!aiKey) { await showAlert('Masukkan Gemini API Key dulu di Pengaturan untuk pakai Scan Label Gizi.'); return; }
+    const quota = await checkAndCountAiUsage(user.uid, todayYmd, 10);
+    if (!quota.allowed) { await showAlert('Batas harian scan label sudah habis.'); return; }
     setScanning(true);
     try {
       const { base64, mimeType } = await compressImageTo100KB(file);

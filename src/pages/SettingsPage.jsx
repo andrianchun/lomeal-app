@@ -11,7 +11,7 @@ import { getLang } from '../i18n';
 
 const FAQ_ITEMS_ID = [
   { q: 'Bagaimana cara sinkronisasi data antar HP dan laptop?', a: 'Cukup login pakai akun Google yang sama di semua perangkat. Data otomatis tersinkron lewat cloud dalam hitungan detik.' },
-  { q: 'Kenapa fitur AI (scan foto/Magic Prompt) tidak bisa dipakai?', a: 'Perlu API Key Gemini dulu — isi di tab Lanjutan bawah ini. Kalau kamu sudah pakai Logym dan sudah isi API key di sana, tinggal klik "Salin ke Lomeal", tidak perlu isi ulang.' },
+  { q: 'Kenapa saya tidak bisa pakai fitur AI (scan foto/Magic Prompt)?', a: 'Lomeal menggunakan kuota server bersama. Jika kuota server sedang habis, Anda bisa memasukkan Gemini API Key pribadi di tab Lanjutan di bawah untuk melewati batas harian tersebut.' },
   { q: 'Bagaimana cara menambah bahan makanan yang tidak ada di Database?', a: 'Buka tab Database, klik "+ Tambah Bahan", isi manual atau foto label gizi kemasan (AI akan baca otomatis).' },
   { q: 'Apa itu Smart Warning?', a: 'Peringatan otomatis (kuning/merah) di Dashboard kalau asupan natrium/gula/kolesterol/purin mendekati atau melewati batas harian. Berjalan offline, tanpa AI.' },
   { q: 'Bagaimana cara membuat resep sendiri?', a: 'Buka tab Resep, buat resep dari bahan-bahan di Database, lalu bisa dijadwalkan otomatis ke Meal Prep di Kalender.' },
@@ -24,7 +24,7 @@ const FAQ_ITEMS_ID = [
 
 const FAQ_ITEMS_EN = [
   { q: 'How do I sync data across my phone and laptop?', a: 'Just log in with the same Google account on all devices. Data syncs automatically via the cloud within seconds.' },
-  { q: "Why can't I use the AI features (photo scan/Magic Prompt)?", a: 'You need a Gemini API Key first — set it up in the Advanced tab below. If you already use Logym and have a key there, just click "Copy to Lomeal" — no need to re-enter it.' },
+  { q: "Why can't I use the AI features (photo scan/Magic Prompt)?", a: 'Lomeal uses a shared backend quota. If the quota is exhausted, you can put your own personal Gemini API Key in the Advanced tab below to bypass the limit.' },
   { q: 'How do I add a food item not in the Database?', a: 'Open the Database tab, tap "+ Add Ingredient", fill it in manually or photograph a packaged nutrition label (AI reads it automatically).' },
   { q: 'What is Smart Warning?', a: 'Automatic warnings (yellow/red) on the Dashboard when sodium/sugar/cholesterol/purine intake nears or exceeds the daily limit. Runs offline, no AI needed.' },
   { q: 'How do I create my own recipe?', a: 'Open the Recipes tab, build a recipe from Database ingredients, then optionally schedule it to Meal Prep on the Calendar.' },
