@@ -28,7 +28,10 @@ export const saveLomealProfile = (uid, data) =>
 // ---------- LOG HARIAN (1 dokumen per bulan: log_YYYY-MM) ----------
 // days: { 'YYYY-MM-DD': { meals: { sessionId: [entry,...] }, water: ml } }
 export const subscribeMonth = (uid, monthKey, cb) =>
-  onSnapshot(flDoc(uid, `log_${monthKey}`), (snap) => cb(snap.exists() ? (snap.data().days || {}) : {}));
+  onSnapshot(flDoc(uid, `log_${monthKey}`), (snap) => {
+    if (!snap.exists() && snap.metadata.fromCache) return;
+    cb(snap.exists() ? (snap.data().days || {}) : {});
+  });
 
 export const getMonth = async (uid, monthKey) => {
   const snap = await getDoc(flDoc(uid, `log_${monthKey}`));
@@ -54,19 +57,28 @@ export const makeEntry = (data) => ({
 
 // ---------- RESEP & CUSTOM FOODS (dokumen tunggal berisi array) ----------
 export const subscribeRecipes = (uid, cb) =>
-  onSnapshot(flDoc(uid, 'recipes'), (snap) => cb(snap.exists() ? (snap.data().items || []) : []));
+  onSnapshot(flDoc(uid, 'recipes'), (snap) => {
+    if (!snap.exists() && snap.metadata.fromCache) return;
+    cb(snap.exists() ? (snap.data().items || []) : []);
+  });
 
 export const saveRecipes = (uid, items) =>
   setDoc(flDoc(uid, 'recipes'), { items }, { merge: false });
 
 export const subscribeMealPreps = (uid, cb) =>
-  onSnapshot(flDoc(uid, 'meal_preps'), (snap) => cb(snap.exists() ? (snap.data().items || []) : []));
+  onSnapshot(flDoc(uid, 'meal_preps'), (snap) => {
+    if (!snap.exists() && snap.metadata.fromCache) return;
+    cb(snap.exists() ? (snap.data().items || []) : []);
+  });
 
 export const saveMealPreps = (uid, items) =>
   setDoc(flDoc(uid, 'meal_preps'), { items }, { merge: false });
 
 export const subscribeCustomFoods = (uid, cb) =>
-  onSnapshot(flDoc(uid, 'custom_foods'), (snap) => cb(snap.exists() ? (snap.data().items || []) : []));
+  onSnapshot(flDoc(uid, 'custom_foods'), (snap) => {
+    if (!snap.exists() && snap.metadata.fromCache) return;
+    cb(snap.exists() ? (snap.data().items || []) : []);
+  });
 
 export const saveCustomFoods = (uid, items) =>
   setDoc(flDoc(uid, 'custom_foods'), { items }, { merge: false });

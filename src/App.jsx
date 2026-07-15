@@ -571,6 +571,16 @@ function App() {
     return subscribeLomealProfile(authState.user.uid, setProfile);
   }, [authState.user]);
 
+  // Kalau snapshot server nggak kunjung datang (jaringan putus abis login), jangan
+  // nyangkut di "Memuat…" selamanya — kasih tombol coba lagi setelah 10 detik.
+  const [profileStuck, setProfileStuck] = useState(false);
+  useEffect(() => {
+    setProfileStuck(false);
+    if (!authState.user || profile !== undefined) return undefined;
+    const timer = setTimeout(() => setProfileStuck(true), 10000);
+    return () => clearTimeout(timer);
+  }, [authState.user, profile]);
+
   const handleOnboardingComplete = async (profileData) => {
     await saveLomealProfile(authState.user.uid, profileData);
   };
@@ -579,10 +589,22 @@ function App() {
   if (authState.loading || isCheckingProfile) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center text-sm"
+        className="min-h-screen flex flex-col items-center justify-center gap-3 text-sm px-6 text-center"
         style={{ background: '#070a08', color: '#fff' }}
       >
-        Memuat…
+        {profileStuck ? (
+          <>
+            <p>Gagal memuat data. Periksa koneksi internet kamu.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 rounded-xl bg-emerald-500 font-bold active:scale-95 transition-all"
+            >
+              Coba Lagi
+            </button>
+          </>
+        ) : (
+          'Memuat…'
+        )}
       </div>
     );
   }

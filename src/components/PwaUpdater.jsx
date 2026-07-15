@@ -8,11 +8,13 @@ const PwaUpdater = ({ t, isDark }) => {
     updateServiceWorker,
   } = useRegisterSW({
     onRegistered(r) {
-      // Setup periodic check every hour
       if (r) {
-        setInterval(() => {
-          r.update();
-        }, 60 * 60 * 1000);
+        // Cek update tiap jam sebagai jaring pengaman...
+        setInterval(() => { r.update(); }, 60 * 60 * 1000);
+        // ...tapi di HP tab jarang idle 1 jam penuh, jadi cek juga tiap app di-resume ke foreground.
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') r.update();
+        });
       }
     },
     onRegisterError(error) {
@@ -25,11 +27,19 @@ const PwaUpdater = ({ t, isDark }) => {
   return (
     <div className={`fixed bottom-20 left-1/2 -translate-x-1/2 z-[9999] w-[90%] max-w-sm p-4 rounded-2xl border shadow-2xl animate-in slide-in-from-bottom-10 fade-in duration-500 ${isDark ? 'bg-[#12141c] border-white/10' : 'bg-white border-black/10'}`}>
       <div className="flex items-start gap-3">
-        <div className={`p-2 rounded-full shrink-0 ${isDark ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
-          <RefreshCw size={24} className="animate-spin-slow" />
+        <div className={`p-2 rounded-full shrink-0 mt-0.5 ${isDark ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+          <RefreshCw size={20} />
         </div>
-        <div className="flex-1">
-          <p className={`font-black text-sm mb-1 ${isDark ? 'text-white' : 'text-black'}`}>Pembaruan Tersedia</p>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <p className={`font-black text-sm ${isDark ? 'text-white' : 'text-black'}`}>Pembaruan Tersedia</p>
+            <button
+              onClick={() => setNeedRefresh(false)}
+              className={`p-1 rounded-full shrink-0 ${isDark ? 'text-white/40 hover:text-white' : 'text-black/40 hover:text-black'}`}
+            >
+              <X size={14} />
+            </button>
+          </div>
           <p className={`text-xs ${isDark ? 'text-white/70' : 'text-black/60'} leading-snug mb-3`}>
             Versi baru Lomeal sudah siap. Muat ulang sekarang untuk menggunakan fitur terbaru!
           </p>
@@ -48,12 +58,10 @@ const PwaUpdater = ({ t, isDark }) => {
             </button>
           </div>
         </div>
-        <button onClick={() => setNeedRefresh(false)} className={`absolute top-2 right-2 p-1 rounded-full ${isDark ? 'text-white/40 hover:text-white' : 'text-black/40 hover:text-black'}`}>
-          <X size={14} />
-        </button>
       </div>
     </div>
   );
+
 };
 
 export default PwaUpdater;
