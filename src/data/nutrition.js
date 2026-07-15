@@ -260,9 +260,12 @@ export const getSmartWarnings = (totals, targets, dietProfile, profile, lyfitTod
 export const computeDayTotals = (day, defaultEaten = true) => {
   let totals = { ...EMPTY_NUTRITION };
   if (!day?.meals) return totals;
-  Object.values(day.meals).forEach((entries) => {
+  const hidden = day?.hiddenSessions || [];
+  Object.entries(day.meals).forEach(([sessionId, entries]) => {
+    if (hidden.includes(sessionId)) return;
     (entries || []).forEach((e) => { 
-      const eaten = e.isEaten !== undefined ? e.isEaten : defaultEaten;
+      const isMealPrep = e.isMealPrep || e.source === 'recipe';
+      const eaten = e.isEaten !== undefined ? e.isEaten : (isMealPrep ? false : defaultEaten);
       if (eaten) {
         totals = addNutrition(totals, e.nutrition); 
       }

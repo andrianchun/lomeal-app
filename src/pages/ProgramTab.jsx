@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { ChefHat, Plus, Trash2, X, Search, CalendarPlus, Share2, Loader2, Pill, GlassWater, CupSoda, Coffee, Beaker, Syringe, Tablets, ShieldPlus } from 'lucide-react';
+import { ChefHat, Plus, Trash2, X, Search, CalendarPlus, Share2, Loader2, Pill, GlassWater, CupSoda, Coffee, Beaker, Syringe, Tablets, ShieldPlus, Bot, ClipboardList, Sparkles } from 'lucide-react';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
-import { EMPTY_NUTRITION, addNutrition, scaleNutrition } from '../data/nutrition';
+import { EMPTY_NUTRITION, addNutrition, scaleNutrition, DIET_PROFILES } from '../data/nutrition';
 import { MEAL_SESSIONS, getLocalYMD, DAY_NAMES_ID } from '../data/constants';
 import { makeEntry } from '../utils/foodLog';
+import { generateDietRecipe } from '../utils/aiFood';
 import SupplementBuilder from '../components/SupplementBuilder';
 import MedicineBuilder from '../components/MedicineBuilder';
+import DietQuestionnaireModal from '../components/DietQuestionnaireModal';
 
 const ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus };
 const COLORS = [
@@ -18,14 +20,17 @@ const COLORS = [
 /**
  * TAB 4: RENCANA & PROGRAM
  */
-const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showConfirm, profile, saveProfilePatch }) => {
-  const [activeTab, setActiveTab] = useState('resep'); // 'resep', 'suplemen', 'obat'
+const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showConfirm, profile, saveProfilePatch, aiKey }) => {
+  const [activeTab, setActiveTab] = useState('resep'); // 'resep', 'suplemen_obat'
   const [editing, setEditing] = useState(null);  // draft resep di builder
   const [editingSupplement, setEditingSupplement] = useState(null);
   const [editingMedicine, setEditingMedicine] = useState(null);
   const [assigning, setAssigning] = useState(null); // resep yang sedang dijadwalkan
   const [ingSearch, setIngSearch] = useState('');
   const [shareBusy, setShareBusy] = useState(null);
+  const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+
+  const isDark = theme === 'dark';
 
   const drinkTemplates = profile?.drinkTemplates || [];
   const medicines = profile?.medicines || [];
@@ -294,13 +299,145 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
   );
 
   // ============ LIST VIEW ============
+  
+  const currentDiet = DIET_PROFILES.find(d => d.id === profile?.dietProfile) || DIET_PROFILES[0];
+  
+  const generateOfflineRecipes = async () => {
+    const dietName = currentDiet.label;
+    if (!(await showConfirm(`Generate resep (Offline) untuk program diet "${dietName}"?`))) return;
+    
+    const aiRecipe = {
+      id: `r_ai_${Date.now()}`,
+      name: `Menu Offline: ${dietName} Praktis`,
+      portions: 2,
+      ingredients: [
+          { foodId: 'dada_ayam_mentah', name: 'Dada Ayam Mentah', grams: 200, nutrition: { kcal: 240, protein: 46, carbs: 0, fat: 5, sodium: 90, sugar: 0, cholesterol: 146 } },
+          { foodId: 'minyak_zaitun', name: 'Minyak Zaitun', grams: 15, nutrition: { kcal: 133, protein: 0, carbs: 0, fat: 15, sodium: 0, sugar: 0, cholesterol: 0 } }
+      ],
+      note: 'Resep hasil racikan offline berdasarkan profil.',
+      createdAt: new Date().toISOString(),
+      totalGrams: 215,
+      total: { kcal: 373, protein: 46, carbs: 0, fat: 20, sodium: 90, sugar: 0, cholesterol: 146 },
+      perPortion: { kcal: 186.5, protein: 23, carbs: 0, fat: 10, sodium: 45, sugar: 0, cholesterol: 73 }
+    };
+    saveRecipesFn([aiRecipe, ...recipes]);
+    showAlert(`1 Resep Offline berhasil ditambahkan ke Buku Resep! 🍲`);
+  };
+
+  const generateTrueAIRecipes = async () => {
+    const dietName = currentDiet.label;
+    if (!(await showConfirm(`Panggil AI sesungguhnya untuk meracik resep khusus diet "${dietName}"? Pastikan koneksi internet stabil.`))) return;
+    
+    showAlert(`Memanggil AI untuk memformulasikan resep ${dietName}... 🤖`);
+    try {
+        const generated = await generateDietRecipe(aiKey, {
+            dietProfile: currentDiet.id,
+            dietName: currentDiet.label,
+            medicalHistory: profile?.medicalHistory || [],
+            allergies: profile?.allergies || ''
+        });
+        
+        const aiRecipe = {
+          id: `r_ai_${Date.now()}`,
+          name: generated.name || `Resep AI ${dietName}`,
+          portions: generated.portions || 2,
+          ingredients: generated.ingredients || [],
+          note: generated.note || 'Resep otomatis hasil generate AI.',
+          createdAt: new Date().toISOString(),
+        };
+
+        // Recalculate totals to be safe
+        let tGrams = 0;
+        let tNut = { ...EMPTY_NUTRITION };
+        aiRecipe.ingredients.forEach(ing => {
+            tGrams += Number(ing.grams || 0);
+            tNut = addNutrition(tNut, ing.nutrition || {});
+        });
+        aiRecipe.totalGrams = tGrams;
+        aiRecipe.total = tNut;
+        aiRecipe.perPortion = scaleNutrition(tNut, 1 / aiRecipe.portions);
+
+        saveRecipesFn([aiRecipe, ...recipes]);
+        showAlert(`Resep AI "${aiRecipe.name}" berhasil dibuat! 🍲`);
+    } catch (err) {
+        if (err.message === 'RATE_LIMIT_EXCEEDED') {
+            showAlert('Limit AI harian habis! Gunakan Generate Offline atau masukkan API Key pribadimu di Pengaturan.');
+        } else {
+            showAlert(`Gagal generate AI: ${err.message}`);
+        }
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto px-4 pt-4 pb-32">
+      
+      {/* KARTU PROGRAM DIET (Logym Style) */}
+      <div 
+        className={`w-full rounded-[2rem] border-0 shadow-[0_8px_30px_rgb(0,0,0,0.12)] overflow-hidden transition-all flex flex-col relative min-h-[340px] sm:min-h-[360px] mb-6`}
+      >
+        {/* --- Background Image Layer --- */}
+        <div 
+          className={`absolute inset-0 z-0 pointer-events-none transition-all duration-700 opacity-100`}
+          style={{
+            backgroundImage: `url('/bg-program.webp')`,
+            backgroundSize: '150%',
+            backgroundPosition: 'center 20%',
+            backgroundRepeat: 'no-repeat',
+          }}
+        />
+        <div className={`absolute inset-0 z-0 bg-gradient-to-t ${isDark ? 'from-[#05070d]/90 via-[#05070d]/50 to-transparent' : 'from-black/80 via-black/40 to-transparent'} pointer-events-none`} />
+        {/* ------------------------------ */}
+        
+        <div className="mt-auto relative z-10 w-full flex flex-col">
+          {/* TEXT HEADER (NO BLUR) */}
+          <div className="w-full sm:w-3/4 p-5 pb-4 sm:p-6 sm:pb-5">
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className={`font-black text-3xl text-white drop-shadow-lg`}>Program Diet</h3>
+            </div>
+            <p className={`text-sm font-medium text-white/90 drop-shadow-md leading-relaxed`}>
+              Jawab beberapa pertanyaan untuk mendapatkan program diet dan resep terbaik yang dipersonalisasi untuk Anda.
+            </p>
+          </div>
+
+          {/* GLASSMORPHISM BUTTONS OVERLAY */}
+          <div className={`w-full ${isDark ? 'bg-black/10 backdrop-blur-sm border-t border-white/10' : 'bg-black/5 backdrop-blur-sm border-t border-white/20'} p-5 pt-4 sm:p-6 sm:pt-4 transition-all duration-300`}>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={() => setShowQuestionnaire(true)}
+                className={`w-full py-3.5 rounded-[14px] font-black text-black bg-white shadow-[0_0_20px_rgba(255,255,255,0.3)] active:scale-95 transition-all flex items-center justify-center text-sm`}
+              >
+                Coach Lomy
+              </button>
+              <button 
+                onClick={() => newRecipe()}
+                className={`w-full py-3.5 rounded-[14px] font-bold text-white transition-all active:scale-95 flex items-center justify-center text-sm bg-white/10 hover:bg-white/20 border border-white/20 shadow-sm`}
+              >
+                Resep Custom
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showQuestionnaire && (
+        <DietQuestionnaireModal 
+          t={t} theme={theme} profile={profile} 
+          onClose={() => setShowQuestionnaire(false)}
+          onSave={async (newProfileData, showAlertMsg = true) => {
+              await saveProfilePatch(newProfileData);
+              if (showAlertMsg) {
+                  showAlert('Profil Medis & Target Diet berhasil diperbarui! ✅');
+              }
+          }}
+          generateOfflineRecipes={generateOfflineRecipes}
+          generateTrueAIRecipes={generateTrueAIRecipes}
+        />
+      )}
+
       <div className={`flex items-center gap-1.5 mb-5 p-1.5 rounded-2xl ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'}`}>
         {[
-          { id: 'resep', label: 'Meal Prep' },
-          { id: 'suplemen', label: 'Suplemen' },
-          { id: 'obat', label: 'Obat' },
+          { id: 'resep', label: 'Buku Resep' },
+          { id: 'suplemen_obat', label: 'Suplemen & Obat' },
         ].map(tb => (
           <button key={tb.id} onClick={() => setActiveTab(tb.id)}
             className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === tb.id ? `${t.bgCard} shadow-sm text-emerald-500` : t.textMuted}`}>
@@ -396,86 +533,87 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
       </>
       )}
 
-      {activeTab === 'suplemen' && (
-        <>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className={`h1 ${t.textMain}`}>Suplemen & Minuman</h1>
-              <p className={`body-md font-medium ${t.textMuted}`}>Template kustom untuk Rak Minuman.</p>
+      {activeTab === 'suplemen_obat' && (
+        <div className="space-y-10">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className={`h1 ${t.textMain}`}>Suplemen & Minuman</h1>
+                <p className={`body-md font-medium ${t.textMuted}`}>Template kustom untuk Rak Minuman.</p>
+              </div>
+              <button onClick={() => setEditingSupplement({ id: `ds_${Date.now()}`, name: '', icon: 'CupSoda', color: 'sky', ingredients: [], nutrition: { ...EMPTY_NUTRITION } })} 
+                      className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
             </div>
-            <button onClick={() => setEditingSupplement({ id: `ds_${Date.now()}`, name: '', icon: 'CupSoda', color: 'sky', ingredients: [], nutrition: { ...EMPTY_NUTRITION } })} 
-                    className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
+
+            {drinkTemplates.length === 0 && (
+              <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
+                <CupSoda size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
+                <p className={`body-md ${t.textMuted}`}>Belum ada suplemen kustom. Klik + untuk membuat minuman pertamamu.</p>
+              </div>
+            )}
+
+            <div className="space-y-2.5">
+              {drinkTemplates.map(r => {
+                const IconComp = ICONS[r.icon] || CupSoda;
+                const bgClass = COLORS.find(c => c.id === r.color)?.bg || 'bg-zinc-500';
+                return (
+                  <div key={r.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise flex items-center gap-4`}>
+                    <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-white ${bgClass}`}>
+                      <IconComp size={24} />
+                    </div>
+                    <div className="flex-1">
+                      <p className={`h2 ${t.textMain}`}>{r.name}</p>
+                      <p className={`caption mt-0.5 ${t.textMuted}`}>{Math.round(r.nutrition?.kcal || 0)} kkal · {Math.round(r.nutrition?.protein || 0)}g P</p>
+                    </div>
+                    <button onClick={async () => {
+                      if (await showConfirm(`Hapus minuman "${r.name}"?`)) saveProfilePatch({ drinkTemplates: drinkTemplates.filter(x => x.id !== r.id) });
+                    }} className="p-2 text-red-400"><Trash2 size={16} /></button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          {drinkTemplates.length === 0 && (
-            <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
-              <CupSoda size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
-              <p className={`body-md ${t.textMuted}`}>Belum ada suplemen kustom. Klik + untuk membuat minuman pertamamu (misal: Jus Dada Ayam).</p>
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className={`h1 ${t.textMain}`}>Jadwal Obat</h1>
+                <p className={`body-md font-medium ${t.textMuted}`}>Daftar pengobatan rutin harian.</p>
+              </div>
+              <button onClick={() => setEditingMedicine({ id: `med_${Date.now()}`, name: '', icon: 'Pill', color: 'rose', signa: '', note: '' })} 
+                      className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
             </div>
-          )}
 
-          <div className="space-y-2.5">
-            {drinkTemplates.map(r => {
-              const IconComp = ICONS[r.icon] || CupSoda;
-              const bgClass = COLORS.find(c => c.id === r.color)?.bg || 'bg-zinc-500';
-              return (
-                <div key={r.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise flex items-center gap-4`}>
-                  <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-white ${bgClass}`}>
-                    <IconComp size={24} />
-                  </div>
-                  <div className="flex-1">
-                    <p className={`h2 ${t.textMain}`}>{r.name}</p>
-                    <p className={`caption mt-0.5 ${t.textMuted}`}>{Math.round(r.nutrition?.kcal || 0)} kkal · {Math.round(r.nutrition?.protein || 0)}g P</p>
-                  </div>
-                  <button onClick={async () => {
-                    if (await showConfirm(`Hapus minuman "${r.name}"?`)) saveProfilePatch({ drinkTemplates: drinkTemplates.filter(x => x.id !== r.id) });
-                  }} className="p-2 text-red-400"><Trash2 size={16} /></button>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
+            {medicines.length === 0 && (
+              <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
+                <Pill size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
+                <p className={`body-md ${t.textMuted}`}>Belum ada resep obat. Klik + untuk membuat jadwal obat pertamamu.</p>
+              </div>
+            )}
 
-      {activeTab === 'obat' && (
-        <>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className={`h1 ${t.textMain}`}>Jadwal Obat</h1>
-              <p className={`body-md font-medium ${t.textMuted}`}>Daftar pengobatan rutin harian.</p>
+            <div className="space-y-2.5">
+              {medicines.map(m => {
+                const IconComp = ICONS[m.icon] || Pill;
+                const bgClass = COLORS.find(c => c.id === m.color)?.bg || 'bg-rose-500';
+                return (
+                  <div key={m.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise flex items-center gap-4`}>
+                    <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-white ${bgClass}`}>
+                      <IconComp size={24} />
+                    </div>
+                    <div className="flex-1">
+                      <p className={`h2 ${t.textMain}`}>{m.name}</p>
+                      <p className={`caption font-medium mt-0.5 text-rose-500`}>{m.signa}</p>
+                      {m.note && <p className={`caption mt-0.5 ${t.textMuted}`}>{m.note}</p>}
+                    </div>
+                    <button onClick={async () => {
+                      if (await showConfirm(`Hapus obat "${m.name}"?`)) saveProfilePatch({ medicines: medicines.filter(x => x.id !== m.id) });
+                    }} className="p-2 text-red-400"><Trash2 size={16} /></button>
+                  </div>
+                );
+              })}
             </div>
-            <button onClick={() => setEditingMedicine({ id: `med_${Date.now()}`, name: '', icon: 'Pill', color: 'rose', signa: '', note: '' })} 
-                    className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
           </div>
-
-          {medicines.length === 0 && (
-            <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
-              <Pill size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
-              <p className={`body-md ${t.textMuted}`}>Tidak ada jadwal obat. Tambahkan obat rutin jika ada.</p>
-            </div>
-          )}
-
-          <div className="space-y-2.5">
-            {medicines.map(r => {
-              const IconComp = ICONS[r.icon] || Pill;
-              const bgClass = COLORS.find(c => c.id === r.color)?.bg || 'bg-zinc-500';
-              return (
-                <div key={r.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise flex items-center gap-4`}>
-                  <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-white ${bgClass}`}>
-                    <IconComp size={24} />
-                  </div>
-                  <div className="flex-1">
-                    <p className={`h2 ${t.textMain}`}>{r.name}</p>
-                    <p className={`caption mt-0.5 ${t.textMuted}`}>Signa: <span className="font-bold text-white">{r.signa}</span> {r.note && `(${r.note})`}</p>
-                  </div>
-                  <button onClick={async () => {
-                    if (await showConfirm(`Hapus obat "${r.name}"?`)) saveProfilePatch({ medicines: medicines.filter(x => x.id !== r.id) });
-                  }} className="p-2 text-red-400"><Trash2 size={16} /></button>
-                </div>
-              );
-            })}
-          </div>
-        </>
+        </div>
       )}
 
       {/* ===== MEAL PREP ASSIGNER MODAL ===== */}

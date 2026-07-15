@@ -82,7 +82,11 @@ export const extractLyfitDay = (yearDays, ymd) => {
     floorKcal: Number(bio.activityCaloriesFloor) || 0,
     steps: Number(bio.steps) || 0,
     weight: Number(bio.weight) || null,
-    workoutCount: completed.length,
+    workoutCount: completed.reduce((sum, w) => {
+        if (w.exercises && Array.isArray(w.exercises)) return sum + w.exercises.length;
+        if (w.log && typeof w.log === 'object') return sum + Object.keys(w.log).length;
+        return sum + 1;
+    }, 0),
     workoutNames: completed.map(w => w.programName).filter(Boolean),
     // Simetris sama burnedKcal: kalau user isi manual "Kalori Makanan" langsung di Logym
     // (bukan lewat Lomeal), Lomeal ikut baca angka itu buat ring/remaining — murni override

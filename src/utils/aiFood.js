@@ -112,6 +112,15 @@ export const generateWeeklyEvaluation = async (apiKey, weekSummary) => {
   return res.evaluation || '';
 };
 
+// --- 5. Generate Diet Recipe (AI cerdas berdasarkan kuesioner) ---
+export const generateDietRecipe = async (apiKey, profileInfo) => {
+  return await callGemini(apiKey, [{ text: `${SAFETY_PREFIX}\n\nTUGAS: Buatkan 1 resep masakan Nusantara sehat, praktis (10-20 menit) yang sesuai dengan target diet berikut. Pastikan bahan mudah dicari di Indonesia.
+Profil: ${JSON.stringify(profileInfo)}
+Format balasan (JSON murni):
+{"name":"nama resep","portions":2,"ingredients":[{"name":"nama bahan","grams":number,"nutrition":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number}}],"note":"catatan singkat (1 kalimat) mengapa ini cocok"}
+Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang diberikan. Harus presisi.` }]);
+};
+
 // --- Kompresi foto on-device ke ≤100KB (blueprint Fase 5) ---
 export const compressImageTo100KB = (file) => new Promise((resolve, reject) => {
   const img = new Image();

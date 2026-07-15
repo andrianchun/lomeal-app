@@ -52,19 +52,10 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
   const today = daysMap[todayYmd];
   const totals = useMemo(() => computeDayTotals(today), [today]);
   const bmrFloor = targets?.bmr || 0;
-  const burnedTotal = Math.max(bmrFloor, lyfitToday?.burnedKcal || 0);
-
-  // Koreksi manual "Dibakar" — buat user yang nyatet olahraga di app lain (bukan Logym).
-  // Nulis langsung ke bioData.activityCalories Logym (ber-flag manual), bukan disimpan lokal.
-  const [editingBurn, setEditingBurn] = useState(false);
-  const [burnInput, setBurnInput] = useState('');
-  const handleSaveBurnOverride = async () => {
-    let val = Number(burnInput);
-    setEditingBurn(false);
-    if (!Number.isFinite(val)) return;
-    if (val < bmrFloor) val = bmrFloor;
-    await pushActivityOverrideToLogym(logymUser.uid, todayYmd, val);
-  };
+  const manualBurn = profile?.settings?.manualBurnKcal || 0;
+  // FIX SINKRONISASI: Jika ada Logym, percaya 100% pada data dari Logym (karena Logym 
+  // sudah hitung BMR dan lantai minimumnya sendiri). Jika tidak, pakai manualBurn atau bmrFloor.
+  const burnedTotal = logymUser ? (lyfitToday?.burnedKcal || bmrFloor) : Math.max(bmrFloor, manualBurn);
 
   // Kalori Dimakan selalu ditarik dari "Tab Catat" (totals.kcal dari rekam makanan lokal Lomeal).
   const displayKcal = totals.kcal;
@@ -85,8 +76,39 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
   const remaining = Math.round(allowance - displayKcal);
   const ringProgress = allowance > 0 ? Math.min(1, displayKcal / allowance) : 0;
   const balance = getEnergyBalance(displayKcal, targets.tdee || targets.kcal || 0, burnedTotal);
-  const ringColor = remaining < 0 ? STATUS.danger.hex : ringProgress >= 0.85 ? STATUS.warn.hex : STATUS.ok.hex;
-
+  const isBulking = programDelta > 0;
+  let ringColor;
+  let remainingText;
+  
+  if (isBulking) {
+    if (remaining < 0) {
+      ringColor = STATUS.ok.hex;
+      remainingText = 'kkal lebih';
+    } else if (remaining === 0) {
+      ringColor = STATUS.ok.hex;
+      remainingText = 'pas target';
+    } else if (ringProgress >= 0.85) {
+      ringColor = STATUS.warn.hex;
+      remainingText = 'kkal lagi';
+    } else {
+      ringColor = STATUS.danger.hex;
+      remainingText = 'kkal lagi';
+    }
+  } else {
+    if (remaining < 0) {
+      ringColor = STATUS.danger.hex;
+      remainingText = 'kkal lebih';
+    } else if (remaining === 0) {
+      ringColor = STATUS.ok.hex;
+      remainingText = 'pas target';
+    } else if (ringProgress >= 0.85) {
+      ringColor = STATUS.warn.hex;
+      remainingText = 'kkal tersisa';
+    } else {
+      ringColor = STATUS.ok.hex;
+      remainingText = 'kkal tersisa';
+    }
+  }
   const warnings = useMemo(() => getSmartWarnings(totals, targets, dietProfile), [totals, targets, dietProfile]);
 
 
@@ -145,29 +167,29 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
         {/* Coach: di ATAS latar kartu (gak keblur kaca) — ring di layer konten (z-20) yang nutupin
             sebagian kalau overlap, pola sama kayak ring SCORE Komposisi Tubuh Logym. Digeser dikit ke kiri (right-2) agar tidak menutupi tombol biometrik */}
         <div
-          className="absolute right-0 -top-6 w-72 h-[22rem] z-10 pointer-events-none overflow-hidden"
+          className="absolute left-[-1rem] -top-6 w-72 h-[22rem] z-10 pointer-events-none overflow-hidden"
           style={{
             maskImage: 'linear-gradient(to bottom, black 70%, transparent 95%)',
             WebkitMaskImage: 'linear-gradient(to bottom, black 70%, transparent 95%)',
           }}
         >
-          <img src="/bg-dashboard.png" alt="" className={`w-full h-full object-cover object-top origin-top transition-transform duration-500 ease-out ${isChartExpanded ? 'scale-[1.35]' : 'scale-110'}`} />
+          <img src="/bg-dashboard.png" alt="" className={`w-full h-full object-cover object-top origin-top transition-transform duration-500 ease-out ${isChartExpanded ? 'scale-[1.45]' : 'scale-[1.25]'}`} />
         </div>
 
         <div className="relative z-20 p-5">
-          <div className="absolute top-8 right-5 z-30 flex items-center gap-2">
-            <button onClick={() => setShowBiometricModal(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`} aria-label="Profil Biometrik">
-              <Scale size={15} />
-            </button>
+          <div className="absolute top-5 right-5 z-30 flex items-center gap-2">
             <button onClick={() => setShowTargetSettings(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`} aria-label="Target & preferensi">
               <Settings size={15} />
             </button>
+            <button onClick={() => setShowBiometricModal(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`} aria-label="Profil Biometrik">
+              <Pencil size={15} />
+            </button>
           </div>
 
-          <div className="flex flex-col items-start gap-4 mt-6">
+          <div className="flex flex-col items-end gap-4 mt-10">
             <RingChart size={148} stroke={12} progress={ringProgress} color={ringColor} glass>
               <span className={`text-3xl font-black tabular-nums ${t.textMain}`}>{Math.abs(remaining).toLocaleString('id-ID')}</span>
-              <span className={`caption ${t.textMuted}`}>{remaining >= 0 ? 'kkal tersisa' : 'kkal lebih'}</span>
+              <span className={`caption ${t.textMuted}`}>{remainingText}</span>
             </RingChart>
 
             {/* Kalori Dimakan & Dibakar Highlight */}
@@ -177,7 +199,10 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
                 <div className="flex flex-col items-start w-[48%]">
                   <p className={`h3 ${t.textMuted}`}>Kalori Dimakan</p>
                   <p className={`text-xl font-black tabular-nums ${t.textAccent} mt-0.5`}>{Math.round(displayKcal).toLocaleString('id-ID')}</p>
-                  <p className={`caption ${t.textMuted} mt-0.5`}>Lomeal: {today?.meals ? Object.keys(today.meals).filter(k => ['breakfast', 'lunch', 'dinner'].includes(k) && today.meals[k].length > 0).length : 0} sesi makan</p>
+                  <div className={`caption ${t.textMuted} mt-0.5 flex items-center gap-1.5`}>
+                    <span className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-500 text-[8px] uppercase font-bold tracking-wider">LOMEAL</span>
+                    {today?.meals ? Object.values(today.meals).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0) : 0} konsumsi
+                  </div>
                 </div>
 
                 {/* Garis Pemisah Tengah */}
@@ -185,31 +210,16 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
 
                 {/* Kanan: Kalori Dibakar */}
                 <div className="flex flex-col items-end w-[48%] text-right">
-                  <div className="flex items-center gap-1.5">
-                    <p className={`h3 ${t.textMuted}`}>Kalori Dibakar</p>
-                    {logymUser && !editingBurn && (
-                      <button onClick={() => { setBurnInput(String(burnedTotal || '')); setEditingBurn(true); }} className={`${t.textMuted} hover:${t.textAccent} transition-colors`} aria-label="Koreksi kalori dibakar">
-                        <Pencil size={12} />
-                      </button>
-                    )}
-                    {logymUser && editingBurn && (
-                      <button onClick={handleSaveBurnOverride} className="text-green-500 hover:text-green-400 transition-colors" aria-label="Simpan kalori dibakar">
-                        <Check size={14} strokeWidth={3} />
-                      </button>
-                    )}
-                  </div>
-                  {editingBurn ? (
-                      <SwipeInput
-                        value={burnInput === '' ? '' : Number(burnInput)}
-                        onChange={(v) => setBurnInput(v === '' ? '' : String(v))}
-                        min={0} max={6000} step={50}
-                        autoFocus
-                        className="w-20 text-xl text-right font-black tabular-nums bg-transparent text-sky-400 outline-none border-none p-0 m-0 mt-0.5 leading-none"
-                      />
+                  <p className={`h3 ${t.textMuted}`}>Kalori Dibakar</p>
+                  <p className="text-xl font-black tabular-nums text-sky-400 mt-0.5">{Number(burnedTotal).toLocaleString('id-ID')}</p>
+                  {logymUser ? (
+                    <div className={`caption ${t.textMuted} mt-0.5 flex items-center justify-end gap-1.5`}>
+                      <span className="px-1 py-0.5 rounded bg-sky-500/20 text-sky-500 text-[8px] uppercase font-bold tracking-wider">LOGYM</span>
+                      {lyfitToday?.workoutCount || 0} latihan
+                    </div>
                   ) : (
-                    <p className="text-xl font-black tabular-nums text-sky-400 mt-0.5">{Number(burnedTotal).toLocaleString('id-ID')}</p>
+                    <p className={`caption ${t.textMuted} mt-0.5`}>Logym: {lyfitToday?.workoutCount || 0} latihan</p>
                   )}
-                  <p className={`caption ${t.textMuted} mt-0.5`}>Logym: {lyfitToday?.workoutCount || 0} sesi latihan</p>
                 </div>
               </div>
             </div>
@@ -299,46 +309,31 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
       </div>
 
       {/* ===== KARTU TREN KALORI ===== */}
-      <div className="relative flex flex-col w-full min-w-0 anim-rise" style={{ animationDelay: '90ms' }}>
-         <div className={`rounded-2xl border ${t.border} ${theme === 'dark' ? 'bg-black/40 backdrop-blur-md' : 'bg-white/45 backdrop-blur-md'} shadow-sm relative z-20`}>
-             {/* Latar Belakang Coach */}
-             <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden rounded-2xl">
-                <div 
-                  className={`absolute inset-0 transition-all duration-700 opacity-30 blur-[2px]`}
-                  style={{
-                    backgroundImage: `url('/bg-lomeal-coach.webp')`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'top center',
-                    backgroundRepeat: 'no-repeat',
-                  }}
-                />
-                <div 
-                  className={`absolute top-0 bottom-0 right-0 w-[50%] transition-all duration-700 opacity-70`}
-                  style={{
-                    WebkitMaskImage: 'linear-gradient(to left, black 60%, transparent 100%)',
-                    maskImage: 'linear-gradient(to left, black 60%, transparent 100%)'
-                  }}
-                >
-                  <div 
-                    className="absolute inset-0 transition-all duration-700"
-                    style={{
-                      backgroundImage: `url('/bg-lomeal-coach.webp')`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'top center',
-                      backgroundRepeat: 'no-repeat',
-                      transform: 'scale(1.15)',
-                    }}
-                  />
-                </div>
+      <div className="relative flex flex-col w-full min-w-0 anim-rise mt-6" style={{ animationDelay: '90ms' }}>
+         <div className="relative z-20">
+             {/* Latar Belakang Kartu Utama */}
+             <div className={`absolute inset-x-0 top-0 bottom-0 rounded-2xl border ${t.border} ${theme === 'dark' ? 'bg-black/40 backdrop-blur-md' : 'bg-white/45 backdrop-blur-md'} shadow-sm z-0`} />
+
+             {/* Coach Pop-out (seperti Logym Aktivitas Harian) */}
+             <div 
+               className="absolute right-[-1rem] -top-16 bottom-0 w-[65%] z-10 pointer-events-none overflow-hidden"
+               style={{
+                 maskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)',
+                 WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)'
+               }}
+             >
+                 <img src="/bg-lomeal-coach.webp" alt="" className={`w-full h-full object-cover object-top origin-top scale-[1.3] opacity-90`} />
              </div>
 
-             <div className="p-4 flex items-center justify-between relative z-10">
+             {/* Konten Kartu */}
+             <div className="relative z-20">
+             <div className="p-4 flex items-center justify-between">
                  <div className="flex flex-col">
                      <span className={`h2 ${t.textMain}`}>Tren Kalori</span>
                      <span className={`caption ${t.textMuted}`}>Pantau defisit & surplus kalori harian</span>
                  </div>
              </div>
-             <div className="pt-0 pb-4 relative z-10 no-swipe">
+             <div className="pt-0 pb-4 no-swipe">
                  <NutritionChart
                      t={t} theme={theme} daysMap={daysMap} targets={targets}
                      lyfitYearData={lyfitToday === null && lyfitToday === undefined ? null : lyfitYearData} 
@@ -346,21 +341,8 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
              </div>
          </div>
       </div>
-
-
-      {/* ===== AREA BAWAH: MINIMIZED LYFIT SYNC CARD ===== */}
-      <div className={`rounded-2xl border ${t.border} ${t.bgCardSoft} px-4 py-3 flex items-center gap-3 anim-rise`}>
-        <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 flex items-center justify-center shrink-0">
-          <Activity size={15} className="text-white" />
-        </span>
-        <p className={`body-md ${t.textMain} flex-1 truncate`}>
-          {lyfitToday
-            ? <>Aktivitas Lyfit: Bakar <span className={t.textAccent}>{lyfitToday.burnedKcal} kkal</span>
-                {lyfitToday.workoutCount > 0 && ` · ${lyfitToday.workoutCount} sesi latihan`}
-                {lyfitToday.weight ? ` · BB: ${lyfitToday.weight}kg` : ''}</>
-            : 'Belum ada aktivitas Lyfit hari ini'}
-        </p>
       </div>
+
 
       {showTargetSettings && (
         <TargetSettingsModal t={t} theme={theme} profile={profile} saveProfilePatch={saveProfilePatch} onClose={() => setShowTargetSettings(false)} />

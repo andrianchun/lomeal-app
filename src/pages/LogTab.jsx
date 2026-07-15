@@ -327,7 +327,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
     const entries = day.meals?.[session.id] || [];
     const eatenEntries = entries.filter(e => {
       const isMealPrep = e.isMealPrep || e.source === 'recipe';
-      return e.isEaten !== undefined ? e.isEaten : !isMealPrep;
+      return e.isEaten !== undefined ? e.isEaten : (isMealPrep ? false : !isFuture);
     });
     const sTotals = eatenEntries.reduce((acc, e) => addNutrition(acc, e.nutrition), { ...EMPTY_NUTRITION });
     const photo = day.photos?.[session.id];
@@ -353,7 +353,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
         <p className={`body-md mt-2 ${t.textMain}`}>{session.label}</p>
         <p className={`caption font-medium ${t.textMuted} flex items-center justify-center gap-1`}>
           {session.id === 'drink' ? (
-            `${Math.round(day.water || 0)} mL`
+            <>{Math.round(day.water || 0)} mL {sTotals.kcal > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : ''}</>
           ) : (
             <>{session.time} {eatenEntries.length > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : (allPlanned ? '· Direncanakan' : '')}</>
           )}

@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-const ScrollPicker = ({ value, onChange, min = 0, max = 200, step = 1, width = 'w-16', theme = 'light', t }) => {
+const ScrollPicker = ({ value, onChange, min = 0, max = 200, step = 1, width = 'w-16', height = 120, theme = 'light', t }) => {
   const containerRef = useRef(null);
   const [isScrolling, setIsScrolling] = useState(false);
+  const [activeOpt, setActiveOpt] = useState(value);
   const scrollTimeout = useRef(null);
   const lastScrollEndAt = useRef(0);
   const pointerDownPos = useRef(null);
@@ -22,9 +23,26 @@ const ScrollPicker = ({ value, onChange, min = 0, max = 200, step = 1, width = '
   // Handle initial scroll position
   useEffect(() => {
     if (!containerRef.current || isScrolling || isEditing) return;
-    const index = options.indexOf(value);
+    let index = options.indexOf(value);
+    
+    if (index === -1) {
+      // Find closest option if exact match not found (e.g. 78.1 with step 1)
+      let minDiff = Infinity;
+      options.forEach((opt, idx) => {
+        const diff = Math.abs(opt - value);
+        if (diff < minDiff) {
+          minDiff = diff;
+          index = idx;
+        }
+      });
+    }
+
     if (index !== -1) {
       containerRef.current.scrollTop = index * 40; // 40px is the height of one item
+      setActiveOpt(options[index]);
+      if (options[index] !== value) {
+        onChange(options[index]); // Sync parent state with snapped value
+      }
     }
   }, [value, options, isScrolling, isEditing]);
 
@@ -37,13 +55,19 @@ const ScrollPicker = ({ value, onChange, min = 0, max = 200, step = 1, width = '
 
   const handleScroll = (e) => {
     setIsScrolling(true);
+    
+    const scrollTop = e.target.scrollTop;
+    const index = Math.round(scrollTop / 40);
+    
+    if (index >= 0 && index < options.length) {
+      setActiveOpt(options[index]);
+    }
+
     if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
 
     scrollTimeout.current = setTimeout(() => {
       setIsScrolling(false);
       lastScrollEndAt.current = Date.now();
-      const scrollTop = e.target.scrollTop;
-      const index = Math.round(scrollTop / 40);
 
       if (index >= 0 && index < options.length) {
         const newValue = options[index];
@@ -87,9 +111,11 @@ const ScrollPicker = ({ value, onChange, min = 0, max = 200, step = 1, width = '
   const textAccentClass = t?.textAccent || (theme === 'dark' ? 'text-[#9db8d6]' : 'text-[#41759b]');
   const textMutedClass = t?.textMuted || (theme === 'dark' ? 'text-slate-400' : 'text-slate-600');
 
+  const paddingHeight = Math.max(0, (height - 40) / 2);
+
   if (isEditing) {
     return (
-      <div className={`relative h-[120px] ${width} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} rounded-xl flex items-center justify-center`}>
+      <div className={`relative ${width} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} rounded-xl flex items-center justify-center`} style={{ height: `${height}px` }}>
         <input
           ref={editInputRef}
           type="text"
@@ -106,8 +132,8 @@ const ScrollPicker = ({ value, onChange, min = 0, max = 200, step = 1, width = '
 
   return (
     <div
-      className={`relative h-[120px] ${width} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} rounded-xl overflow-hidden shadow-inner`}
-      style={{ touchAction: 'pan-y', scrollSnapType: 'y mandatory' }}
+      className={`relative ${width} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} rounded-xl overflow-hidden shadow-inner`}
+      style={{ height: `${height}px`, touchAction: 'pan-y', scrollSnapType: 'y mandatory' }}
     >
       {/* Active selection overlay */}
       <div className={`absolute top-1/2 left-0 w-full h-[40px] -translate-y-1/2 border-y-2 pointer-events-none z-10 ${bgSoftClass} ${borderClass}`} />
@@ -123,20 +149,20 @@ const ScrollPicker = ({ value, onChange, min = 0, max = 200, step = 1, width = '
         style={{ scrollBehavior: isScrolling ? 'auto' : 'smooth' }}
       >
         {/* Padding items to allow snapping to first and last */}
-        <div className="h-[40px] snap-center"></div>
+        <div style={{ height: `${paddingHeight}px` }} className="snap-center shrink-0"></div>
 
         {options.map((opt) => (
           <div
             key={opt}
             className={`h-[40px] flex items-center justify-center snap-center font-bold text-lg transition-opacity ${
-              opt === value ? `opacity-100 ${textAccentClass}` : `opacity-20 ${textMutedClass}`
+              opt === activeOpt ? `opacity-100 ${textAccentClass}` : `opacity-20 ${textMutedClass}`
             }`}
           >
             {opt}
           </div>
         ))}
 
-        <div className="h-[40px] snap-center"></div>
+        <div style={{ height: `${paddingHeight}px` }} className="snap-center shrink-0"></div>
       </div>
     </div>
   );

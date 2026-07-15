@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { getLocalYMD } from '../data/constants';
 import { formatNumber } from '../utils/numberFormat';
 import { computeDayTotals } from '../data/nutrition';
@@ -42,9 +42,15 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
           const burned = Number(lyfitYearData?.[entry.dateStr]?.bioData?.activityCalories) || 0;
           const eaten = totals.kcal || 0;
           
+          let dayTargets = entry.dayData?.targetSnapshot || targets;
+          
           let delta = null;
-          if (eaten > 0 && targets?.kcal) {
-             delta = Math.round(eaten - (targets.tdee || targets.kcal) - burned);
+          let targetDeltaVal = 0;
+          if (eaten > 0 && dayTargets?.kcal) {
+             delta = Math.round(eaten - (dayTargets.tdee || dayTargets.kcal) - burned);
+          }
+          if (dayTargets?.kcal) {
+             targetDeltaVal = dayTargets.kcal - (dayTargets.tdee || dayTargets.kcal);
           }
 
           data.push({
@@ -56,6 +62,11 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
               protein: totals.protein > 0 ? totals.protein : null,
               fat: totals.fat > 0 ? totals.fat : null,
               carbs: totals.carbs > 0 ? totals.carbs : null,
+              targetCalories: dayTargets?.tdee || dayTargets?.kcal || null,
+              targetProtein: dayTargets?.protein || null,
+              targetFat: dayTargets?.fat || null,
+              targetCarbs: dayTargets?.carbs || null,
+              targetDelta: targetDeltaVal,
           });
       });
       return data;
@@ -154,12 +165,27 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
       if (min === Infinity || max === -Infinity) findMinMax(multiChartData);
 
       if (min !== Infinity && max !== -Infinity) {
+          let maxTargetInView = 0;
+          visibleData.forEach(d => {
+             if (activeMetric === 'calories' && d.targetCalories > maxTargetInView) maxTargetInView = d.targetCalories;
+             if (activeMetric === 'protein' && d.targetProtein > maxTargetInView) maxTargetInView = d.targetProtein;
+             if (activeMetric === 'fat' && d.targetFat > maxTargetInView) maxTargetInView = d.targetFat;
+             if (activeMetric === 'carbs' && d.targetCarbs > maxTargetInView) maxTargetInView = d.targetCarbs;
+          });
+
           const diff = max - min;
           if (activeMetric === 'delta') {
-              const absMax = Math.max(Math.abs(min), Math.abs(max));
+              let maxAbsTargetDelta = 0;
+              visibleData.forEach(d => {
+                 if (Math.abs(d.targetDelta) > maxAbsTargetDelta) maxAbsTargetDelta = Math.abs(d.targetDelta);
+              });
+              const absMax = Math.max(Math.abs(min), Math.abs(max), maxAbsTargetDelta);
               setYDomain([-(absMax * 1.15), absMax * 1.15]);
           } else {
-              setYDomain([0, max + diff * 0.15 || max * 1.1]);
+              const effectiveMax = Math.max(max, maxTargetInView);
+              const effectiveDiff = effectiveMax - min;
+              const upper = effectiveMax + effectiveDiff * 0.15 || effectiveMax * 1.1;
+              setYDomain([0, upper === 0 ? 100 : upper]);
           }
       } else {
           setYDomain(activeMetric === 'delta' ? [-100, 100] : [0, 100]);
@@ -242,7 +268,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                      ))}
                  </svg>
 
-                 <BarChart 
+                 <ComposedChart 
                     width={chartWidth}
                     height={224}
                     data={multiChartData} 
@@ -286,20 +312,23 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                     <XAxis dataKey="name" stroke={theme === 'dark' ? '#a1a1aa' : '#64748b'} fontSize={10} tickLine={false} axisLine={false} />
                     <YAxis domain={yDomain} hide={true} />
                     
-                    {activeMetric === 'calories' && targets?.kcal && (
-                        <ReferenceLine y={targets.tdee || targets.kcal} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    {activeMetric === 'calories' && (
+                        <Line type="step" dataKey="targetCalories" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                     )}
-                    {activeMetric === 'protein' && targets?.protein && (
-                        <ReferenceLine y={targets.protein} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    {activeMetric === 'protein' && (
+                        <Line type="step" dataKey="targetProtein" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                     )}
-                    {activeMetric === 'fat' && targets?.fat && (
-                        <ReferenceLine y={targets.fat} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    {activeMetric === 'fat' && (
+                        <Line type="step" dataKey="targetFat" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                     )}
-                    {activeMetric === 'carbs' && targets?.carbs && (
-                        <ReferenceLine y={targets.carbs} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                    {activeMetric === 'carbs' && (
+                        <Line type="step" dataKey="targetCarbs" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                     )}
                     {activeMetric === 'delta' && (
-                        <ReferenceLine y={0} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeDasharray="3 3" />
+                        <>
+                            <ReferenceLine y={0} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeWidth={1} strokeDasharray="3 3" />
+                            <Line type="step" dataKey="targetDelta" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
+                        </>
                     )}
 
                     {activeObj.type === 'single' ? (
@@ -307,7 +336,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                             dataKey={activeMetric} 
                             name={activeObj.label} 
                             fill={`url(#gradient-${activeMetric})`}
-                            radius={activeMetric === 'delta' ? 0 : [50, 50, 0, 0]} 
+                            radius={[50, 50, 0, 0]} 
                             isAnimationActive={false} 
                             maxBarSize={30}
                         />
@@ -324,7 +353,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                             />
                         ))
                     )}
-                 </BarChart>
+                 </ComposedChart>
              </div>
          </div>
          

@@ -124,7 +124,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     // pushDailyTotalsToLogym → lomealSync.today (dashboard Lomeal ringkas di Logym)
     // pushNutritionBioToLogym → bioData.nutritionCalories (grafik bio Logym sinkron sama Lomeal)
     if (logymUser) {
-      const mealsCount = Object.entries(dayData?.meals || {}).filter(([k, e]) => ['breakfast', 'lunch', 'dinner'].includes(k) && e.length > 0).length;
+      const mealsCount = Object.values(dayData?.meals || {}).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
       const dayTotals = computeDayTotals(dayData);
       if (ymd === todayYmd) {
         pushDailyTotalsToLogym(logymUser.uid, ymd, dayTotals, mealsCount).catch(() => {});

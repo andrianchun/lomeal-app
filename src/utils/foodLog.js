@@ -6,7 +6,7 @@
 // Project ini berdiri sendiri, terpisah dari project Firebase Logym/Lyfit.
 // ============================================================
 import { db } from '../firebase';
-import { doc, setDoc, onSnapshot, getDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, onSnapshot, getDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
 import { getMonthKey } from '../data/constants';
 
 const flDoc = (uid, docId) => doc(db, 'users', uid, 'food_logs', docId);
@@ -28,8 +28,14 @@ export const getMonth = async (uid, monthKey) => {
   return snap.exists() ? (snap.data().days || {}) : {};
 };
 
-export const saveDay = (uid, ymd, dayData) =>
-  setDoc(flDoc(uid, `log_${getMonthKey(ymd)}`), { days: { [ymd]: dayData } }, { merge: true });
+export const saveDay = async (uid, ymd, dayData) => {
+  const docRef = flDoc(uid, `log_${getMonthKey(ymd)}`);
+  try {
+    await updateDoc(docRef, { [`days.${ymd}`]: dayData });
+  } catch (e) {
+    await setDoc(docRef, { days: { [ymd]: dayData } }, { merge: true });
+  }
+};
 
 // Entry makanan: { id, name, grams, unit, nutrition, foodId?, photoUrl?, time, source }
 export const makeEntry = (data) => ({
