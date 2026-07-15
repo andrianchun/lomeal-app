@@ -1,4 +1,5 @@
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const functions = require('firebase-functions/v1');
+const { HttpsError } = require('firebase-functions/v1/https');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
@@ -105,17 +106,17 @@ const isFallbackable = (errMsg) => {
 
 // ---------- Endpoints ----------
 
-exports.aiChat = onCall({ region: REGION, cors: true, timeoutSeconds: 120, memory: '256MiB' }, async (req) => {
-    if (!req.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
+exports.aiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall(async (data, context) => {
+    if (!context.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
 
-    const { messages, provider = 'google', model = '' } = req.data || {};
+    const { messages, provider = 'google', model = '' } = data || {};
     if (!Array.isArray(messages) || messages.length === 0) {
         throw new HttpsError('invalid-argument', 'messages harus berupa array.');
     }
     const totalChars = messages.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : 0), 0);
     if (totalChars > 200000) throw new HttpsError('invalid-argument', 'Pesan terlalu panjang.');
 
-    await checkRateLimit(req.auth.uid);
+    await checkRateLimit(context.auth.uid);
 
     const keys = getSharedKeys().filter(k => detectKeyProvider(k) === provider);
     if (keys.length === 0) {
@@ -166,16 +167,16 @@ exports.aiChat = onCall({ region: REGION, cors: true, timeoutSeconds: 120, memor
         `Semua key server untuk ${provider} sedang limit. ${lastError ? lastError.message.substring(0, 100) : ''}`);
 });
 
-exports.aiVision = onCall({ region: REGION, cors: true, timeoutSeconds: 120, memory: '512MiB' }, async (req) => {
-    if (!req.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
+exports.aiVision = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB' }).https.onCall(async (data, context) => {
+    if (!context.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
 
-    const { imageBase64, mimeType = 'image/jpeg', prompt, provider = 'google', model = '' } = req.data || {};
+    const { imageBase64, mimeType = 'image/jpeg', prompt, provider = 'google', model = '' } = data || {};
     if (!imageBase64 || typeof imageBase64 !== 'string') {
         throw new HttpsError('invalid-argument', 'imageBase64 wajib diisi.');
     }
     if (imageBase64.length > 8 * 1024 * 1024) throw new HttpsError('invalid-argument', 'Gambar terlalu besar (maks ~6MB).');
 
-    await checkRateLimit(req.auth.uid);
+    await checkRateLimit(context.auth.uid);
 
     const keys = getSharedKeys().filter(k => detectKeyProvider(k) === provider);
     if (keys.length === 0) {
@@ -239,8 +240,8 @@ exports.aiVision = onCall({ region: REGION, cors: true, timeoutSeconds: 120, mem
 // gak ada celah orang daftar pakai email siapa aja buat ambil alih akun Logym.
 const lomealVerifyApp = admin.initializeApp({ projectId: 'lomeal-id' }, 'lomeal-verify');
 
-exports.bridgeLomealAuth = onCall({ region: REGION, cors: true }, async (req) => {
-    const { lomealIdToken } = req.data || {};
+exports.bridgeLomealAuth = functions.region(REGION).https.onCall(async (data, context) => {
+    const { lomealIdToken } = data || {};
     if (!lomealIdToken) throw new HttpsError('invalid-argument', 'lomealIdToken wajib diisi.');
 
     const decoded = await admin.auth(lomealVerifyApp).verifyIdToken(lomealIdToken);

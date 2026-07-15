@@ -105,8 +105,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const quota = await checkAndCountAiUsage(user.uid, todayYmd, 10);
-    if (!quota.allowed) { await showAlert('Batas harian scan label sudah habis.'); return; }
+    const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
+    if (!quota.allowed) { await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
     setScanning(true);
     try {
       const { base64, mimeType } = await compressImageTo100KB(file);

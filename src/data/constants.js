@@ -45,6 +45,6 @@ export const WATER_STEP_ML = 200;    // satu tap = +200ml (blueprint Tab 2)
 export const WATER_GOAL_ML = 2000;
 
 // Satpam API: batas Smart Input Bar per user per hari (blueprint Fase 5)
-export const AI_DAILY_LIMIT = 10;
+export const AI_DAILY_LIMIT = 100;
 
 export const APP_NAME = 'Lomeal';

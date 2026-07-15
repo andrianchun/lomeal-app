@@ -54,34 +54,37 @@ async function callGeminiWithKey(apiKey, parts) {
 
 async function callGemini(apiKeyOrKeys, parts) {
   const keys = (Array.isArray(apiKeyOrKeys) ? apiKeyOrKeys : [apiKeyOrKeys]).filter((k) => k && k.trim());
+  
   if (keys.length > 0) {
     let lastErr = 'Unknown error';
     for (const key of keys) {
       try {
         return await callGeminiWithKey(key, parts);
       } catch (err) {
-        if (err.message === 'OUT_OF_SCOPE') throw err;
+        if (['RATE_LIMIT_EXCEEDED', 'OUT_OF_SCOPE'].includes(err.message)) throw err;
+        if (err instanceof SyntaxError) { lastErr = 'Respons AI tidak valid'; continue; }
         lastErr = err.message;
       }
     }
-    throw new Error(lastErr);
-  } else {
-    const chatWithAI = httpsCallable(functions, 'chatWithAI');
-    try {
-      const res = await chatWithAI({
-        messages: [{ role: 'user', content: parts }],
-        provider: 'google',
-        model: 'gemini-3.5-flash'
-      });
-      let text = res.data?.text || '{}';
-      text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
-      const parsed = JSON.parse(text);
-      if (parsed.error === 'OUT_OF_SCOPE') throw new Error('OUT_OF_SCOPE');
-      return parsed;
-    } catch (err) {
-      if (err.message === 'OUT_OF_SCOPE') throw err;
-      throw new Error('Backend AI Error: ' + err.message);
-    }
+    console.warn('Personal key failed, falling back to server...', lastErr);
+  }
+
+  // Fallback to server if no keys or all keys failed
+  const aiChat = httpsCallable(functions, 'aiChat');
+  try {
+    const res = await aiChat({
+      messages: [{ role: 'user', content: parts }],
+      provider: 'google',
+      model: 'gemini-3.5-flash'
+    });
+    let text = res.data?.text || '{}';
+    text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+    const parsed = JSON.parse(text);
+    if (parsed.error === 'OUT_OF_SCOPE') throw new Error('OUT_OF_SCOPE');
+    return parsed;
+  } catch (err) {
+    if (err.message === 'OUT_OF_SCOPE') throw err;
+    throw new Error('Backend AI Error: ' + err.message);
   }
 }
 

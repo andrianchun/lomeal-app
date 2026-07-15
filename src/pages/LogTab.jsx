@@ -499,7 +499,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
             className={`w-full max-w-sm max-h-[85vh] overflow-y-auto hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
             <div className="flex items-center gap-2 mb-3">
               <Sparkles size={16} className={t.textAccent} />
-              <h2 className={`h2 ${t.textMain}`}>Hasil AI — cek dulu ya</h2>
+              <h2 className={`h2 ${t.textMain}`}>Hasil Pemindaian AI</h2>
               <button onClick={() => setAiResult(null)} className={`ml-auto p-2 rounded-xl ${t.btnBg}`}><X size={15} className={t.textMuted} /></button>
             </div>
             {aiResult.photoDataUrl && (
@@ -600,7 +600,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
                           }} className={`bg-transparent outline-none border-b border-dashed ${t.border} text-center`} style={{ width: '40px' }} />
                         )}
                         <span className="truncate">{e.grams}{e.unit || 'g'} · {Math.round(e.nutrition?.kcal || 0)} kkal</span>
-                        {e.source === 'ai' && ' · ✨AI'}{e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}
+                        {e.source === 'ai' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <Sparkles size={14} strokeWidth={2.5} /></span>}{e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}
                         {e.isMealPrep && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border shrink-0 ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>Meal Prep</span>}
                       </div>
                     </div>
