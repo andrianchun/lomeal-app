@@ -469,7 +469,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
                     <div>
                       <p className={`h2 ${t.textMain}`}>{b.name}</p>
                       <p className={`caption font-medium mt-0.5 ${t.textMuted}`}>
-                        Dimakan: <span className={`font-bold ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{b.initialPortions - b.remainingPortions}</span> / {b.initialPortions} porsi · Sisa: <span className={b.remainingPortions > 0 ? 'text-emerald-500 font-bold' : 'text-red-500 font-bold'}>{b.remainingPortions}</span>
+                        Dimakan: <span className={`font-bold ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{b.initialPortions - b.remainingPortions}</span> / {b.initialPortions} porsi · Sisa: <span className={b.remainingPortions > 0 ? 'text-emerald-500 font-bold' : 'text-red-400 font-bold'}>{b.remainingPortions}</span>
                       </p>
                     </div>
                     <button onClick={() => deleteBatch(b)} className="p-2 text-red-400"><Trash2 size={14} /></button>

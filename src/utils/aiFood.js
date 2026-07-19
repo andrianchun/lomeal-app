@@ -129,21 +129,23 @@ export const compressImageTo100KB = (file) => new Promise((resolve, reject) => {
     URL.revokeObjectURL(url);
     const canvas = document.createElement('canvas');
     let { width, height } = img;
-    const maxSide = 1024;
+    const maxSide = 800; // Dikurangi agar makin kencang, Gemini vision udah pinter
     if (Math.max(width, height) > maxSide) {
       const s = maxSide / Math.max(width, height);
       width = Math.round(width * s); height = Math.round(height * s);
     }
     canvas.width = width; canvas.height = height;
     canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-    let quality = 0.8;
-    let dataUrl = canvas.toDataURL('image/jpeg', quality);
-    // base64 ~4/3 ukuran byte → target string ≤ ~136K karakter
+    
+    // Pindah ke WebP untuk hemat space drastis
+    let quality = 0.6;
+    let dataUrl = canvas.toDataURL('image/webp', quality);
+    
     while (dataUrl.length > 136000 && quality > 0.25) {
       quality -= 0.1;
-      dataUrl = canvas.toDataURL('image/jpeg', quality);
+      dataUrl = canvas.toDataURL('image/webp', quality);
     }
-    resolve({ base64: dataUrl.split(',')[1], dataUrl, mimeType: 'image/jpeg' });
+    resolve({ base64: dataUrl.split(',')[1], dataUrl, mimeType: 'image/webp' });
   };
   img.onerror = reject;
   img.src = url;

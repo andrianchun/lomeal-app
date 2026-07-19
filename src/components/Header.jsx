@@ -38,7 +38,7 @@ const Header = ({ t, theme, isOffline, logymUser, onOpenSocial, onOpenSettings, 
       {/* KANAN: OFFLINE → BELL → SETTINGS → AVATAR (PROFIL & SOSIAL) */}
       <div className="flex items-center gap-2">
         {isOffline && (
-          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-red-500/10 text-red-500 animate-pulse" title="Sedang Offline">
+          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-red-400/10 text-red-400 animate-pulse" title="Sedang Offline">
             <WifiOff size={20} strokeWidth={2} />
           </span>
         )}

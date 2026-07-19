@@ -4,8 +4,9 @@ import RingChart from '../components/RingChart';
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS } from '../data/constants';
-import { computeDayTotals, addNutrition, EMPTY_NUTRITION } from '../data/nutrition';
-import { MACRO_COLORS } from '../theme';
+import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS } from '../data/nutrition';
+import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
+import { MACRO_COLORS, statusFor } from '../theme';
 import { parseFoodText, analyzeFoodPhoto, compressImageTo100KB } from '../utils/aiFood';
 import { makeEntry, checkAndCountAiUsage } from '../utils/foodLog';
 import { uploadToCloudinary } from '../utils/cloudinary';
@@ -49,7 +50,9 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
   const day = daysMap[selectedYmd] || { meals: {}, water: 0 };
   const isFuture = selectedYmd > todayYmd;
   const totals = useMemo(() => computeDayTotals(day, !isFuture), [day, isFuture]);
-  const targets = profile?.targets || {};
+  const targets = day.targetSnapshot || profile?.targets || {};
+  const dietGoal = targets.dietGoal || '';
+  const kcalDiff = (targets.kcal || 0) - (targets.tdee || targets.kcal || 0);
 
   // ---------- Date Strip horizontal (±30 hari) ----------
   const dates = useMemo(() => {
@@ -63,14 +66,17 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
   }, []);
 
   const stripRef = useRef(null);
+  const mountRef = useRef(true);
+  
   useEffect(() => {
-    if (stripRef.current) {
+    if (stripRef.current && mountRef.current) {
       const activeBtn = stripRef.current.querySelector(`button[data-ymd="${selectedYmd}"]`);
       if (activeBtn) {
         const container = stripRef.current;
         const scrollLeft = activeBtn.offsetLeft - container.offsetWidth / 2 + activeBtn.offsetWidth / 2;
-        container.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+        container.scrollTo({ left: scrollLeft, behavior: 'instant' });
       }
+      mountRef.current = false;
     }
   }, [selectedYmd]);
 
@@ -78,8 +84,17 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
 
   const addEntryToSession = (sessionId, entry) => {
     const meals = { ...(day.meals || {}) };
+    const isFirstEntry = (meals[sessionId] || []).length === 0;
     meals[sessionId] = [...(meals[sessionId] || []), entry];
-    persistDay({ ...day, meals });
+    
+    const newDay = { ...day, meals };
+    if (selectedYmd === todayYmd && isFirstEntry) {
+      const sessionTimes = { ...(day.sessionTimes || {}) };
+      sessionTimes[sessionId] = entry.time || new Date().toTimeString().slice(0, 5);
+      newDay.sessionTimes = sessionTimes;
+    }
+    
+    persistDay(newDay);
   };
 
   const removeEntry = (sessionId, entryId) => {
@@ -196,16 +211,81 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
     return true;
   };
 
-  const runMagicPrompt = async () => {
-    const text = chatText.trim();
+  const runMagicPrompt = async (forcedText = null) => {
+    const text = typeof forcedText === 'string' ? forcedText.trim() : chatText.trim();
     if (!text || aiBusy) return;
+
+    // 1. OFFLINE SMART SEARCH (Cepat, 0 Detik)
+    try {
+      const items = text.split(/,|\n/);
+      let offlineFoods = [];
+      let allFound = true;
+      for (const item of items) {
+         let t = item.trim();
+         if (!t) continue;
+         let qty = 1;
+         let name = t;
+         let unitStr = '';
+         
+         const m1 = t.match(/^([\D]+?)\s+(\d+(?:\.\d+)?|\d+\/\d+|setengah)\s*(centong|porsi|sdm|sdt|g|gram|gr|biji|buah|potong|lembar|mangkok|bungkus|tusuk|gelas|butir|ekor)?$/i);
+         const m2 = t.match(/^(\d+(?:\.\d+)?|\d+\/\d+|setengah)\s*(centong|porsi|sdm|sdt|g|gram|gr|biji|buah|potong|lembar|mangkok|bungkus|tusuk|gelas|butir|ekor)?\s+([\D]+)$/i);
+         
+         let match = m1 || m2;
+         if (match) {
+             if (m1) { name = match[1].trim(); qty = match[2]; unitStr = match[3] || ''; }
+             else { qty = match[1]; unitStr = match[2] || ''; name = match[3].trim(); }
+         }
+         
+         if (qty === 'setengah') qty = 0.5;
+         else if (typeof qty === 'string' && qty.includes('/')) {
+             const [num, den] = qty.split('/');
+             qty = Number(num) / Number(den);
+         } else {
+             qty = Number(qty) || 1;
+         }
+
+         const customFoods = Object.values(profile?.customFoods || {});
+         const results = searchFoods(name, customFoods);
+         const best = results[0];
+         
+         // Syarat lolos offline: Nemu hasil yang namanya cukup mirip
+         if (best && (best.name.toLowerCase() === name.toLowerCase() || best.name.toLowerCase().includes(name.toLowerCase()))) {
+             let grams = best.portion.grams * qty;
+             let finalUnit = 'porsi';
+             const u = unitStr.toLowerCase();
+             if (u === 'g' || u === 'gram' || u === 'gr') { grams = qty; finalUnit = 'g'; }
+             else if (u) finalUnit = u;
+             
+             offlineFoods.push({
+                 name: best.name,
+                 grams,
+                 unit: finalUnit,
+                 nutrition: nutritionForAmount(best, grams)
+             });
+         } else {
+             allFound = false;
+             break;
+         }
+      }
+      
+      if (allFound && offlineFoods.length > 0) {
+          setAiTargetSession(getNearestSessionId());
+          setAiResult({ foods: offlineFoods, isOffline: true }); // Tanda diproses lokal
+          setChatText('');
+          return;
+      }
+    } catch (e) {
+      console.warn("Offline parsing failed, fallback ke AI:", e);
+    }
+
+    // 2. FALLBACK KE AI (Jika teks kompleks/nama makanan aneh)
     if (!(await guardAi())) return;
     setAiBusy(true);
     try {
       const res = await parseFoodText(aiKey, text);
       if (res.foods?.length) { 
          setAiTargetSession(getNearestSessionId());
-         setAiResult({ foods: res.foods }); 
+         setAiResult({ foods: res.foods, isOffline: false, originalInput: text }); 
          setChatText(''); 
       }
       else await showAlert('AI tidak menemukan makanan pada teks itu. Coba lebih spesifik, mis. "nasi 1 centong, ayam goreng 1 potong".');
@@ -233,20 +313,31 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
   };
 
   const confirmAiResult = async () => {
-    const { foods, photoDataUrl, photoFile } = aiResult;
-    let photoUrl = null;
-    if (photoFile) {
-      try { const up = await uploadToCloudinary(photoFile, null, 'lomeal_meals'); photoUrl = up?.secure_url || null; }
-      catch { photoUrl = null; }
-    }
+    const { foods, photoDataUrl } = aiResult;
     const meals = { ...(day.meals || {}) };
+    const isFirstEntry = (meals[aiTargetSession] || []).length === 0;
+    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: 'g', nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai' }));
+    
     meals[aiTargetSession] = [
       ...(meals[aiTargetSession] || []),
-      ...foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: 'g', nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai' })),
+      ...newEntries,
     ];
-    const photos = { ...(day.photos || {}) };
-    if (photoUrl || photoDataUrl) photos[aiTargetSession] = photoUrl || undefined;
-    persistDay({ ...day, meals, ...(photoUrl ? { photos } : {}) });
+    
+    let newDay = { ...day, meals };
+    
+    if (selectedYmd === todayYmd && isFirstEntry && newEntries.length > 0) {
+      const sessionTimes = { ...(day.sessionTimes || {}) };
+      sessionTimes[aiTargetSession] = newEntries[0].time;
+      newDay.sessionTimes = sessionTimes;
+    }
+    // Simpan foto lokal super cepat (tanpa Cloud Storage)
+    if (photoDataUrl) {
+      const photos = { ...(day.photos || {}) };
+      photos[aiTargetSession] = photoDataUrl;
+      newDay.photos = photos;
+    }
+    
+    persistDay(newDay);
     setAiResult(null);
   };
 
@@ -306,13 +397,24 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
     const target = targets[mkey] || 1;
     const value = totals[mkey] || 0;
     const pct = Math.min(100, (value / target) * 100);
-    const mc = mkey === 'kcal' ? { label: 'Kalori', hex: value > (target || Infinity) ? '#ef4444' : '#22c55e' } : MACRO_COLORS[mkey];
+    const mc = mkey === 'kcal' ? { label: 'Kalori', hex: value > (target || Infinity) ? '#cd4a4a' : '#3daa5c' } : MACRO_COLORS[mkey];
     return (
         <div>
           <div className="flex justify-between items-baseline mb-1">
-            <span className={`caption ${t.textMuted}`}>{mc.label}</span>
+            {mkey === 'kcal' ? (
+              <div className="flex items-center gap-2">
+                <span className={`caption ${t.textMuted}`}>Kalori</span>
+                {dietGoal && (
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${dietGoal === 'cut' ? 'bg-amber-500/20 text-amber-500' : dietGoal === 'bulk' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>
+                    {dietGoal === 'cut' ? `Cut (${kcalDiff > 0 ? '+' : ''}${kcalDiff} kcal)` : dietGoal === 'bulk' ? `Bulk (+${kcalDiff} kcal)` : 'Maintenance'}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <span className={`caption ${t.textMuted}`}>{mc.label}</span>
+            )}
             <div className="flex items-center gap-2">
-              {mkey !== 'kcal' && <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(pct)}% AKG</span>}
+              {mkey !== 'kcal' && <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(pct)}%</span>}
               <span className={`caption ${t.textMain}`}>{Math.round(value)}<span className={t.textMuted}>/{target}{mkey==='kcal'?'':'g'}</span></span>
             </div>
           </div>
@@ -376,7 +478,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
           const isTodayBtn = d.ymd === todayYmd;
           return (
             <button key={d.ymd} data-ymd={d.ymd} onClick={() => setSelectedYmd(d.ymd)}
-              className={`shrink-0 w-11 flex flex-col items-center justify-center rounded-2xl transition-all ${active ? `py-[10px] border-0 ${t.bgAccent} shadow-glow` : `py-2 border-2 ${isTodayBtn ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : `border-transparent ${t.bgCardSoft}`} ${future ? 'opacity-50' : ''}`}`}>
+              className={`shrink-0 w-11 flex flex-col items-center justify-center rounded-2xl transition-all py-2 border-2 ${active ? `border-transparent ${t.bgAccent} shadow-glow` : isTodayBtn ? `border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)] ${t.bgCardSoft}` : `border-transparent ${t.bgCardSoft}`} ${future ? 'opacity-50' : ''}`}>
               <span className={`caption ${active ? 'text-white/80' : isTodayBtn ? 'text-emerald-500' : t.textMuted}`}>{d.dow}</span>
               <span className={`text-sm font-black ${active ? 'text-white' : isTodayBtn ? 'text-emerald-500' : t.textMain}`}>{d.day}</span>
             </button>
@@ -385,7 +487,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
       </div>
 
       {/* ===== QUICK STATS ===== */}
-      <button onClick={() => setShowDayStatsModal(true)} className={`mt-3 w-full rounded-3xl border ${t.border} ${t.bgCard} p-4 flex flex-col gap-3 anim-rise text-left`}>
+      <button onClick={() => setShowDayStatsModal(true)} className={`mt-3 w-full rounded-3xl border ${t.border} ${t.bgCard} p-4 flex flex-col gap-3 text-left transition-transform active:scale-[0.98]`}>
         <div className="w-full">
            <MacroBar mkey="kcal" />
         </div>
@@ -463,30 +565,42 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
          </div>
       </div>
 
-      {/* ===== SMART INPUT BAR (menempel di atas BottomNav) ===== */}
+      {/* ===== SMART INPUT BAR (menempel di atas BottomNav, besar ala Logym) ===== */}
       <div className="fixed bottom-[76px] left-0 right-0 z-30 px-3 pb-2 pointer-events-none">
-        <div className={`pointer-events-auto max-w-2xl mx-auto flex items-center gap-1.5 px-2 py-1.5 rounded-[24px] border ${t.border} ${t.navBg} ${t.glow}`}>
+        <div className={`pointer-events-auto relative max-w-2xl mx-auto flex items-center gap-1.5 px-3 py-2.5 rounded-[32px] border overflow-hidden ${t.border} ${t.navBg} shadow-2xl`}>
+          {aiBusy && (
+            <div className="absolute inset-0 bg-green-500/20 dark:bg-green-400/20 w-full origin-left" style={{ animation: 'progressFill 4s cubic-bezier(0.1, 0.8, 0.2, 1) forwards' }} />
+          )}
           <button onClick={() => fileRef.current?.click()} disabled={aiBusy}
-            className={`p-2.5 rounded-2xl ${t.btnBg} ${t.textAccent}`} aria-label="Scan foto makanan">
-            <Camera size={18} />
+            className={`relative z-10 shrink-0 p-3.5 rounded-full ${t.btnBg} ${t.textAccent} transition-transform active:scale-95`} aria-label="Scan foto makanan">
+            <Camera size={22} />
           </button>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden"
+          <input ref={fileRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => { runPhotoScan(e.target.files?.[0]); e.target.value = ''; }} />
-          <input
-            value={chatText} onChange={(e) => setChatText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && runMagicPrompt()}
-            placeholder='Coba: "nasi 2 centong, ayam goreng"…'
-            className={`flex-1 bg-transparent outline-none body-md px-1 ${t.textMain} placeholder:${t.textMuted}`} />
-          <button onClick={toggleVoice} className={`p-2.5 rounded-2xl ${t.btnBg} ${listening ? 'text-red-500 animate-pulse' : t.textMuted}`} aria-label="Input suara">
-            <Mic size={18} />
+          
+          {aiBusy ? (
+            <div className="relative z-10 flex-1 px-2 body-lg font-bold text-green-600 dark:text-green-400 animate-pulse flex items-center gap-2 min-w-0">
+              <Sparkles size={18} className="shrink-0" /> <span className="truncate">Memproses...</span>
+            </div>
+          ) : (
+            <input
+              value={chatText} onChange={(e) => setChatText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && runMagicPrompt()}
+              placeholder="Ketik makananmu..."
+              className={`relative z-10 flex-1 min-w-0 bg-transparent outline-none body-lg px-1 font-medium ${t.textMain} placeholder:${t.textMuted} placeholder:opacity-50`} />
+          )}
+          
+          <button onClick={toggleVoice} className={`relative z-10 shrink-0 p-3.5 rounded-full ${t.btnBg} ${listening ? 'text-red-400 animate-pulse' : t.textMuted} transition-transform active:scale-95`} aria-label="Input suara">
+            <Mic size={22} />
           </button>
+          
           {chatText.trim() ? (
-            <button onClick={runMagicPrompt} disabled={aiBusy} className={`p-2.5 rounded-2xl ${t.bgAccent} shadow-glow`} aria-label="Kirim">
-              {aiBusy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            <button onClick={() => runMagicPrompt()} disabled={aiBusy} className={`relative z-10 shrink-0 p-3.5 rounded-full bg-green-500 text-white shadow-lg transition-transform active:scale-95`} aria-label="Kirim">
+              {aiBusy ? <Loader2 size={22} className="animate-spin" /> : <Send size={22} />}
             </button>
           ) : (
-            <button onClick={() => setPickerSession(detailSession || getNearestSessionId())} className={`p-2.5 rounded-2xl ${t.bgAccent} shadow-glow`} aria-label="Input manual presisi">
-              {aiBusy ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+            <button onClick={() => setPickerSession(detailSession || getNearestSessionId())} disabled={aiBusy} className={`relative z-10 shrink-0 p-3.5 rounded-full ${t.bgAccent} shadow-lg transition-transform active:scale-95`} aria-label="Input manual presisi">
+              {aiBusy ? <Loader2 size={22} className="animate-spin" /> : <Plus size={22} />}
             </button>
           )}
         </div>
@@ -532,6 +646,26 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
                 </div>
               ))}
             </div>
+
+            {/* Chat Revisi AI */}
+            {!aiResult.isOffline && (
+              <div className={`mb-4 flex items-center gap-2 p-2 rounded-2xl border ${t.border} ${t.bgSunken}`}>
+                <input
+                  type="text"
+                  placeholder="Koreksi (mis: nasi setengah aja)"
+                  className={`flex-1 bg-transparent outline-none body-md px-2 ${t.textMain} placeholder:${t.textMuted}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.target.value.trim()) {
+                      const correction = e.target.value.trim();
+                      e.target.value = '';
+                      runMagicPrompt(`Koreksi input sebelumnya ("${aiResult.originalInput || 'foto'}") dengan instruksi ini: ${correction}`);
+                      setAiResult(null); // Tutup sementara biar muncul loading di smart bar
+                    }
+                  }}
+                />
+                <div className={`p-2 rounded-xl ${t.bgAccent} pointer-events-none`}><Send size={16} /></div>
+              </div>
+            )}
             <p className={`caption font-medium mb-1.5 ${t.textMuted}`}>Masukkan ke sesi:</p>
             <div className="flex gap-1.5 overflow-x-auto hide-scrollbar mb-4">
               {MEAL_SESSIONS.map(s => (
@@ -574,7 +708,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
                     className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1`} />
                 )}
                 <button onClick={() => { setCopySourceSession(detailSession); setDetailSession(null); }} className={`p-2 rounded-xl ${t.btnBg} text-emerald-500`}><Copy size={15} /></button>
-                <button onClick={() => setDeleteConfirm(detailSession)} className={`p-2 rounded-xl bg-red-500/10 text-red-500`}><Trash2 size={15} /></button>
+                <button onClick={() => setDeleteConfirm(detailSession)} className={`p-2 rounded-xl bg-red-400/10 text-red-400`}><Trash2 size={15} /></button>
               </div>
             </div>
             <div className="space-y-1.5 mb-3">
@@ -648,18 +782,52 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
         </div>
       )}
 
-      {/* ===== DAY STATS MODAL (Dari MacroBar yang di-klik) ===== */}
+      {/* ===== DAY STATS MODAL (Rincian Makro & Mikro) ===== */}
       {showDayStatsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe" onClick={() => setShowDayStatsModal(false)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm no-swipe overscroll-none" onClick={() => setShowDayStatsModal(false)}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-[85vh] overflow-y-auto hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className={`h2 ${t.textMain}`}>Rincian Nutrisi</h2>
-              <button onClick={() => setShowDayStatsModal(false)} className={`p-2 rounded-xl ${t.btnBg}`}><X size={15} className={t.textMuted} /></button>
-            </div>
+            className={`w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510] border-white/10' : 'bg-white border-black/10'} shadow-2xl p-6 anim-rise`}>
             
-            <div className="mt-4">
-               <NutritionChart t={t} theme={theme} daysMap={daysMap} targets={targets} date={selectedYmd} />
+            <div className="space-y-4 mb-6 mt-1">
+               <h3 className={`caption ${t.textMuted} uppercase tracking-wider`}>Makro</h3>
+               <MacroBar mkey="kcal" />
+               <MacroBar mkey="protein" />
+               <MacroBar mkey="carbs" />
+               <MacroBar mkey="fat" />
+            </div>
+
+            <div className="space-y-4 mb-4">
+               <h3 className={`caption ${t.textMuted} uppercase tracking-wider`}>Mikro & Lainnya</h3>
+               {(() => {
+                 const dietProfile = profile?.settings?.dietProfile || 'standard';
+                 const microChips = NUTRIENTS.filter(n => !n.macro && (!n.conditional || dietProfile === 'low_purine'));
+                 const activeMicros = microChips.filter(n => targets[n.key] && (totals[n.key] || 0) > 0);
+                 
+                 if (activeMicros.length === 0) {
+                   return <p className={`caption ${t.textMuted} py-2`}>Belum ada data nutrisi mikro yang tercatat hari ini.</p>;
+                 }
+
+                 return activeMicros.map(n => {
+                   const target = targets[n.key];
+                   const ratio = (totals[n.key] || 0) / target;
+                   const s = statusFor(ratio, { invert: MINIMUM_TARGETS.has(n.key) });
+                   const pct = Math.min(100, ratio * 100);
+                   return (
+                     <div key={n.key} className="flex flex-col gap-1">
+                       <div className="flex justify-between items-baseline">
+                         <span className={`caption ${t.textMuted}`}>{n.label}</span>
+                         <div className="flex items-center gap-2">
+                            <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(pct)}%</span>
+                            <span className={`caption ${t.textMain} tabular-nums`}>{(totals[n.key] || 0) < 10 ? Number((totals[n.key] || 0).toFixed(2)) : Math.round(totals[n.key] || 0)}<span className={t.textMuted}>/{target}{n.unit || 'mg'}</span></span>
+                         </div>
+                       </div>
+                       <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
+                         <div className={`h-full rounded-full transition-all duration-500 ${s.bg}`} style={{ width: `${pct}%` }} />
+                       </div>
+                     </div>
+                   );
+                 });
+               })()}
             </div>
           </div>
         </div>
@@ -718,7 +886,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
       {deleteConfirm && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setDeleteConfirm(null)}>
           <div onClick={(e) => e.stopPropagation()} className={`w-[90%] max-w-sm rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]' : 'bg-white'} p-6 anim-rise text-center`}>
-            <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+            <div className="w-14 h-14 rounded-full bg-red-400/10 text-red-400 flex items-center justify-center mx-auto mb-4 border border-red-400/20">
               <Trash2 size={24} />
             </div>
             <h3 className={`h2 ${t.textMain} mb-2`}>Hapus Sesi?</h3>
@@ -732,7 +900,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, recipe
                 persistDay({ ...day, meals, hiddenSessions: hidden });
                 setDeleteConfirm(null);
                 setDetailSession(null);
-              }} className="flex-1 py-3 rounded-2xl bg-red-500 text-white body-md font-medium shadow-glow">Hapus</button>
+              }} className="flex-1 py-3 rounded-2xl bg-red-500/80 text-white body-md font-medium shadow-glow">Hapus</button>
             </div>
           </div>
         </div>

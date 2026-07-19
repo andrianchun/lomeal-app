@@ -69,13 +69,15 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
   // Kalau tidak ada data Logym, fallback ke targets.kcal (behavior lama).
   const baseTdee = targets.tdee || targets.kcal || 0;
   const programDelta = (targets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
-  const allowance = burnedTotal > 0
-    ? Math.max(0, burnedTotal + programDelta)
+  const actualTdee = Math.max(baseTdee, burnedTotal);
+  const allowance = actualTdee > 0
+    ? Math.max(0, actualTdee + programDelta)
     : (targets.kcal || 0);
 
   const remaining = Math.round(allowance - displayKcal);
   const ringProgress = allowance > 0 ? Math.min(1, displayKcal / allowance) : 0;
-  const balance = getEnergyBalance(displayKcal, targets.tdee || targets.kcal || 0, burnedTotal);
+  const burnedBonus = Math.max(0, burnedTotal - baseTdee);
+  const balance = getEnergyBalance(displayKcal, baseTdee, burnedBonus);
   const isBulking = programDelta > 0;
   let ringColor;
   let remainingText;
@@ -125,7 +127,7 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
           <div className="flex justify-between items-baseline mb-1">
             <span className={`caption ${t.textMuted}`}>{mc.label}</span>
             <div className="flex items-center gap-2">
-              <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(pct)}% AKG</span>
+              <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(pct)}%</span>
               <span className={`caption ${t.textMain}`}>{Math.round(value)}<span className={t.textMuted}>/{target}g</span></span>
             </div>
           </div>
@@ -198,7 +200,10 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
                 {/* Kiri: Kalori Dimakan */}
                 <div className="flex flex-col items-start w-[48%]">
                   <p className={`h3 ${t.textMuted}`}>Kalori Dimakan</p>
-                  <p className={`text-xl font-black tabular-nums ${t.textAccent} mt-0.5`}>{Math.round(displayKcal).toLocaleString('id-ID')}</p>
+                  <p className={`text-xl font-black tabular-nums ${t.textAccent} mt-0.5`}>
+                    {Math.round(displayKcal).toLocaleString('id-ID')}
+                    <span className={`caption ${t.textMuted} ml-1`}>/ {Math.round(targets.kcal || 0).toLocaleString('id-ID')} kkal</span>
+                  </p>
                   <div className={`caption ${t.textMuted} mt-0.5 flex items-center gap-1.5`}>
                     <span className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-500 text-[8px] uppercase font-bold tracking-wider">LOMEAL</span>
                     {today?.meals ? Object.values(today.meals).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0) : 0} konsumsi
@@ -291,7 +296,7 @@ const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday,
                           <div className="flex justify-between items-baseline">
                             <span className={`caption ${t.textMuted}`}>{n.label}</span>
                             <div className="flex items-center gap-2">
-                               <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(pct)}% AKG</span>
+                               <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(pct)}%</span>
                                <span className={`caption ${t.textMain} tabular-nums`}>{(totals[n.key] || 0) < 10 ? Number((totals[n.key] || 0).toFixed(2)) : Math.round(totals[n.key] || 0)}<span className={t.textMuted}>/{target}{n.unit || 'mg'}</span></span>
                             </div>
                           </div>

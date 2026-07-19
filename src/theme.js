@@ -39,9 +39,9 @@ export const buildTheme = (theme) => ({
 // hijau = aman/on-target, kuning = mendekati batas (Smart Warning 85%),
 // merah = melewati batas. Dipakai di chips mikro, ring kalori, dan grafik.
 export const STATUS = {
-  ok:     { text: 'text-green-500',  bg: 'bg-green-500',  soft: 'bg-green-500/15',  border: 'border-green-500/40',  hex: '#22c55e' },
-  warn:   { text: 'text-amber-500',  bg: 'bg-amber-500',  soft: 'bg-amber-500/15',  border: 'border-amber-500/40',  hex: '#f59e0b' },
-  danger: { text: 'text-red-500',    bg: 'bg-red-500',    soft: 'bg-red-500/15',    border: 'border-red-500/40',    hex: '#ef4444' },
+  ok:     { text: 'text-green-500',  bg: 'bg-green-500',  soft: 'bg-green-500/12',  border: 'border-green-500/30',  hex: '#3daa5c' },
+  warn:   { text: 'text-amber-500',  bg: 'bg-amber-500',  soft: 'bg-amber-500/12',  border: 'border-amber-500/30',  hex: '#c98920' },
+  danger: { text: 'text-red-400',    bg: 'bg-red-500',    soft: 'bg-red-500/10',    border: 'border-red-400/25',    hex: '#cd4a4a' },
   info:   { text: 'text-slate-400',  bg: 'bg-slate-400',  soft: 'bg-slate-400/15',  border: 'border-slate-400/40',  hex: '#94a3b8' },
 };
 
@@ -57,7 +57,7 @@ export const statusFor = (ratio, { warnAt = 0.85, invert = false } = {}) => {
 
 // Warna makro konsisten di seluruh app (bar dashboard, ring piring, studio share)
 export const MACRO_COLORS = {
-  protein: { hex: '#22c55e', text: 'text-green-500',  label: 'Protein' },
-  carbs:   { hex: '#f59e0b', text: 'text-amber-500',  label: 'Karbo' },
-  fat:     { hex: '#ef4444', text: 'text-red-400',    label: 'Lemak' },
+  protein: { hex: '#3daa5c', text: 'text-green-500',  label: 'Protein' },
+  carbs:   { hex: '#c98920', text: 'text-amber-500',  label: 'Karbo' },
+  fat:     { hex: '#cd4a4a', text: 'text-red-400',    label: 'Lemak' },
 };

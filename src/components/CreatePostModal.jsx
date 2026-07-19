@@ -116,7 +116,7 @@ export default function CreatePostModal({ user, onClose, theme, t, initialFiles 
               className={`w-full min-h-[140px] resize-none outline-none text-lg bg-transparent ${t?.textMain || (isDark ? 'text-white placeholder-white/40' : 'text-black placeholder-black/40')}`}
             />
             {(isNearLimit || text.length > 0) && (
-              <div className={`text-right text-xs font-bold mt-1 ${isOverLimit ? 'text-red-500' : isNearLimit ? 'text-amber-500' : (t?.textMuted || 'text-white/30')}`}>
+              <div className={`text-right text-xs font-bold mt-1 ${isOverLimit ? 'text-red-400' : isNearLimit ? 'text-amber-500' : (t?.textMuted || 'text-white/30')}`}>
                 {isOverLimit ? `-${Math.abs(charsLeft)}` : charsLeft}
               </div>
             )}

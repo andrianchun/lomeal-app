@@ -6,16 +6,16 @@ import { computeDayTotals } from '../data/nutrition';
 
 const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
   const chartMetricsList = [
-      { key: 'calories', label: 'Kalori', color: theme === 'dark' ? '#818cf8' : '#4f46e5', type: 'grouped',
+      { key: 'calories', label: 'Kalori', color: theme === 'dark' ? '#7c85d4' : '#4f46e5', type: 'grouped',
         subMetrics: [
-            { key: 'nutritionCalories', label: 'Dimakan', color: theme === 'dark' ? '#34d399' : '#059669' },
-            { key: 'activityCalories', label: 'Dibakar', color: theme === 'dark' ? '#60a5fa' : '#2563eb' }
+            { key: 'nutritionCalories', label: 'Dimakan', color: theme === 'dark' ? '#3daa5c' : '#059669' },
+            { key: 'activityCalories', label: 'Dibakar', color: theme === 'dark' ? '#5090d4' : '#2563eb' }
         ]
       },
-      { key: 'delta', label: 'Delta', color: theme === 'dark' ? '#f43f5e' : '#e11d48', type: 'single' },
-      { key: 'protein', label: 'Protein', color: theme === 'dark' ? '#fbbf24' : '#f59e0b', type: 'single' },
-      { key: 'fat', label: 'Lemak', color: theme === 'dark' ? '#f87171' : '#ef4444', type: 'single' },
-      { key: 'carbs', label: 'Karbo', color: theme === 'dark' ? '#38bdf8' : '#0ea5e9', type: 'single' }
+      { key: 'delta', label: 'Delta', color: theme === 'dark' ? '#b84a5a' : '#e11d48', type: 'single' },
+      { key: 'protein', label: 'Protein', color: theme === 'dark' ? '#c98920' : '#f59e0b', type: 'single' },
+      { key: 'fat', label: 'Lemak', color: theme === 'dark' ? '#cd4a4a' : '#dc2626', type: 'single' },
+      { key: 'carbs', label: 'Karbo', color: theme === 'dark' ? '#3a8fbf' : '#0ea5e9', type: 'single' }
   ];
 
   const [activeMetric, setActiveMetric] = useState('calories');
@@ -43,14 +43,16 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
           const eaten = totals.kcal || 0;
           
           let dayTargets = entry.dayData?.targetSnapshot || targets;
+          const baseTdee = dayTargets?.tdee || dayTargets?.kcal || 0;
+          const actualTdee = Math.max(baseTdee, burned);
           
           let delta = null;
           let targetDeltaVal = 0;
           if (eaten > 0 && dayTargets?.kcal) {
-             delta = Math.round(eaten - (dayTargets.tdee || dayTargets.kcal) - burned);
+             delta = Math.round(eaten - actualTdee);
           }
           if (dayTargets?.kcal) {
-             targetDeltaVal = dayTargets.kcal - (dayTargets.tdee || dayTargets.kcal);
+             targetDeltaVal = dayTargets.kcal - baseTdee;
           }
 
           data.push({
@@ -62,7 +64,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
               protein: totals.protein > 0 ? totals.protein : null,
               fat: totals.fat > 0 ? totals.fat : null,
               carbs: totals.carbs > 0 ? totals.carbs : null,
-              targetCalories: dayTargets?.tdee || dayTargets?.kcal || null,
+              targetCalories: dayTargets?.kcal || dayTargets?.tdee || null,
               targetProtein: dayTargets?.protein || null,
               targetFat: dayTargets?.fat || null,
               targetCarbs: dayTargets?.carbs || null,
@@ -313,21 +315,21 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                     <YAxis domain={yDomain} hide={true} />
                     
                     {activeMetric === 'calories' && (
-                        <Line type="step" dataKey="targetCalories" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
+                        <Line type="bumpX" dataKey="targetCalories" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                     )}
                     {activeMetric === 'protein' && (
-                        <Line type="step" dataKey="targetProtein" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
+                        <Line type="bumpX" dataKey="targetProtein" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                     )}
                     {activeMetric === 'fat' && (
-                        <Line type="step" dataKey="targetFat" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
+                        <Line type="bumpX" dataKey="targetFat" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                     )}
                     {activeMetric === 'carbs' && (
-                        <Line type="step" dataKey="targetCarbs" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
+                        <Line type="bumpX" dataKey="targetCarbs" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                     )}
                     {activeMetric === 'delta' && (
                         <>
                             <ReferenceLine y={0} stroke={theme === 'dark' ? '#52525b' : '#d4d4d8'} strokeWidth={1} strokeDasharray="3 3" />
-                            <Line type="step" dataKey="targetDelta" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
+                            <Line type="bumpX" dataKey="targetDelta" stroke={theme === 'dark' ? '#facc15' : '#eab308'} strokeWidth={2} dot={false} isAnimationActive={false} />
                         </>
                     )}
 
