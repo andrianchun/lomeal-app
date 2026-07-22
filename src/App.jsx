@@ -24,7 +24,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import useDialog from './hooks/useDialog';
 
 const MEAL_REMINDER_ID = 1001;
-const TAB_ORDER = ['dashboard', 'log', 'history', 'recipes', 'fooddb'];
+const TAB_ORDER = ['dashboard', 'log', 'history', 'program', 'fooddb'];
 
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
@@ -55,7 +55,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
   const todayYmd = getLocalYMD();
   const path = location.pathname.substring(1) || 'dashboard';
-  const setActiveTab = (tabId) => navigate(`/${tabId}`);
+  const setActiveTab = (tabId, swipeDir = null) => navigate(`/${tabId}`, { state: { swipeDir } });
 
   // Swipe kiri/kanan buat pindah tab utama — pola sama kayak App.jsx Logym. Elemen yang gak
   // boleh kesenggol (grafik, modal, dst) ditandai `.no-swipe` atau stopPropagation lokal.
@@ -71,8 +71,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     const dy = e.changedTouches[0].clientY - swipeStartRef.current.y;
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
       const idx = TAB_ORDER.indexOf(path);
-      if (dx < 0 && idx < TAB_ORDER.length - 1) setActiveTab(TAB_ORDER[idx + 1]);
-      else if (dx > 0 && idx > 0) setActiveTab(TAB_ORDER[idx - 1]);
+      if (dx < 0 && idx < TAB_ORDER.length - 1) setActiveTab(TAB_ORDER[idx + 1], 'left');
+      else if (dx > 0 && idx > 0) setActiveTab(TAB_ORDER[idx - 1], 'right');
     }
   };
 
@@ -603,7 +603,7 @@ function App() {
             </button>
           </>
         ) : (
-          'Memuat…'
+          <img src="/logo-dark.png" alt="LOMEAL Logo" className="w-40 h-40 object-contain animate-pulse drop-shadow-2xl" />
         )}
       </div>
     );

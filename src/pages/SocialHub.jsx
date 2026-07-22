@@ -37,7 +37,18 @@ const SocialHub = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, on
         className={`sticky top-0 z-10 ${t.navBg} border-b ${t.border} px-4 flex items-center justify-between`}
         style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))', paddingBottom: '0.75rem' }}
       >
-        <p className={`font-heading font-extrabold text-lg ${t.textMain}`}>Social Hub</p>
+        <div className="flex items-center gap-2">
+          <img 
+            src={theme === 'dark' ? '/banner-dark.png?v=3' : '/banner-light.png?v=3'} 
+            alt="Lomeal" 
+            className="h-10 w-auto object-contain drop-shadow-sm"
+            onError={(e) => {
+              e.target.style.display = 'none';
+              e.target.nextElementSibling.style.display = 'block';
+            }}
+          />
+          <p className={`font-heading font-extrabold text-lg ${t.textMain} hidden`} style={{ display: 'none' }}>Social Hub</p>
+        </div>
         <button onClick={onClose} className={`p-2 rounded-2xl ${t.btnBg} ${t.textMuted}`}>
           <X size={20} />
         </button>

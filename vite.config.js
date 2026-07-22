@@ -19,13 +19,9 @@ export default defineConfig({
         background_color: '#070a08',
         theme_color: '#070a08',
         icons: [
-          { src: '/icon-48.png', type: 'image/png', sizes: '48x48', purpose: 'any maskable' },
-          { src: '/icon-72.png', type: 'image/png', sizes: '72x72', purpose: 'any maskable' },
-          { src: '/icon-96.png', type: 'image/png', sizes: '96x96', purpose: 'any maskable' },
-          { src: '/icon-128.png', type: 'image/png', sizes: '128x128', purpose: 'any maskable' },
-          { src: '/icon-192.png', type: 'image/png', sizes: '192x192', purpose: 'any maskable' },
-          { src: '/icon-256.png', type: 'image/png', sizes: '256x256', purpose: 'any maskable' },
-          { src: '/icon-512.png', type: 'image/png', sizes: '512x512', purpose: 'any maskable' },
+          { src: '/pwa-192x192.png', type: 'image/png', sizes: '192x192', purpose: 'any' },
+          { src: '/pwa-512x512.png', type: 'image/png', sizes: '512x512', purpose: 'any' },
+          { src: '/maskable-icon-512x512.png', type: 'image/png', sizes: '512x512', purpose: 'maskable' },
         ],
       },
       workbox: {

@@ -1,9 +1,13 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Search, Plus, Camera, X, Trash2, Pencil, Loader2, ChevronLeft, Database, Globe } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { Search, Plus, Camera, Image, X, Trash2, Pencil, Loader2, ChevronLeft, Database, Globe } from 'lucide-react';
 import { searchFoods, FOOD_CATEGORIES, fetchOpenFoodFacts } from '../data/foodDatabase';
 import { NUTRIENTS } from '../data/nutrition';
-import { compressImageTo100KB, scanNutritionLabel } from '../utils/aiFood';
+import { compressImageTo100KB, analyzeSmartPhoto } from '../utils/aiFood';
 import { playSoundEffect } from '../utils/audio';
+import { checkAndCountAiUsage } from '../utils/foodLog';
+import ImageCropperModal from '../components/ImageCropperModal';
+import SpeedDialScanner from '../components/SpeedDialScanner';
 
 const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key, `${n.label} (${n.unit})`]);
 const EXTRA_NUTRIENT_FIELDS = NUTRIENTS.filter(n => !n.macro).map(n => [n.key, `${n.label} (${n.unit})`]);
@@ -14,13 +18,11 @@ const emptyForm = () => {
   return obj;
 };
 
-const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, showConfirm, soundEnabled }) => {
+const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, showConfirm, soundEnabled, user, todayYmd, AI_DAILY_LIMIT, theme }) => {
+  const location = useLocation();
   // ── Tab State ────────────────────────────────────────────────────
-  const [viewMode, setViewMode] = useState('all'); // 'all' | 'custom'
+  const [viewMode, setViewMode] = useState(location.state?.swipeDir === 'right' ? 'custom' : 'all'); // 'all' | 'custom'
 
-  // Swipe antar sub-tab Semua/Custom — pola sama kayak DatabaseTab Logym: kalau udah di
-  // ujung (all→kiri lagi, atau custom→kanan lagi), gak di-stopPropagation, jadi event-nya
-  // "jatuh" ke swipe handler global App.jsx yang pindah ke tab utama sebelah.
   const swipeXRef = useRef({ start: 0, end: 0 });
   const handleSubTabTouchStart = (e) => { swipeXRef.current.start = e.touches[0].clientX; };
   const handleSubTabTouchMove = (e) => { swipeXRef.current.end = e.touches[0].clientX; };
@@ -37,7 +39,10 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm());
   const [scanning, setScanning] = useState(false);
-  const fileInputRef = useRef(null);
+  const [ocrStatus, setOcrStatus] = useState('');
+  const [cropFile, setCropFile] = useState(null);
+  const cameraRef = useRef(null);
+  const galleryRef = useRef(null);
 
   // ── Online API State (OpenFoodFacts) ─────────────────────────────
   const [onlineFoods, setOnlineFoods] = useState([]);
@@ -48,7 +53,6 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     
-    // Only search online if term is >= 3 chars
     if (term.trim().length >= 3) {
       setOnlineLoading(true);
       searchTimeoutRef.current = setTimeout(async () => {
@@ -96,36 +100,64 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   const openEditForm = (food) => {
     setForm({
       name: food.name, grams: food.portion?.grams || 100,
+      kcal: food.nutrition?.kcal ?? '',
       ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, food.nutrition?.[k] ?? ''])),
     });
     setEditing(food);
+  };
+
+  const runOcrScan = async (file) => {
+    if (scanning || ocrStatus) return;
+    setScanning(true);
+    setOcrStatus('Menganalisis foto...');
+    try {
+      const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
+      if (!quota.allowed) { await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
+      
+      const { base64, mimeType } = await compressImageTo100KB(file);
+      const res = await analyzeSmartPhoto(aiKey, base64, mimeType);
+      
+      let parsed = {};
+      if (res.type === 'label') {
+        parsed = {
+          name: res.name || '',
+          grams: res.servingGrams || 100,
+          kcal: res.per100?.kcal ?? '',
+          ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, res.per100?.[k] ?? ''])),
+        };
+      } else {
+        const first = res.foods?.[0];
+        if (!first) throw new Error("Tidak menemukan makanan.");
+        parsed = {
+          name: first.name || '',
+          grams: first.grams || 100,
+          kcal: first.nutrition?.kcal ?? '',
+          ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, first.nutrition?.[k] ?? ''])),
+        };
+      }
+
+      setForm(parsed);
+      setEditing('new');
+      await showAlert(res.type === 'label' 
+        ? 'Tabel nutrisi berhasil dipindai oleh AI! Silakan cek & koreksi angkanya.' 
+        : 'Makanan di piring berhasil ditebak AI! Silakan simpan ke database.');
+    } catch (err) {
+      await showAlert(err.message === 'OUT_OF_SCOPE' ? 'Foto ini tidak terbaca sebagai tabel gizi atau makanan.' : `Gagal scan: ${err.message}`);
+    } finally {
+      setOcrStatus('');
+      setScanning(false);
+    }
   };
 
   const handleScanLabel = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
-    if (!quota.allowed) { await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
-    setScanning(true);
-    try {
-      const { base64, mimeType } = await compressImageTo100KB(file);
-      const res = await scanNutritionLabel(aiKey, base64, mimeType);
-      setForm({
-        name: res.name || '',
-        grams: 100,
-        ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, res.per100?.[k] ?? ''])),
-      });
-      setEditing('new');
-      await showAlert(`Berhasil dibaca dari label${res.servingSize ? ` (takaran saji tertulis: ${res.servingSize})` : ''}. Cek & koreksi angkanya sebelum simpan.`);
-    } catch (err) {
-      await showAlert(err.message === 'OUT_OF_SCOPE' ? 'Foto ini tidak terbaca sebagai label gizi.' : `Gagal scan: ${err.message}`);
-    }
-    setScanning(false);
+    setCropFile(file);
   };
 
   const saveForm = async () => {
-    const nutrition = {};
+    const nutrition = { kcal: Number(form.kcal) || 0 };
     NUTRIENT_FIELDS.forEach(([k]) => { nutrition[k] = Number(form[k]) || 0; });
     const grams = Number(form.grams) || 100;
     const factor = 100 / grams;
@@ -286,20 +318,30 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
           <button onClick={() => { openNewForm(); playSoundEffect('click', soundEnabled); }} className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl ${t.bgAccent} body-md shadow-glow`}>
             <Plus size={16} /> Tambah Manual
           </button>
-          <button
-            onClick={() => { fileInputRef.current?.click(); playSoundEffect('click', soundEnabled); }}
-            disabled={scanning}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl border ${t.borderAccentSoft} ${t.bgAccentSoft} ${t.textAccent} body-md disabled:opacity-50`}
-          >
-            {scanning ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />} Scan OCR
-          </button>
-          <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleScanLabel} className="hidden" />
+          <div className={`shrink-0 w-16 h-[48px] rounded-2xl border ${t.borderAccentSoft} ${t.bgAccentSoft} relative flex items-center justify-center`}>
+            {ocrStatus ? (
+              <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+                <div className="absolute inset-0 bg-amber-500/20 dark:bg-amber-400/20 w-full origin-left" style={{ animation: 'progressFill 10s cubic-bezier(0.1, 0.8, 0.2, 1) forwards' }} />
+              </div>
+            ) : null}
+            <div className="relative z-10 w-full h-full">
+              <SpeedDialScanner 
+                mainIcon={Camera}
+                direction="down"
+                mainColorClass={`w-full h-full ${t.textAccent} bg-transparent`}
+                disabled={scanning || !!ocrStatus}
+                onSelectCamera={() => cameraRef.current?.click()}
+                onSelectGallery={() => galleryRef.current?.click()}
+              />
+            </div>
+          </div>
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handleScanLabel} className="hidden" />
+          <input ref={galleryRef} type="file" accept="image/*" onChange={handleScanLabel} className="hidden" />
         </div>
       )}
 
       <div className="flex items-center justify-between mb-2 shrink-0">
         <p className={`text-[11px] font-bold ${t.textMuted}`}>Menampilkan {results.length} hasil</p>
-        {/* OpenFoodFacts dipensiunkan */}
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-2 pb-10 hide-scrollbar -mx-4 px-4 pt-1"
@@ -312,7 +354,6 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
                 <div className={`body-md font-bold ${t.textMain} flex items-start justify-between gap-2`}>
                   <span className="line-clamp-2 pr-2">{f.name}</span>
                   <div className="flex shrink-0 gap-1 flex-col items-end">
-                    {/* OpenFoodFacts dipensiunkan */}
                     {f.isCustom && <span className={`px-1.5 py-0.5 rounded text-[8px] ${t.bgAccentSoft} ${t.textAccent} uppercase tracking-widest`}>Custom</span>}
                   </div>
                 </div>
@@ -336,6 +377,17 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
           )}
         </div>
       </div>
+
+      {/* ===== CROPPER MODAL ===== */}
+      <ImageCropperModal
+        isOpen={!!cropFile}
+        imageFile={cropFile}
+        onClose={() => setCropFile(null)}
+        onCropComplete={(croppedFile) => {
+          setCropFile(null);
+          if (croppedFile) runOcrScan(croppedFile);
+        }}
+      />
     </div>
   );
 };

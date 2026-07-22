@@ -149,6 +149,26 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onRemove, customFoods
                 </div>
                 <button onClick={() => setSelected(s => ({ ...s, grams: s.grams + 25 }))} className={`p-3 rounded-2xl ${t.btnBg}`}><Plus size={16} className={t.textMain} /></button>
               </div>
+
+              {/* Quick URT Buttons */}
+              <div className="flex gap-2 overflow-x-auto hide-scrollbar mb-6 -mx-4 px-4 pb-1">
+                {[
+                  { label: '1 Porsi', g: selected.food.portion.grams },
+                  { label: '1 Sdm', g: 15 },
+                  { label: '1 Centong', g: 100 },
+                  { label: '1 Gelas', g: 200 },
+                  { label: '1 Potong', g: 50 },
+                  { label: '1 Piring', g: 250 },
+                  { label: '1 Buah', g: 100 },
+                  { label: '1 Mangkok', g: 250 },
+                ].map((u, i) => (
+                  <button key={i} onClick={() => setSelected(s => ({ ...s, grams: u.g }))}
+                    className={`shrink-0 px-3 py-1.5 rounded-xl border caption font-medium ${t.border} ${t.textMuted} hover:${t.bgAccentSoft} active:scale-95 transition-all`}>
+                    {u.label}
+                  </button>
+                ))}
+              </div>
+
               <div className={`grid grid-cols-4 gap-2 p-3 rounded-2xl ${t.bgSunken} mb-4`}>
                 {[['kcal', 'kkal'], ['protein', 'P (g)'], ['carbs', 'K (g)'], ['fat', 'L (g)']].map(([k, label]) => (
                   <div key={k} className="text-center">

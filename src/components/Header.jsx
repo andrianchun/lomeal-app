@@ -27,12 +27,23 @@ const Header = ({ t, theme, isOffline, logymUser, onOpenSocial, onOpenSettings, 
 
       {/* KIRI: LOGO */}
       <div className="flex items-center gap-2">
-        <span className={`w-8 h-8 rounded-xl ${t.bgAccent} flex items-center justify-center shadow-glow`}>
-          <Leaf size={18} strokeWidth={2.5} />
-        </span>
-        <span className={`font-heading font-extrabold text-lg tracking-tight ${t.textMain}`}>
-          Lo<span className={t.textAccent}>meal</span>
-        </span>
+        <img 
+          src={theme === 'dark' ? '/banner-dark.png?v=3' : '/banner-light.png?v=3'} 
+          alt="Lomeal" 
+          className="h-10 w-auto object-contain drop-shadow-sm"
+          onError={(e) => {
+            e.target.style.display = 'none';
+            e.target.nextElementSibling.style.display = 'flex';
+          }}
+        />
+        <div className="hidden items-center gap-2" style={{ display: 'none' }}>
+          <span className={`w-8 h-8 rounded-xl ${t.bgAccent} flex items-center justify-center shadow-glow`}>
+            <Leaf size={18} strokeWidth={2.5} />
+          </span>
+          <span className={`font-heading font-extrabold text-lg tracking-tight ${t.textMain}`}>
+            Lo<span className={t.textAccent}>meal</span>
+          </span>
+        </div>
       </div>
 
       {/* KANAN: OFFLINE → BELL → SETTINGS → AVATAR (PROFIL & SOSIAL) */}

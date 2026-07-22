@@ -217,12 +217,23 @@ const AuthPage = ({ t, theme, soundEnabled, onLogin }) => {
 
           {/* Logo */}
           <div className="absolute top-0 left-0 right-0 p-6 flex items-center gap-2" style={{ paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}>
-            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center shadow-glow">
-              <Leaf size={18} strokeWidth={2.5} className="text-white" />
-            </span>
-            <span className="font-heading font-extrabold text-lg tracking-tight text-white drop-shadow-lg">
-              Lo<span className="text-green-400">meal</span>
-            </span>
+            <img 
+              src={theme === 'dark' ? '/banner-dark.png?v=3' : '/banner-light.png?v=3'} 
+              alt="Lomeal" 
+              className="h-10 w-auto object-contain drop-shadow-sm"
+              onError={(e) => {
+                e.target.style.display = 'none';
+                e.target.nextElementSibling.style.display = 'flex';
+              }}
+            />
+            <div className="hidden items-center gap-2" style={{ display: 'none' }}>
+              <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center shadow-glow">
+                <Leaf size={18} strokeWidth={2.5} className="text-white" />
+              </span>
+              <span className="font-heading font-extrabold text-lg tracking-tight text-white drop-shadow-lg">
+                Lo<span className="text-green-400">meal</span>
+              </span>
+            </div>
           </div>
         </div>
       </div>

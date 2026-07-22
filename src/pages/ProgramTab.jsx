@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ChefHat, Plus, Trash2, X, Search, CalendarPlus, Share2, Loader2, Pill, GlassWater, CupSoda, Coffee, Beaker, Syringe, Tablets, ShieldPlus, Bot, ClipboardList, Sparkles } from 'lucide-react';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { EMPTY_NUTRITION, addNutrition, scaleNutrition, DIET_PROFILES } from '../data/nutrition';
@@ -21,7 +22,18 @@ const COLORS = [
  * TAB 4: RENCANA & PROGRAM
  */
 const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showConfirm, profile, saveProfilePatch, aiKey }) => {
-  const [activeTab, setActiveTab] = useState('resep'); // 'resep', 'suplemen_obat'
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState(location.state?.swipeDir === 'right' ? 'suplemen_obat' : 'resep'); // 'resep', 'suplemen_obat'
+  
+  const swipeXRef = useRef({ start: 0, end: 0 });
+  const handleSubTabTouchStart = (e) => { swipeXRef.current.start = e.touches[0].clientX; };
+  const handleSubTabTouchMove = (e) => { swipeXRef.current.end = e.touches[0].clientX; };
+  const handleSubTabTouchEnd = (e) => {
+    const dist = swipeXRef.current.start - swipeXRef.current.end;
+    if (Math.abs(dist) < 50) return;
+    if (dist > 0 && activeTab === 'resep') { setActiveTab('suplemen_obat'); e.stopPropagation(); }
+    else if (dist < 0 && activeTab === 'suplemen_obat') { setActiveTab('resep'); e.stopPropagation(); }
+  };
   const [editing, setEditing] = useState(null);  // draft resep di builder
   const [editingSupplement, setEditingSupplement] = useState(null);
   const [editingMedicine, setEditingMedicine] = useState(null);
@@ -369,7 +381,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 pt-4 pb-32">
+    <div className="max-w-2xl mx-auto px-4 pt-4 pb-32" onTouchStart={handleSubTabTouchStart} onTouchMove={handleSubTabTouchMove} onTouchEnd={handleSubTabTouchEnd}>
       
       {/* KARTU PROGRAM DIET (Logym Style) */}
       <div 

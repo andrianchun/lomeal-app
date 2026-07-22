@@ -104,9 +104,8 @@ input:disabled { opacity: 0.5; }
 }
 @keyframes progressFill {
   0% { transform: scaleX(0); opacity: 0; }
-  20% { opacity: 1; }
-  90% { transform: scaleX(0.95); opacity: 1; }
-  100% { transform: scaleX(1); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: scaleX(0.95); opacity: 1; }
 }
 .anim-slide-left {
     animation: customSlideInFromRight 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
