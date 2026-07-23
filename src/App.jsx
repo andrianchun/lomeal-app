@@ -22,6 +22,7 @@ import { computeDayTotals, calcTargets } from './data/nutrition';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import useDialog from './hooks/useDialog';
+import useToast from './hooks/useToast';
 
 const MEAL_REMINDER_ID = 1001;
 const TAB_ORDER = ['dashboard', 'log', 'history', 'program', 'fooddb'];
@@ -48,10 +49,20 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { dialog, showAlert, showConfirm } = useDialog(theme === 'dark');
+  const { toastPortal, showToast } = useToast(theme === 'dark');
 
   const [socialOpen, setSocialOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  // Draft Smart Input AI Lomeal (LogTab) diangkat ke sini (bukan state lokal LogTab) supaya
+  // tetap ada kalau user pindah tab lain lalu balik lagi — react-router unmount komponen tab
+  // yang tidak aktif, jadi state lokal bakal hilang kalau disimpan di LogTab.
+  const [chatText, setChatText] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiAbortController, setAiAbortController] = useState(null);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiTargetSession, setAiTargetSession] = useState('lunch');
 
   const todayYmd = getLocalYMD();
   const path = location.pathname.substring(1) || 'dashboard';
@@ -482,7 +493,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     waterGoal: profile?.targets?.waterGoal,
     lyfitToday: dashboardLyfitToday,
     lyfitYearData,
-    showAlert, showConfirm,
+    showAlert, showConfirm, showToast,
+    chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession,
   };
 
   return (
@@ -523,6 +535,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
           onClose={() => setSocialOpen(false)}
           onLogout={onLogout}
           showAlert={showAlert}
+          showToast={showToast}
           showConfirm={showConfirm}
         />
       )}
@@ -548,6 +561,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
           onClose={() => setSettingsOpen(false)}
           onLogout={onLogout}
           showAlert={showAlert}
+          showToast={showToast}
           showConfirm={showConfirm}
           exportData={exportData}
           handleImportFile={handleImportFile}
@@ -561,6 +575,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       )}
 
       {dialog}
+      {toastPortal}
     </div>
   );
 };

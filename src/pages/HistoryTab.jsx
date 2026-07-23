@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, ImageDown, Loader2, X, Bell, BellOff, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sparkles, ImageDown, Loader2, X, Bell, BellOff, Clock } from 'lucide-react';
 import FoodPickerModal from '../components/FoodPickerModal';
 import { MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, getMonthKey, DEFAULT_SESSION_TIMES } from '../data/constants';
 import { computeDayTotals } from '../data/nutrition';
@@ -14,7 +14,7 @@ import { AI_DAILY_LIMIT } from '../data/constants';
  * tanggal maju = Meal Prep. Klik tanggal → dropdown sub-card CRUD inline.
  * Bawah: Generate Evaluasi Mingguan (Gemini, manual) + Export Image.
  */
-const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, customFoods, recipes, aiKey, showAlert, saveProfilePatch }) => {
+const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, customFoods, recipes, aiKey, showAlert, showToast, saveProfilePatch }) => {
   const todayYmd = getLocalYMD();
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [expandedYmd, setExpandedYmd] = useState(null);
@@ -96,6 +96,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
     const meals = { ...(day.meals || {}) };
     meals[sessionId] = [...(meals[sessionId] || []), entry];
     saveDay(ymd, { ...day, meals });
+    showToast(`${entry.name} dicatat!`);
   };
 
   const setSessionTime = (ymd, sessionId, timeStr) => {
@@ -230,7 +231,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
                             className={`w-12 text-right caption bg-transparent border-b ${t.border} outline-none no-spinners ${t.textMain}`} />
                           <span className={`caption ${t.textMuted} ml-0.5 mr-1`}>g</span>
                           <span className={`caption ${t.textMuted} w-14 text-right`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
-                          <button onClick={() => removeEntry(expandedYmd, s.id, e.id)} className="p-1.5 text-red-400"><Trash2 size={12} /></button>
+                          <button onClick={() => removeEntry(expandedYmd, s.id, e.id)} className="p-1.5 text-red-400"><X size={12} /></button>
                         </div>
                       ))}
                     </div>
@@ -276,6 +277,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
         t={t} theme={theme} open={!!picker}
         onClose={() => setPicker(null)}
         customFoods={customFoods} recipes={recipes}
+        favoriteFoods={profile?.favoriteFoods || []}
         onAdd={(entry) => picker && addEntry(picker.ymd, picker.session, entry)}
       />
     </div>

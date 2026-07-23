@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { X, Search, Trash2, Check, Beaker, Coffee, CupSoda, GlassWater, Pill } from 'lucide-react';
+import { X, Search, Check, Beaker, Coffee, CupSoda, GlassWater, Pill } from 'lucide-react';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { EMPTY_NUTRITION, addNutrition } from '../data/nutrition';
 
@@ -124,7 +124,7 @@ const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods 
             <span className={`caption ${t.textMuted}`}>g</span>
             <span className={`caption w-14 text-right ${t.textMuted}`}>{Math.round(ing.nutrition.kcal)} kkal</span>
             <button onClick={() => setEditing(r => ({ ...r, ingredients: r.ingredients.filter((_, j) => j !== i) }))}
-              className="p-1.5 text-red-400"><Trash2 size={13} /></button>
+              className="p-1.5 text-red-400"><X size={13} /></button>
           </div>
         ))}
         {editing.ingredients.length === 0 && <p className={`body-md text-center py-2 ${t.textMuted}`}>Tidak ada bahan tambahan (Kkal 0).</p>}

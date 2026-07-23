@@ -2,7 +2,7 @@
 // (tanpa search user, edit post, image lightbox — lihat "sengaja belum digarap" di rencana).
 // Filter Semua/Diikuti/Teman, halo leaderboard top-10, like, komentar, hapus post sendiri, lapor.
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Heart, MessageCircle, Loader2, Plus, MoreHorizontal, Trash2, Flag, Send, Sparkles } from 'lucide-react';
+import { Heart, MessageCircle, Loader2, Plus, MoreHorizontal, X, Flag, Send, Sparkles } from 'lucide-react';
 import {
   getGlobalFeed, getFollowingFeed, toggleLike, deletePost,
   addComment, getComments, getWeeklyLeaderboard,
@@ -222,7 +222,7 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
                     <div className={`absolute right-0 top-6 z-10 w-40 rounded-2xl border ${t.border} ${t.bgCard} shadow-xl overflow-hidden`}>
                       {isMine ? (
                         <button onClick={() => handleDelete(post)} className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-bold text-rose-500 hover:bg-rose-500/10">
-                          <Trash2 size={14} /> Hapus
+                          <X size={14} /> Hapus
                         </button>
                       ) : (
                         <button onClick={() => handleReport(post)} className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs font-bold ${t.textMuted} hover:bg-black/5`}>

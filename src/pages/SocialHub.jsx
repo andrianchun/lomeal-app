@@ -12,7 +12,7 @@ const TABS = [
   { id: 'profil', label: 'Profil', icon: UserCircle2 },
 ];
 
-const SocialHub = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, onClose, onLogout, showAlert, showConfirm }) => {
+const SocialHub = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, onClose, onLogout, showAlert, showToast, showConfirm }) => {
   const [tab, setTab] = useState(logymUser ? 'feed' : 'profil');
 
   // Swipe kiri/kanan pindah tab Feed/Studio/Profil — pola sama kayak swipe lokal
@@ -92,6 +92,7 @@ const SocialHub = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, on
             saveProfilePatch={saveProfilePatch}
             onLogout={onLogout}
             showAlert={showAlert}
+            showToast={showToast}
             showConfirm={showConfirm}
           />
         )}

@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ChefHat, Plus, Trash2, X, Search, CalendarPlus, Share2, Loader2, Pill, GlassWater, CupSoda, Coffee, Beaker, Syringe, Tablets, ShieldPlus, Bot, ClipboardList, Sparkles } from 'lucide-react';
+import { ChefHat, Plus, X, Search, CalendarPlus, Share2, Loader2, Pill, GlassWater, CupSoda, Coffee, Beaker, Syringe, Tablets, ShieldPlus, Bot, ClipboardList, Sparkles } from 'lucide-react';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { EMPTY_NUTRITION, addNutrition, scaleNutrition, DIET_PROFILES } from '../data/nutrition';
 import { MEAL_SESSIONS, getLocalYMD, DAY_NAMES_ID } from '../data/constants';
@@ -21,7 +21,7 @@ const COLORS = [
 /**
  * TAB 4: RENCANA & PROGRAM
  */
-const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showConfirm, profile, saveProfilePatch, aiKey }) => {
+const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showToast, showConfirm, profile, saveProfilePatch, aiKey }) => {
   const location = useLocation();
   const [activeTab, setActiveTab] = useState(location.state?.swipeDir === 'right' ? 'suplemen_obat' : 'resep'); // 'resep', 'suplemen_obat'
   
@@ -121,7 +121,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
       };
       saveMealPrepsFn([newBatch, ...mealPreps]);
     }
-    showAlert(`Berhasil memasak ${r.portions} porsi ${r.name}! 👨‍🍳`);
+    showToast(`${r.portions} porsi ${r.name} berhasil dimasak! 👨‍🍳`);
   };
 
   const deleteBatch = async (b) => {
@@ -264,7 +264,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
             <span className={`caption ${t.textMuted}`}>g</span>
             <span className={`caption w-14 text-right ${t.textMuted}`}>{Math.round(ing.nutrition.kcal)} kkal</span>
             <button onClick={() => setEditing(r => ({ ...r, ingredients: r.ingredients.filter((_, j) => j !== i) }))}
-              className="p-1.5 text-red-400"><Trash2 size={13} /></button>
+              className="p-1.5 text-red-400"><X size={13} /></button>
           </div>
         ))}
         {editing.ingredients.length === 0 && <p className={`body-md text-center py-4 ${t.textMuted}`}>Belum ada bahan — cari di atas ⬆️</p>}
@@ -333,14 +333,14 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
       perPortion: { kcal: 186.5, protein: 23, carbs: 0, fat: 10, sodium: 45, sugar: 0, cholesterol: 73 }
     };
     saveRecipesFn([aiRecipe, ...recipes]);
-    showAlert(`1 Resep Offline berhasil ditambahkan ke Buku Resep! 🍲`);
+    showToast(`1 Resep Offline berhasil ditambahkan ke Buku Resep! 🍲`);
   };
 
   const generateTrueAIRecipes = async () => {
     const dietName = currentDiet.label;
     if (!(await showConfirm(`Panggil AI sesungguhnya untuk meracik resep khusus diet "${dietName}"? Pastikan koneksi internet stabil.`))) return;
     
-    showAlert(`Memanggil AI untuk memformulasikan resep ${dietName}... 🤖`);
+    showToast(`Memanggil AI untuk memformulasikan resep ${dietName}... 🤖`, { type: 'info', duration: 4000 });
     try {
         const generated = await generateDietRecipe(aiKey, {
             dietProfile: currentDiet.id,
@@ -370,7 +370,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
         aiRecipe.perPortion = scaleNutrition(tNut, 1 / aiRecipe.portions);
 
         saveRecipesFn([aiRecipe, ...recipes]);
-        showAlert(`Resep AI "${aiRecipe.name}" berhasil dibuat! 🍲`);
+        showToast(`Resep AI "${aiRecipe.name}" berhasil dibuat! 🍲`);
     } catch (err) {
         if (err.message === 'RATE_LIMIT_EXCEEDED') {
             showAlert('Limit AI harian habis! Gunakan Generate Offline atau masukkan API Key pribadimu di Pengaturan.');
@@ -438,7 +438,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
           onSave={async (newProfileData, showAlertMsg = true) => {
               await saveProfilePatch(newProfileData);
               if (showAlertMsg) {
-                  showAlert('Profil Medis & Target Diet berhasil diperbarui! ✅');
+                  showToast('Profil Medis & Target Diet berhasil diperbarui! ✅');
               }
           }}
           generateOfflineRecipes={generateOfflineRecipes}
@@ -484,7 +484,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
                         Dimakan: <span className={`font-bold ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{b.initialPortions - b.remainingPortions}</span> / {b.initialPortions} porsi · Sisa: <span className={b.remainingPortions > 0 ? 'text-emerald-500 font-bold' : 'text-red-400 font-bold'}>{b.remainingPortions}</span>
                       </p>
                     </div>
-                    <button onClick={() => deleteBatch(b)} className="p-2 text-red-400"><Trash2 size={14} /></button>
+                    <button onClick={() => deleteBatch(b)} className="p-2 text-red-400"><X size={14} /></button>
                   </div>
                   <div className="flex gap-2 mt-3">
                     <button onClick={() => setAssigning(b)} disabled={b.remainingPortions <= 0}
@@ -525,7 +525,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
                   {r.ingredients.length} bahan · {r.portions} porsi · {Math.round(r.perPortion?.kcal || 0)} kkal/porsi
                 </p>
               </div>
-              <button onClick={() => deleteRecipe(r)} className="p-2 text-red-400"><Trash2 size={14} /></button>
+              <button onClick={() => deleteRecipe(r)} className="p-2 text-red-400"><X size={14} /></button>
             </div>
             <p className={`caption font-medium mt-1 ${t.textMuted} truncate`}>{r.ingredients.map(i => i.name).join(', ')}</p>
             <div className="flex gap-2 mt-3">
@@ -579,7 +579,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
                     </div>
                     <button onClick={async () => {
                       if (await showConfirm(`Hapus minuman "${r.name}"?`)) saveProfilePatch({ drinkTemplates: drinkTemplates.filter(x => x.id !== r.id) });
-                    }} className="p-2 text-red-400"><Trash2 size={16} /></button>
+                    }} className="p-2 text-red-400"><X size={16} /></button>
                   </div>
                 );
               })}
@@ -619,7 +619,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
                     </div>
                     <button onClick={async () => {
                       if (await showConfirm(`Hapus obat "${m.name}"?`)) saveProfilePatch({ medicines: medicines.filter(x => x.id !== m.id) });
-                    }} className="p-2 text-red-400"><Trash2 size={16} /></button>
+                    }} className="p-2 text-red-400"><X size={16} /></button>
                   </div>
                 );
               })}

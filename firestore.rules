@@ -23,5 +23,12 @@ service cloud.firestore {
         allow read, write: if isOwner(uid);
       }
     }
+
+    // Cache pola teks makanan lintas-user (mis. "nasi kucing" → hasil parse gizi),
+    // dipakai nlpParser.js supaya user lain tidak minta ulang ke AI untuk teks yang
+    // sama. Bukan data pribadi — hanya teks makanan + estimasi gizi.
+    match /globalPatternCache/{docId} {
+      allow read, write: if isSignedIn();
+    }
   }
 }

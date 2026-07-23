@@ -14,6 +14,22 @@ import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, s
 import { uploadToCloudinary } from '../utils/cloudinary';
 import SpeedDialScanner from '../components/SpeedDialScanner';
 import WaterSlider from '../components/WaterSlider';
+import SwipeInput from '../components/SwipeInput';
+import { URT_DICTIONARY, normalizeUnit } from '../utils/urtMapping';
+
+// Satuan yang bisa dipilih user di sheet hasil AI — dikonversi otomatis ke gram
+// lewat URT_DICTIONARY (tabel ukuran rumah tangga generik, lihat urtMapping.js).
+const UNIT_OPTIONS = ['g', 'sdt', 'sdm', 'centong', 'gelas', 'cangkir', 'mangkok', 'piring', 'porsi', 'potong', 'iris', 'lembar', 'tusuk', 'ekor', 'butir', 'biji', 'buah', 'bungkus', 'kepal', 'genggam', 'batang', 'siung'];
+
+// Simpan baseline (gram & gizi) tetap di tiap item hasil AI begitu muncul di preview —
+// tanpa ini, edit gramasi dihitung sebagai rasio ke NILAI SEBELUMNYA (bukan ke baseline
+// tetap): kalau user sempat ketik 0, rasio jadi 0/0 dan macet permanen di 0 kkal walau
+// gramasi diisi ulang. Edit gramasi berikutnya selalu dihitung ulang dari baseline ini.
+const withBase = (foods) => (foods || []).map(f => ({
+  ...f,
+  baseGrams: f.grams > 0 ? f.grams : 1,
+  baseNutrition: { ...f.nutrition },
+}));
 
 const ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus };
 const COLORS = [
@@ -28,11 +44,12 @@ const COLORS = [
  * Date strip → quick stats + water tracker → Meal Grid 2 kolom (piring + ring
  * makro) → Smart Input Bar (chat NL / kamera / voice / manual presisi).
  */
-const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, aiKey, showAlert, waterGoal }) => {
+const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, aiKey, showAlert, showToast, waterGoal,
+  chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession }) => {
 
   const todayYmd = getLocalYMD();
   const [selectedYmd, setSelectedYmd] = useState(todayYmd);
-  const [pickerSession, setPickerSession] = useState(null); // sessionId saat FoodPicker terbuka
+  const [pickerOpen, setPickerOpen] = useState(false); // FoodPicker terbuka? (nambah ke batch aiResult yang sama)
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
   const [copySourceSession, setCopySourceSession] = useState(null);
   const [copyTargetSessions, setCopyTargetSessions] = useState([]);
@@ -40,11 +57,6 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [editingPhotoObj, setEditingPhotoObj] = useState(null);
-  const [chatText, setChatText] = useState('');
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiAbortController, setAiAbortController] = useState(null);
-  const [aiResult, setAiResult] = useState(null); // { foods:[...], photoDataUrl? }
-  const [aiTargetSession, setAiTargetSession] = useState('lunch');
   const [waterEdit, setWaterEdit] = useState(false);
   const [listening, setListening] = useState(false);
   const [rackExpanded, setRackExpanded] = useState(false);
@@ -77,40 +89,44 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
   const stripRef = useRef(null);
   const mountRef = useRef(true);
-  
+
+  // Auto-scroll tombol sesi aktif ke tengah di sheet hasil AI, biar kelihatan walau
+  // daftar sesi kepanjangan dan sesi terpilih ada di ujung yang ke-scroll keluar layar.
+  const sessionStripRef = useRef(null);
   useEffect(() => {
-    if (stripRef.current && mountRef.current) {
-      const activeBtn = stripRef.current.querySelector(`button[data-ymd="${selectedYmd}"]`);
-      if (activeBtn) {
-        const container = stripRef.current;
-        const scrollLeft = activeBtn.offsetLeft - container.offsetWidth / 2 + activeBtn.offsetWidth / 2;
-        container.scrollTo({ left: scrollLeft, behavior: 'instant' });
-      }
-      mountRef.current = false;
+    if (!aiResult || !sessionStripRef.current) return;
+    const container = sessionStripRef.current;
+    const activeBtn = container.querySelector(`button[data-session="${aiTargetSession}"]`);
+    if (activeBtn) {
+      container.scrollTo({ left: activeBtn.offsetLeft - container.offsetWidth / 2 + activeBtn.offsetWidth / 2, behavior: 'smooth' });
     }
+  }, [aiResult, aiTargetSession]);
+
+  // Kunci scroll halaman di belakang selama sheet hasil AI kebuka.
+  useEffect(() => {
+    if (!aiResult) return;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, [!!aiResult]);
+
+  useEffect(() => {
+    if (!stripRef.current) return;
+    const activeBtn = stripRef.current.querySelector(`button[data-ymd="${selectedYmd}"]`);
+    if (activeBtn) {
+      const container = stripRef.current;
+      const scrollLeft = activeBtn.offsetLeft - container.offsetWidth / 2 + activeBtn.offsetWidth / 2;
+      container.scrollTo({ left: scrollLeft, behavior: mountRef.current ? 'instant' : 'smooth' });
+    }
+    mountRef.current = false;
   }, [selectedYmd]);
 
   const persistDay = (newDay) => saveDay(selectedYmd, newDay);
-
-  const addEntryToSession = (sessionId, entry) => {
-    const meals = { ...(day.meals || {}) };
-    const isFirstEntry = (meals[sessionId] || []).length === 0;
-    meals[sessionId] = [...(meals[sessionId] || []), entry];
-    
-    const newDay = { ...day, meals };
-    if (selectedYmd === todayYmd && isFirstEntry) {
-      const sessionTimes = { ...(day.sessionTimes || {}) };
-      sessionTimes[sessionId] = entry.time || new Date().toTimeString().slice(0, 5);
-      newDay.sessionTimes = sessionTimes;
-    }
-    
-    persistDay(newDay);
-  };
 
   const removeEntry = (sessionId, entryId) => {
     const meals = { ...(day.meals || {}) };
     meals[sessionId] = (meals[sessionId] || []).filter(e => e.id !== entryId);
     persistDay({ ...day, meals });
+    showToast('Item dihapus.', { type: 'info' });
   };
 
   const toggleEatenStatus = (sessionId, e, checked) => {
@@ -213,7 +229,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     persistDay({ ...day, meals });
     setCopySourceSession(null);
     setCopyTargetSessions([]);
-    showAlert(isMove ? 'Berhasil memindah menu!' : 'Berhasil menyalin menu!');
+    showToast(isMove ? 'Menu berhasil dipindah!' : 'Menu berhasil disalin!');
   };
 
   // ---------- Water Tracker ----------
@@ -233,6 +249,15 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     return true;
   };
 
+  // Batch: kalau sheet hasil AI sudah kebuka (aiResult ada isinya), item baru NAMBAH ke
+  // list yang sama alih-alih ganti/nutup sheet — jadi user bisa kirim beberapa kali sebelum
+  // pencet "Catat". Sesi target cuma di-auto-pilih untuk item PERTAMA di batch; abis itu
+  // ikut pilihan user biar gak ke-reset tiap nambah item baru.
+  const appendAiResult = (newFoods, meta = {}) => {
+    if (!aiResult) setAiTargetSession(getNearestSessionId());
+    setAiResult(prev => prev ? { ...prev, foods: [...prev.foods, ...withBase(newFoods)] } : { foods: withBase(newFoods), ...meta });
+  };
+
   const runMagicPrompt = async (forcedText = null) => {
     const text = typeof forcedText === 'string' ? forcedText.trim() : chatText.trim();
     if (!text || aiBusy) return;
@@ -244,8 +269,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     const normalizedText = text.toLowerCase();
     const localCache = getLocalPatternCache();
     if (localCache[normalizedText]) {
-       setAiTargetSession(getNearestSessionId());
-       setAiResult({ foods: localCache[normalizedText], isOffline: true });
+       appendAiResult(localCache[normalizedText], { isOffline: true });
        setChatText('');
        setAiAbortController(null);
        return;
@@ -256,8 +280,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     const globalFoods = await checkGlobalPatternCache(normalizedText);
     if (globalFoods && globalFoods.length > 0) {
        saveLocalPatternCache(text, globalFoods);
-       setAiTargetSession(getNearestSessionId());
-       setAiResult({ foods: globalFoods, isOffline: true, source: 'global_cache' });
+       appendAiResult(globalFoods, { isOffline: true, source: 'global_cache' });
        setChatText('');
        setAiAbortController(null);
        setAiBusy(false);
@@ -268,12 +291,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     try {
       const customFoods = Object.values(profile?.customFoods || {});
       const localResult = runLocalNlpParse(text, customFoods);
-      
+
       if (localResult && localResult.foods?.length > 0) {
           saveLocalPatternCache(text, localResult.foods);
           // Optional: bisa save ke global pattern juga, tapi lokal mungkin kurang standar
-          setAiTargetSession(getNearestSessionId());
-          setAiResult({ foods: localResult.foods, isOffline: true }); // Tanda diproses lokal
+          appendAiResult(localResult.foods, { isOffline: true }); // Tanda diproses lokal
           setChatText('');
           setAiAbortController(null);
           setAiBusy(false);
@@ -291,12 +313,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     setAiBusy(true);
     try {
       const res = await parseFoodText(aiKey, text, controller.signal, customFoods);
-      if (res.foods?.length) { 
+      if (res.foods?.length) {
          saveLocalPatternCache(text, res.foods);
          saveGlobalPatternCache(text, res.foods);
-         setAiTargetSession(getNearestSessionId());
-         setAiResult({ foods: res.foods, isOffline: false, originalInput: text }); 
-         setChatText(''); 
+         appendAiResult(res.foods, { isOffline: false });
+         setChatText('');
       }
       else await showAlert('AI tidak menemukan makanan pada teks itu. Coba lebih spesifik, mis. "nasi 1 centong, ayam goreng 1 potong".');
     } catch (e) {
@@ -424,8 +445,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       }
       
       if (items.length) {
-         setAiTargetSession(getNearestSessionId());
-         setAiResult({ foods: items, photoDataUrl: dataUrl, photoFile: file, isOcr: res.type === 'label' });
+         appendAiResult(items, { photoDataUrl: dataUrl, photoFile: file, isOcr: res.type === 'label' });
       }
       else await showAlert('AI tidak mengenali makanan di foto. Coba sudut/cahaya lain, atau input manual.');
     } catch (e) {
@@ -487,6 +507,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     
     persistDay(newDay);
     setAiResult(null);
+    showToast(`${foods.length} catatan makanan berhasil disimpan!`);
   };
 
   // ---------- Voice (Web Speech API bila tersedia) ----------
@@ -617,8 +638,12 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
   return (
     <div className="max-w-2xl mx-auto px-4 pt-3 pb-52">
-      {/* ===== HORIZONTAL DATE STRIP ===== */}
-      <div className="flex gap-1.5 overflow-x-auto hide-scrollbar -mx-4 px-4 pb-1 no-swipe"
+      {/* ===== HORIZONTAL DATE STRIP (dikunci, gak ikut scroll vertikal) =====
+          t.bgApp sama persis dengan background body (background-attachment: fixed, posisi
+          dihitung dari viewport) jadi nyambung mulus walau strip-nya sticky di atas konten
+          yang lewat di baliknya. */}
+      <div className={`sticky z-30 -mx-4 px-4 pt-1 pb-2 ${t.bgApp}`} style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))' }}>
+      <div className="flex gap-1.5 overflow-x-auto hide-scrollbar no-swipe"
         ref={stripRef}>
         {dates.map(d => {
           const active = d.ymd === selectedYmd;
@@ -626,12 +651,13 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           const isTodayBtn = d.ymd === todayYmd;
           return (
             <button key={d.ymd} data-ymd={d.ymd} onClick={() => setSelectedYmd(d.ymd)}
-              className={`shrink-0 w-11 flex flex-col items-center justify-center rounded-2xl transition-all py-2 border-2 ${active ? `border-transparent ${t.bgAccent} shadow-glow` : isTodayBtn ? `border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)] ${t.bgCardSoft}` : `border-transparent ${t.bgCardSoft}`} ${future ? 'opacity-50' : ''}`}>
+              className={`shrink-0 w-11 flex flex-col items-center justify-center rounded-2xl transition-all py-2 ${active ? `${t.bgAccent} shadow-glow` : isTodayBtn ? `${t.bgAccentSoft}` : `${t.bgCardSoft}`} ${future ? 'opacity-50' : ''}`}>
               <span className={`caption ${active ? 'text-white/80' : isTodayBtn ? 'text-emerald-500' : t.textMuted}`}>{d.dow}</span>
               <span className={`text-sm font-black ${active ? 'text-white' : isTodayBtn ? 'text-emerald-500' : t.textMain}`}>{d.day}</span>
             </button>
           );
         })}
+      </div>
       </div>
 
       {/* ===== QUICK STATS ===== */}
@@ -668,8 +694,16 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       {/* ===== WATER TRACKER (Mengambang di atas input bar) ===== */}
       <div className="fixed left-0 right-0 z-30 pointer-events-none px-3" style={{ bottom: 'calc(180px + env(safe-area-inset-bottom, 20px))' }}>
          <div className="max-w-2xl mx-auto flex justify-end pointer-events-none">
-             <div 
-                 className={`pointer-events-auto flex items-end justify-end gap-2 rounded-[32px] transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] ${rackExpanded ? `backdrop-blur-xl border ${theme === 'dark' ? 'bg-black/20 border-white/10' : 'bg-white/40 border-black/5'} shadow-2xl pl-2 pr-2 py-2` : ''}`}
+             <div
+                 // p-2 & border SELALU ada (cuma warnanya yang transisi transparent↔terlihat) —
+                 // sebelumnya border/padding cuma nempel pas rackExpanded, jadi border "muncul
+                 // mendadak" (keliatan kayak outline) dan tinggi kontainer berubah pas toggle,
+                 // bikin rak-nya geser ke atas/bawah gak perlu (posisi bottom fixed).
+                 className={`pointer-events-auto flex items-end justify-end gap-2 rounded-[32px] p-2 border transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] ${
+                   rackExpanded
+                     ? `backdrop-blur-xl shadow-2xl ${theme === 'dark' ? 'bg-black/20 border-white/10' : 'bg-white/40 border-black/5'}`
+                     : 'backdrop-blur-none shadow-none bg-transparent border-transparent'
+                 }`}
                  style={{ width: rackExpanded ? '100%' : '90px' }}
              >
                  
@@ -787,21 +821,24 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
               <Send size={22} />
             </button>
           ) : (
-            <button onClick={() => setPickerSession(detailSession || getNearestSessionId())} className={`relative z-10 shrink-0 p-3.5 rounded-full ${t.bgAccent} shadow-lg transition-transform active:scale-95`} aria-label="Input manual presisi">
+            <button onClick={() => { if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId()); setPickerOpen(true); }} className={`relative z-10 shrink-0 p-3.5 rounded-full ${t.bgAccent} shadow-lg transition-transform active:scale-95`} aria-label="Input manual presisi">
               <Plus size={22} />
             </button>
           )}
         </div>
       </div>
 
-      {/* ===== SHEET KONFIRMASI HASIL AI ===== */}
+      {/* ===== SHEET KONFIRMASI HASIL AI (batch — smart bar tetap aktif di bawahnya buat nambah item lagi) =====
+          Mulai di bawah header (bukan top-0) biar gak numpuk header, dan belakangnya di-blur+dim
+          + gak bisa di-scroll selama sheet ini kebuka (lihat useEffect scroll-lock di atas). */}
       {aiResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe" onClick={() => setAiResult(null)}>
+        <div className="fixed inset-x-0 z-40 flex flex-col justify-end items-center p-4 no-swipe bg-black/40 backdrop-blur-sm"
+          style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))', bottom: 'calc(170px + env(safe-area-inset-bottom, 20px))' }}
+          onClick={() => setAiResult(null)}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-[85vh] overflow-y-auto hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
+            className={`w-full max-w-sm max-h-full overflow-y-auto hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={16} className={t.textAccent} />
-              <h2 className={`h2 ${t.textMain}`}>Hasil Pemindaian AI</h2>
+              <h2 className={`h2 ${t.textMain}`}>Catat Makanan</h2>
               <button onClick={() => setAiResult(null)} className={`ml-auto p-2 rounded-xl ${t.btnBg}`}><X size={15} className={t.textMuted} /></button>
             </div>
             {aiResult.photoDataUrl && (
@@ -810,11 +847,12 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
               </div>
             )}
             <div className="space-y-1.5 mb-3">
-              {aiResult.foods.map((f, i) => (
-                <div key={i} className={`relative flex flex-col p-3 rounded-2xl border ${t.border} ${t.bgCard}`}>
-                  <button onClick={() => setAiResult(r => ({ ...r, foods: r.foods.filter((_, j) => j !== i) }))}
-                    className="absolute top-3 right-3 p-1.5 rounded-xl text-red-400 z-10"><Trash2 size={14} /></button>
-                  
+              {aiResult.foods.map((f, i) => {
+                const unit = URT_DICTIONARY[normalizeUnit(f.unit)] ? normalizeUnit(f.unit) : 'g';
+                const isGram = unit === 'g' || unit === 'ml';
+                return (
+                <div key={i} className={`flex items-start gap-2 p-3 rounded-2xl border ${t.border} ${t.bgCard}`}>
+                <div className="flex-1 min-w-0">
                   {aiResult.isOcr ? (
                     <div className="space-y-3 pt-1">
                        <input type="text" className={`w-11/12 bg-transparent border-b border-dashed ${t.border} outline-none body-md font-bold ${t.textMain}`} value={f.name} onChange={e => {
@@ -824,91 +862,91 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                        <div className="grid grid-cols-2 gap-3 mt-2">
                          <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
                            <label className={`caption ${t.textMuted} flex items-center gap-1`}><Utensils size={12}/> Takaran (g/ml)</label>
-                           <input type="number" className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.grams || ''} onChange={e => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, grams: Number(e.target.value) || 0 } : x) }));
+                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.grams || 0} min={0} onChange={(v) => {
+                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, grams: v } : x) }));
                            }} />
                          </div>
                          <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
                            <label className={`caption ${t.textMuted} flex items-center gap-1`}><Flame size={12}/> Kalori (kkal)</label>
-                           <input type="number" className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.kcal || ''} onChange={e => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, kcal: Number(e.target.value) || 0 } } : x) }));
+                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.kcal || 0} min={0} step={5} onChange={(v) => {
+                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, kcal: v } } : x) }));
                            }} />
                          </div>
                          <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
                            <label className={`caption ${t.textMuted} flex items-center gap-1`}><Activity size={12}/> Protein (g)</label>
-                           <input type="number" className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.protein || ''} onChange={e => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, protein: Number(e.target.value) || 0 } } : x) }));
+                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.protein || 0} min={0} onChange={(v) => {
+                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, protein: v } } : x) }));
                            }} />
                          </div>
                          <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
                            <label className={`caption ${t.textMuted} flex items-center gap-1`}><Activity size={12}/> Karbo (g)</label>
-                           <input type="number" className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.carbs || ''} onChange={e => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, carbs: Number(e.target.value) || 0 } } : x) }));
+                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.carbs || 0} min={0} onChange={(v) => {
+                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, carbs: v } } : x) }));
                            }} />
                          </div>
                          <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
                            <label className={`caption ${t.textMuted} flex items-center gap-1`}><Activity size={12}/> Lemak (g)</label>
-                           <input type="number" className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.fat || ''} onChange={e => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, fat: Number(e.target.value) || 0 } } : x) }));
+                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.fat || 0} min={0} onChange={(v) => {
+                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, fat: v } } : x) }));
                            }} />
                          </div>
                        </div>
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-between w-full">
-                      <div className="flex-1 mr-2">
-                        <p className={`body-md ${t.textMain} flex items-center gap-1.5`}>
-                          {f.name}
-                          {f.lowConfidence && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500" title="AI kurang yakin dengan estimasi ini — cek manual">⚠️ Perkiraan</span>
-                          )}
-                        </p>
-                        <p className={`caption font-medium ${t.textMuted}`}>
-                          <input type="number" inputMode="numeric" value={Math.round(f.grams)} onChange={(e) => {
-                            const grams = Number(e.target.value) || 0;
-                            const factor = f.grams > 0 ? grams / f.grams : 0;
-                            setAiResult(r => ({
-                              ...r,
-                              foods: r.foods.map((x, j) => j === i ? {
-                                ...x, grams,
-                                nutrition: Object.fromEntries(Object.entries(x.nutrition).map(([k, v]) => [k, Math.round(v * factor * 10) / 10])),
-                              } : x),
-                            }));
-                          }} className={`w-14 bg-transparent border-b ${t.border} outline-none no-spinners text-center ${t.textMain}`} />g
-                          &nbsp;· {Math.round(f.nutrition?.kcal || 0)} kkal · P{Math.round(f.nutrition?.protein || 0)} K{Math.round(f.nutrition?.carbs || 0)} L{Math.round(f.nutrition?.fat || 0)}
-                        </p>
+                  ) : (() => {
+                    const unitWeight = isGram ? 1 : URT_DICTIONARY[unit];
+                    const qty = Math.round((f.grams / unitWeight) * 10) / 10;
+                    const applyGrams = (grams) => {
+                      const baseGrams = f.baseGrams || f.grams || 1;
+                      const baseNutrition = f.baseNutrition || f.nutrition;
+                      const factor = grams / baseGrams;
+                      setAiResult(r => ({
+                        ...r,
+                        foods: r.foods.map((x, j) => j === i ? {
+                          ...x, grams,
+                          nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 10) / 10])),
+                        } : x),
+                      }));
+                    };
+                    return (
+                      <div className="flex items-center justify-between w-full gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className={`body-md ${t.textMain} truncate`}>{f.name}</p>
+                          <p className={`caption font-medium ${t.textMuted}`}>
+                            {Math.round(f.nutrition?.kcal || 0)} kkal · P {Math.round(f.nutrition?.protein || 0)}g · K {Math.round(f.nutrition?.carbs || 0)}g · L {Math.round(f.nutrition?.fat || 0)}g
+                          </p>
+                        </div>
+                        <div className="shrink-0 flex flex-col items-center gap-0.5">
+                          <div className={`px-3 py-1.5 rounded-xl ${t.bgSunken}`}>
+                            <SwipeInput value={qty} min={0} onChange={(newQty) => applyGrams(Math.round(newQty * unitWeight))}
+                              className={`w-10 bg-transparent body-lg outline-none no-spinners ${t.textMain}`} />
+                          </div>
+                          <select value={unit} onChange={(e) => {
+                            const newUnit = e.target.value;
+                            const newUnitWeight = (newUnit === 'g' || newUnit === 'ml') ? 1 : URT_DICTIONARY[newUnit];
+                            setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, unit: newUnit, grams: Math.round(qty * newUnitWeight) } : x) }));
+                          }} className={`bg-transparent text-[10px] font-bold outline-none text-center ${t.textMuted}`}>
+                            {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
+                          </select>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
-              ))}
+                <div className="shrink-0 flex flex-col items-center gap-1">
+                  <button onClick={() => setAiResult(r => ({ ...r, foods: r.foods.filter((_, j) => j !== i) }))}
+                    className={`p-2 rounded-xl text-red-400 ${t.bgSunken}`}><X size={16} /></button>
+                  {!aiResult.isOcr && !isGram && <span className={`text-[10px] ${t.textMuted}`}>≈{Math.round(f.grams)} g</span>}
+                </div>
+                </div>
+              );})}
             </div>
 
-            {/* Chat Revisi AI */}
-            {!aiResult.isOffline && (
-              <div className={`mb-4 flex items-center gap-2 p-2 rounded-2xl border ${t.border} ${t.bgSunken}`}>
-                <input
-                  type="text"
-                  placeholder="Koreksi (mis: nasi setengah aja)"
-                  className={`flex-1 bg-transparent outline-none body-md px-2 ${t.textMain} placeholder:${t.textMuted}`}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.target.value.trim()) {
-                      const correction = e.target.value.trim();
-                      e.target.value = '';
-                      runMagicPrompt(`Koreksi input sebelumnya ("${aiResult.originalInput || 'foto'}") dengan instruksi ini: ${correction}`);
-                      setAiResult(null); // Tutup sementara biar muncul loading di smart bar
-                    }
-                  }}
-                />
-                <div className={`p-2 rounded-xl ${t.bgAccent} pointer-events-none`}><Send size={16} /></div>
-              </div>
-            )}
-            <p className={`caption font-medium mb-1.5 ${t.textMuted}`}>Masukkan ke sesi:</p>
-            <div className="flex gap-1.5 overflow-x-auto hide-scrollbar mb-3">
+            <p className={`caption font-medium mb-2 ${t.textMuted}`}>Masukkan ke sesi:</p>
+            <div ref={sessionStripRef} className="flex gap-2 overflow-x-auto hide-scrollbar mb-4 -mx-1 px-1">
               {MEAL_SESSIONS.map(s => (
-                <button key={s.id} onClick={() => setAiTargetSession(s.id)}
-                  className={`shrink-0 px-3 py-2 rounded-xl border caption ${aiTargetSession === s.id ? `${t.bgAccentSoft} ${t.borderAccentSoft} ${t.textAccent}` : `${t.border} ${t.textMuted}`}`}>
-                  {s.emoji} {s.label}
+                <button key={s.id} data-session={s.id} onClick={() => setAiTargetSession(s.id)}
+                  className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-2xl body-md font-bold transition-all active:scale-95 ${aiTargetSession === s.id ? `${t.bgAccent} text-white shadow-glow` : `${t.bgCardSoft} ${t.textMuted}`}`}>
+                  <span className="text-base">{s.emoji}</span> {s.label}
                 </button>
               ))}
             </div>
@@ -942,7 +980,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                         const photos = { ...(day.photos || {}) };
                         delete photos[detailSession];
                         persistDay({ ...day, photos });
-                     }} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95"><Trash2 size={16} /></button>
+                     }} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95"><X size={16} /></button>
                    </div>
                    <div className="absolute bottom-4 inset-x-4 flex items-center gap-2">
                      <button onClick={() => handleReanalyzeSessionPhoto(detailSession)} disabled={aiBusy} className={`flex-1 py-2 rounded-xl bg-emerald-500/90 text-white caption font-bold shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2 backdrop-blur-md ${aiBusy ? 'opacity-50' : ''}`}>
@@ -982,7 +1020,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                       className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1`} />
                   )}
                   <button onClick={() => { setCopySourceSession(detailSession); setDetailSession(null); }} className={`p-2 rounded-xl ${t.btnBg} text-emerald-500`}><Copy size={15} /></button>
-                  <button onClick={() => setDeleteConfirm(detailSession)} className={`p-2 rounded-xl bg-red-400/10 text-red-400`}><Trash2 size={15} /></button>
+                  <button onClick={() => setDeleteConfirm(detailSession)} className={`p-2 rounded-xl bg-red-400/10 text-red-400`}><X size={15} /></button>
                 </div>
               </div>
               <div className="space-y-1.5 mb-3">
@@ -1033,11 +1071,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                         </div>
                       </div>
                     </div>
-                    <button onClick={() => removeEntry(detailSession, e.id)} className="p-2 rounded-xl text-red-400 shrink-0"><Trash2 size={14} /></button>
+                    <button onClick={() => removeEntry(detailSession, e.id)} className="p-2 rounded-xl text-red-400 shrink-0"><X size={14} /></button>
                   </div>
                 )})}
               </div>
-              <button onClick={() => { setPickerSession(detailSession); setDetailSession(null); }}
+              <button onClick={() => { if (!aiResult) setAiTargetSession(detailSession); setPickerOpen(true); setDetailSession(null); }}
                 className={`w-full py-3 rounded-2xl border-2 border-dashed ${t.borderDashed} body-md ${t.textMuted}`}>
                 <Plus size={14} className="inline mr-1" />Tambah item
               </button>
@@ -1165,17 +1203,17 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         </div>
       )}
 
-      {/* ===== FOOD PICKER (Manual Fallback Presisi) ===== */}
+      {/* ===== FOOD PICKER — nambah ke batch aiResult yang sama kayak hasil AI, biar gak ada
+          dua cara beda buat "tambah makanan" (satu sheet review buat semua sumber) ===== */}
       <FoodPickerModal
-        t={t} theme={theme} open={!!pickerSession}
-        onClose={() => setPickerSession(null)}
+        t={t} theme={theme} open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
         customFoods={customFoods} recipes={recipes}
-        onAdd={(entry) => addEntryToSession(pickerSession, entry)}
-        onRemove={(entryId) => removeEntry(pickerSession, entryId)}
-        targetSession={pickerSession}
-        setTargetSession={setPickerSession}
-        activeSessions={activeSessions}
-        dayMeals={day.meals || {}}
+        favoriteFoods={profile?.favoriteFoods || []}
+        onAdd={(entry) => {
+          appendAiResult([entry]);
+          showToast(`${entry.name} ditambahkan ke catatan makan, silakan cek sebelum disimpan.`);
+        }}
       />
       
       {/* ===== SHEET KONFIRMASI HAPUS SESI ===== */}

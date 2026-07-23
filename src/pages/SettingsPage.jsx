@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   X, Moon, Sun, Globe, Volume2, VolumeX, Timer, Download, Upload, CalendarDays,
-  Bell, BellOff, Clock, Activity, Scale, Ruler, Thermometer, Trash2, Plus,
+  Bell, BellOff, Clock, Activity, Scale, Ruler, Thermometer, Plus,
   MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw,
 } from 'lucide-react';
 import { getLang } from '../i18n';
@@ -254,7 +254,7 @@ const SettingsPage = ({
                       onClick={() => updateSetting('userApiKeys', userApiKeys.filter((_, i) => i !== index))}
                       className={`p-2.5 rounded-xl ${t.btnBg} text-rose-500 shrink-0`}
                     >
-                      <Trash2 size={18} />
+                      <X size={18} />
                     </button>
                   </div>
                 ))}
@@ -342,7 +342,7 @@ const SettingsPage = ({
                         onClick={() => updateSetting('aiCoachMemory', settings.aiCoachMemory.filter((_, idx) => idx !== i))}
                         className="p-1 rounded-full text-rose-400 shrink-0"
                       >
-                        <Trash2 size={14} />
+                        <X size={14} />
                       </button>
                     </div>
                   ))}

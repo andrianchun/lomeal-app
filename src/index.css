@@ -4,15 +4,15 @@
 @tailwind utilities;
 
 @layer components {
-  /* Headings */
-  .h1 { @apply font-heading text-2xl font-bold tracking-tight leading-tight; }
-  .h2 { @apply font-heading text-base font-bold leading-snug; }
-  .h3 { @apply font-heading text-[10px] font-bold uppercase tracking-wider; }
+  /* Headings — skala 3 tingkat, dipakai konsisten di seluruh app */
+  .h1 { @apply font-heading text-[26px] font-bold tracking-tight leading-tight; }
+  .h2 { @apply font-heading text-lg font-bold leading-snug; }
+  .h3 { @apply font-heading text-[11px] font-bold uppercase tracking-wider; }
 
-  /* Body & Text */
-  .body-lg { @apply text-sm font-bold leading-relaxed; }
-  .body-md { @apply text-xs font-bold leading-relaxed; }
-  .caption { @apply text-[10px] font-bold leading-tight; }
+  /* Body & Text — dinaikkan 1 tingkat dari sebelumnya, standar keterbacaan mobile (min ~12px) */
+  .body-lg { @apply text-base font-bold leading-relaxed; }
+  .body-md { @apply text-sm font-bold leading-relaxed; }
+  .caption { @apply text-[12px] font-bold leading-tight; }
 }
 html, body {
   overscroll-behavior: none;

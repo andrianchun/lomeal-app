@@ -1,11 +1,12 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, Plus, Camera, Image, X, Trash2, Pencil, Loader2, ChevronLeft, Database, Globe } from 'lucide-react';
+import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star } from 'lucide-react';
 import { searchFoods, FOOD_CATEGORIES, fetchOpenFoodFacts } from '../data/foodDatabase';
 import { NUTRIENTS } from '../data/nutrition';
 import { compressImageTo100KB, analyzeSmartPhoto } from '../utils/aiFood';
 import { playSoundEffect } from '../utils/audio';
 import { checkAndCountAiUsage } from '../utils/foodLog';
+import { sortFoodsByUsage } from '../utils/foodUsage';
 import ImageCropperModal from '../components/ImageCropperModal';
 import SpeedDialScanner from '../components/SpeedDialScanner';
 
@@ -18,7 +19,12 @@ const emptyForm = () => {
   return obj;
 };
 
-const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, showConfirm, soundEnabled, user, todayYmd, AI_DAILY_LIMIT, theme }) => {
+const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, showConfirm, soundEnabled, user, todayYmd, AI_DAILY_LIMIT, theme, profile, saveProfilePatch }) => {
+  const favoriteFoods = profile?.favoriteFoods || [];
+  const toggleFavorite = (foodId) => {
+    const next = favoriteFoods.includes(foodId) ? favoriteFoods.filter((id) => id !== foodId) : [...favoriteFoods, foodId];
+    saveProfilePatch({ favoriteFoods: next });
+  };
   const location = useLocation();
   // ── Tab State ────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState(location.state?.swipeDir === 'right' ? 'custom' : 'all'); // 'all' | 'custom'
@@ -74,11 +80,11 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     if (viewMode === 'custom') {
       let list = searchFoods(term, customFoods).filter(f => f.isCustom);
       if (category) list = list.filter((f) => f.category === category);
-      return list.slice(0, 80);
+      return sortFoodsByUsage(list, favoriteFoods).slice(0, 80);
     } else {
       let localList = searchFoods(term, customFoods);
       let combined = [...localList, ...onlineFoods];
-      
+
       const seen = new Set();
       let uniqueList = [];
       for (const item of combined) {
@@ -88,11 +94,11 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
           uniqueList.push(item);
         }
       }
-      
+
       if (category) uniqueList = uniqueList.filter((f) => f.category === category);
-      return uniqueList.slice(0, 150);
+      return sortFoodsByUsage(uniqueList, favoriteFoods).slice(0, 150);
     }
-  }, [term, category, customFoods, onlineFoods, viewMode]);
+  }, [term, category, customFoods, onlineFoods, viewMode, favoriteFoods]);
 
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
 
@@ -228,7 +234,10 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
       <div className="p-4 pb-24 h-full flex flex-col">
         <div className="flex items-center gap-2 mb-4 shrink-0">
           <button onClick={() => setDetail(null)} className={`p-2 rounded-xl ${t.btnBg}`}><ChevronLeft size={16} className={t.textMuted} /></button>
-          <h2 className={`h2 ${t.textMain} line-clamp-2`}>{detail.name}</h2>
+          <h2 className={`h2 ${t.textMain} line-clamp-2 flex-1`}>{detail.name}</h2>
+          <button onClick={() => toggleFavorite(detail.id)} className={`p-2 rounded-xl ${t.btnBg} shrink-0`} aria-label="Favoritkan">
+            <Star size={18} className={favoriteFoods.includes(detail.id) ? 'fill-amber-400 text-amber-400' : t.textMuted} />
+          </button>
         </div>
         
         <div className="flex-1 overflow-y-auto hide-scrollbar -mx-4 px-4 space-y-4">
@@ -260,7 +269,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
               <Pencil size={14} /> Edit
             </button>
             <button onClick={() => deleteCustom(detail)} className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-rose-500/10 text-rose-500 body-md">
-              <Trash2 size={14} /> Hapus
+              <X size={14} /> Hapus
             </button>
           </div>
         )}
@@ -348,9 +357,11 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         onTouchStart={handleSubTabTouchStart} onTouchMove={handleSubTabTouchMove} onTouchEnd={handleSubTabTouchEnd}>
         <div key={viewMode} className={`space-y-2 animate-in fade-in duration-300 ${viewMode === 'all' ? 'slide-in-from-left-12' : 'slide-in-from-right-12'}`}>
           {results.map((f) => (
-            <button key={f.id} onClick={() => { setDetail(f); playSoundEffect('click', soundEnabled); }}
-              className={`w-full flex items-center justify-between p-3 rounded-2xl border text-left transition-all active:scale-[0.98] ${t.border} ${t.bgCard}`}>
-              <div className="w-full">
+            <div key={f.id} className={`w-full flex items-center gap-1 p-3 rounded-2xl border transition-all active:scale-[0.98] ${t.border} ${t.bgCard}`}>
+              <button onClick={() => toggleFavorite(f.id)} className="shrink-0 p-1.5 -m-1.5" aria-label="Favoritkan">
+                <Star size={16} className={favoriteFoods.includes(f.id) ? 'fill-amber-400 text-amber-400' : t.textMuted} />
+              </button>
+              <button onClick={() => { setDetail(f); playSoundEffect('click', soundEnabled); }} className="w-full text-left">
                 <div className={`body-md font-bold ${t.textMain} flex items-start justify-between gap-2`}>
                   <span className="line-clamp-2 pr-2">{f.name}</span>
                   <div className="flex shrink-0 gap-1 flex-col items-end">
@@ -363,8 +374,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
                   <p className={`text-[11px] font-bold ${t.textMain}`}>{Math.round(f.nutrition.kcal * f.portion.grams / 100)} kkal</p>
                   <p className={`text-[10px] font-medium ${t.textMuted}`}>P: {Math.round(f.nutrition.protein * f.portion.grams / 100)}g</p>
                 </div>
-              </div>
-            </button>
+              </button>
+            </div>
           ))}
           {results.length === 0 && !onlineLoading && (
             <div className="flex flex-col items-center justify-center py-10 opacity-60">

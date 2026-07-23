@@ -33,7 +33,7 @@ const getCroppedBlob = (imageSrc, pixelCrop) => new Promise((resolve, reject) =>
   image.src = imageSrc;
 });
 
-const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, onLogout, showAlert, showConfirm }) => {
+const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, onLogout, showAlert, showToast, showConfirm }) => {
   const [communityProfile, setCommunityProfile] = useState(null);
   const [followerCount, setFollowerCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
@@ -118,7 +118,7 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
       await updateProfile(authLogym.currentUser, { photoURL });
       await updateUserProfileInFeed(logymUser.uid, undefined, photoURL);
       setCommunityProfile((prev) => ({ ...prev, photoUrl: photoURL }));
-      await showAlert('Foto profil berhasil diperbarui!');
+      showToast('Foto profil berhasil diperbarui!');
     } catch (err) {
       console.error(err);
       await showAlert(err.message || 'Gagal mengunggah foto profil.');
@@ -141,6 +141,7 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
       await updateUserProfileInFeed(logymUser.uid, undefined, undefined, username);
       setCommunityProfile((prev) => ({ ...prev, username }));
       setIsEditingUsername(false);
+      showToast('Username berhasil disimpan!');
     } catch (err) {
       await showAlert(err.message || 'Gagal menyimpan username.');
     }
