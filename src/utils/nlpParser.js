@@ -149,7 +149,9 @@ export const runLocalNlpParse = (text, customFoods = []) => {
         name: best.name,
         grams,
         unit: finalUnit,
-        nutrition: nutritionForAmount(best, grams)
+        nutrition: nutritionForAmount(best, grams),
+        baseNutrition: best.nutrition,
+        baseGrams: 100
       });
     } else {
       // Failed to confidently find this food chunk locally

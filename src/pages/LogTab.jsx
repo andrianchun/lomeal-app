@@ -188,20 +188,32 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     persistDay({ ...day, sessionTimes });
   };
 
-  const executeCopy = () => {
+  const executeCopyOrMove = (isMove) => {
     if (!copySourceSession || copyTargetSessions.length === 0) return;
     const sourceMeals = day.meals?.[copySourceSession] || [];
     if (sourceMeals.length === 0) return;
     
     const meals = { ...(day.meals || {}) };
+    const sessionTimes = day.sessionTimes || profile?.settings?.defaultSessionTimes || DEFAULT_SESSION_TIMES;
+    
     copyTargetSessions.forEach(targetId => {
-      const cloned = sourceMeals.map(e => ({ ...e, id: Math.random().toString(36).substr(2, 9) }));
+      const targetTime = sessionTimes[targetId] || '12:00';
+      const cloned = sourceMeals.map(e => ({ 
+        ...e, 
+        id: Math.random().toString(36).substr(2, 9),
+        time: targetTime
+      }));
       meals[targetId] = [...(meals[targetId] || []), ...cloned];
     });
+    
+    if (isMove) {
+      delete meals[copySourceSession];
+    }
+    
     persistDay({ ...day, meals });
     setCopySourceSession(null);
     setCopyTargetSessions([]);
-    showAlert('Berhasil menyalin menu!');
+    showAlert(isMove ? 'Berhasil memindah menu!' : 'Berhasil menyalin menu!');
   };
 
   // ---------- Water Tracker ----------
@@ -993,13 +1005,20 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                           <span className="truncate flex items-center gap-1">
                             <input type="number" inputMode="numeric" value={Math.round(e.grams)} onChange={(ev) => {
                               const grams = Number(ev.target.value) || 0;
-                              const factor = e.grams > 0 ? grams / e.grams : 0;
                               const meals = { ...(day.meals || {}) };
-                              meals[detailSession] = meals[detailSession].map(x => x.id === e.id ? {
-                                ...x,
-                                grams,
-                                nutrition: Object.fromEntries(Object.entries(x.nutrition).map(([k, v]) => [k, Math.round(v * factor * 10) / 10]))
-                              } : x);
+                              meals[detailSession] = meals[detailSession].map(x => {
+                                if (x.id !== e.id) return x;
+                                const baseGrams = x.baseGrams || (x.grams > 0 ? x.grams : 1);
+                                const baseNutrition = x.baseNutrition || x.nutrition;
+                                const factor = grams / baseGrams;
+                                return {
+                                  ...x,
+                                  grams,
+                                  baseGrams, // Preserve the fallback baseGrams
+                                  baseNutrition, // Preserve the fallback baseNutrition
+                                  nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 10) / 10]))
+                                };
+                              });
                               persistDay({ ...day, meals });
                             }} className={`w-12 bg-transparent border-b border-dashed ${t.border} outline-none no-spinners text-center ${t.textMain}`} />
                             {e.unit || 'g'} · {Math.round(e.nutrition?.kcal || 0)} kkal
@@ -1027,8 +1046,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe" onClick={() => setCopySourceSession(null)}>
           <div onClick={(e) => e.stopPropagation()}
             className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
-            <h2 className={`h2 mb-2 ${t.textMain}`}>Salin Menu</h2>
-            <p className={`caption ${t.textMuted} mb-4`}>Pilih sesi tujuan untuk menyalin menu dari <span className="font-bold">{activeSessions.find(s => s.id === copySourceSession)?.label}</span>:</p>
+            <h2 className={`h2 mb-2 ${t.textMain}`}>Salin / Pindah Menu</h2>
+            <p className={`caption ${t.textMuted} mb-4`}>Pilih sesi tujuan untuk menu dari <span className="font-bold">{activeSessions.find(s => s.id === copySourceSession)?.label}</span>:</p>
             
             <div className="space-y-2 mb-4 max-h-[40vh] overflow-y-auto">
               {activeSessions.filter(s => s.id !== copySourceSession).map(s => (
@@ -1047,7 +1066,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
             <div className="flex gap-2">
               <button onClick={() => { setCopySourceSession(null); setCopyTargetSessions([]); }} className={`flex-1 py-3 rounded-2xl ${t.btnBg} ${t.textMain} body-md font-bold`}>Batal</button>
-              <button onClick={executeCopy} disabled={copyTargetSessions.length === 0} className={`flex-1 py-3 rounded-2xl ${t.bgAccent} body-md font-bold disabled:opacity-50`}>Salin</button>
+              <button onClick={() => executeCopyOrMove(true)} disabled={copyTargetSessions.length === 0} className={`flex-1 py-3 rounded-2xl bg-orange-500 text-white body-md font-bold disabled:opacity-50`}>Pindah</button>
+              <button onClick={() => executeCopyOrMove(false)} disabled={copyTargetSessions.length === 0} className={`flex-1 py-3 rounded-2xl ${t.bgAccent} text-white body-md font-bold disabled:opacity-50`}>Salin</button>
             </div>
           </div>
         </div>

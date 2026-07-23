@@ -47,11 +47,13 @@ export const saveDay = async (uid, ymd, dayData) => {
   }
 };
 
-// Entry makanan: { id, name, grams, unit, nutrition, foodId?, photoUrl?, time, source }
+// Entry makanan: { id, name, grams, unit, nutrition, foodId?, photoUrl?, time, source, baseNutrition?, baseGrams? }
 export const makeEntry = (data) => ({
   id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   time: new Date().toTimeString().slice(0, 5),
   source: 'db',
+  baseNutrition: data.baseNutrition || data.nutrition,
+  baseGrams: data.baseGrams || (data.grams > 0 ? data.grams : 1),
   ...data,
 });
 

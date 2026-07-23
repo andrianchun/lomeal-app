@@ -32,6 +32,8 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onRemove, customFoods
     onAdd(makeEntry({
       name: food.name, foodId: food.id, grams, unit: food.unit,
       nutrition: nutritionForAmount(food, grams), source: 'db',
+      baseNutrition: food.nutrition,
+      baseGrams: 100
     }));
     setSelected(null);
   };
@@ -39,7 +41,12 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onRemove, customFoods
   const confirmManual = () => {
     const n = {};
     ['kcal', 'protein', 'carbs', 'fat', 'sodium', 'sugar', 'cholesterol', 'satFat', 'iron', 'calcium', 'purine'].forEach(k => { n[k] = Number(manual[k]) || 0; });
-    onAdd(makeEntry({ name: manual.name || 'Makanan Manual', grams: Number(manual.grams) || 0, unit: 'g', nutrition: n, source: 'manual' }));
+    onAdd(makeEntry({ 
+      name: manual.name || 'Makanan Manual', grams: Number(manual.grams) || 0, unit: 'g', 
+      nutrition: n, source: 'manual',
+      baseNutrition: n,
+      baseGrams: Number(manual.grams) || 1
+    }));
     setManual({ name: '', grams: 100, kcal: '', protein: '', carbs: '', fat: '', sodium: '', sugar: '', cholesterol: '', satFat: '', iron: '', calcium: '', purine: '' });
     onClose();
   };
@@ -51,6 +58,8 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onRemove, customFoods
       unit: 'g',
       nutrition: scaleNutrition(recipe.perPortion, portions),
       recipeId: recipe.id, source: 'recipe',
+      baseNutrition: recipe.perPortion,
+      baseGrams: (recipe.totalGrams || 0) / (recipe.portions || 1) || 1,
     }));
     onClose();
   };
