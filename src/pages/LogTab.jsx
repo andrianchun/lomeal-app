@@ -290,7 +290,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     }
     setAiBusy(true);
     try {
-      const res = await parseFoodText(aiKey, text, controller.signal);
+      const res = await parseFoodText(aiKey, text, controller.signal, customFoods);
       if (res.foods?.length) { 
          saveLocalPatternCache(text, res.foods);
          saveGlobalPatternCache(text, res.foods);
@@ -857,7 +857,12 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                   ) : (
                     <div className="flex items-center justify-between w-full">
                       <div className="flex-1 mr-2">
-                        <p className={`body-md ${t.textMain}`}>{f.name}</p>
+                        <p className={`body-md ${t.textMain} flex items-center gap-1.5`}>
+                          {f.name}
+                          {f.lowConfidence && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500" title="AI kurang yakin dengan estimasi ini — cek manual">⚠️ Perkiraan</span>
+                          )}
+                        </p>
                         <p className={`caption font-medium ${t.textMuted}`}>
                           <input type="number" inputMode="numeric" value={Math.round(f.grams)} onChange={(e) => {
                             const grams = Number(e.target.value) || 0;

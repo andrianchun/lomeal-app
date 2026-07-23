@@ -52,25 +52,30 @@ export default function ImageCropperModal({
 
     const scaleX = image.naturalWidth / image.width;
     const scaleY = image.naturalHeight / image.height;
-    
-    // Set canvas dimensions to match the crop size
-    canvas.width = completedCrop.width * scaleX;
-    canvas.height = completedCrop.height * scaleY;
-    
+    const cropWidthPx = completedCrop.width * scaleX;
+    const cropHeightPx = completedCrop.height * scaleY;
+
+    // ponytail: clamp sisi terpanjang ke 1080px — foto HP modern beberapa MP,
+    // tanpa cap ini upload & RAM decode-nya boros padahal cuma dipakai sebagai foto profil/log kecil.
+    const MAX_DIM = 1080;
+    const scale = Math.min(1, MAX_DIM / Math.max(cropWidthPx, cropHeightPx));
+    canvas.width = cropWidthPx * scale;
+    canvas.height = cropHeightPx * scale;
+
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.rotate((rotate * Math.PI) / 180);
     ctx.translate(-canvas.width / 2, -canvas.height / 2);
-    
+
     ctx.drawImage(
       image,
       completedCrop.x * scaleX,
       completedCrop.y * scaleY,
-      completedCrop.width * scaleX,
-      completedCrop.height * scaleY,
+      cropWidthPx,
+      cropHeightPx,
       0,
       0,
-      completedCrop.width * scaleX,
-      completedCrop.height * scaleY
+      canvas.width,
+      canvas.height
     );
     
     const base64Url = canvas.toDataURL('image/jpeg', 0.85);

@@ -49,15 +49,21 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
     return out;
   }, [viewDate]);
 
-  const dayDot = (ymd) => {
-    const totals = computeDayTotals(daysMap[ymd]);
-    if (!totals.kcal) return null;
-    // Arsip: hari yang udah lewat pakai target yang berlaku WAKTU ITU (targetSnapshot),
-    // bukan target sekarang — biar ganti Diet Profile gak nulis ulang riwayat kepatuhan.
-    const dayTargets = daysMap[ymd]?.targetSnapshot || targets;
-    const ratio = totals.kcal / (dayTargets.kcal || 1);
-    return ratio > 1.05 ? STATUS.danger : ratio >= 0.7 ? STATUS.ok : STATUS.warn;
-  };
+  const dotsByYmd = useMemo(() => {
+    const out = {};
+    weeks.flat().forEach((ymd) => {
+      if (!ymd) return;
+      const totals = computeDayTotals(daysMap[ymd]);
+      if (!totals.kcal) { out[ymd] = null; return; }
+      // Arsip: hari yang udah lewat pakai target yang berlaku WAKTU ITU (targetSnapshot),
+      // bukan target sekarang — biar ganti Diet Profile gak nulis ulang riwayat kepatuhan.
+      const dayTargets = daysMap[ymd]?.targetSnapshot || targets;
+      const ratio = totals.kcal / (dayTargets.kcal || 1);
+      out[ymd] = ratio > 1.05 ? STATUS.danger : ratio >= 0.7 ? STATUS.ok : STATUS.warn;
+    });
+    return out;
+  }, [weeks, daysMap, targets]);
+  const dayDot = (ymd) => dotsByYmd[ymd] ?? null;
 
   // Cincin warna di angka tanggal — fase (cutting/bulk) yang berlaku hari itu, diambil dari
   // arsip targetSnapshot (bukan target sekarang), biar riwayat fase kebaca kayak kalender.

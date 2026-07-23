@@ -86,12 +86,31 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   // --- Log harian: subscribe per-bulan, digabung jadi satu daysMap ---
   const [monthsData, setMonthsData] = useState({});
   const unsubsRef = useRef({});
+  // ponytail: cap listener bulan aktif ke 4 (LRU) — tanpa ini, user yg scroll histori
+  // bertahun-tahun numpuk onSnapshot yang gak pernah dilepas, biaya read Firestore nambah terus.
+  const MAX_MONTH_LISTENERS = 4;
+  const monthOrderRef = useRef([]);
   const ensureMonth = useCallback((monthKey) => {
-    if (!user || unsubsRef.current[monthKey]) return;
+    if (!user) return;
+    if (unsubsRef.current[monthKey]) {
+      monthOrderRef.current = [...monthOrderRef.current.filter((k) => k !== monthKey), monthKey];
+      return;
+    }
     unsubsRef.current[monthKey] = subscribeMonth(user.uid, monthKey, (days) => {
       setMonthsData((prev) => ({ ...prev, [monthKey]: days }));
     });
-  }, [user]);
+    monthOrderRef.current = [...monthOrderRef.current, monthKey];
+
+    const todayMonthKey = getMonthKey(todayYmd);
+    while (monthOrderRef.current.length > MAX_MONTH_LISTENERS) {
+      const evictIdx = monthOrderRef.current.findIndex((k) => k !== todayMonthKey);
+      if (evictIdx === -1) break;
+      const [evictKey] = monthOrderRef.current.splice(evictIdx, 1);
+      unsubsRef.current[evictKey]?.();
+      delete unsubsRef.current[evictKey];
+      setMonthsData((prev) => { const next = { ...prev }; delete next[evictKey]; return next; });
+    }
+  }, [user, todayYmd]);
 
   useEffect(() => {
     ensureMonth(getMonthKey(todayYmd));
@@ -112,7 +131,17 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     const dataToSave = (ymd === todayYmd && profile?.targets)
       ? { ...dayData, targetSnapshot: profile.targets }
       : dayData;
-    await saveDayFs(user.uid, ymd, dataToSave);
+    // Update lokal SEGERA (optimistic) — daysMap datang dari onSnapshot yang butuh round-trip
+    // network untuk kembali. Tanpa ini, dua saveDay() beruntun (mis. tap tambah 2x cepat)
+    // sama-sama baca `day` lama dari closure dan yang kedua menimpa balik yang pertama.
+    const monthKey = getMonthKey(ymd);
+    setMonthsData((prev) => ({ ...prev, [monthKey]: { ...(prev[monthKey] || {}), [ymd]: dataToSave } }));
+    try {
+      await saveDayFs(user.uid, ymd, dataToSave);
+    } catch (e) {
+      await showAlert(`Gagal menyimpan perubahan: ${e.message}. Coba lagi.`);
+      return;
+    }
     if (settings.healthConnectEnabled) {
       const totals = Object.values(dayData?.meals || {}).flat().reduce((acc, e) => {
         Object.keys(acc).forEach((k) => { acc[k] += Number(e.nutrition?.[k]) || 0; });
@@ -132,17 +161,19 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       }
       pushNutritionBioToLogym(logymUser.uid, ymd, dayTotals.kcal).catch(() => {});
     }
-  }, [user, settings.healthConnectEnabled, logymUser, todayYmd, profile?.targets]);
+  }, [user, settings.healthConnectEnabled, logymUser, todayYmd, profile?.targets, showAlert]);
 
   // Sinkron SEMUA riwayat Lomeal ke Logym sekaligus (bioData.nutritionCalories)
+  // ponytail: 10 per batch paralel, bukan serial — histori 1 tahun bisa 300+ hari,
+  // serial-await satu-satu bikin UI freeze menunggu network round-trip berkali-kali.
   const syncAllNutritionToLogym = useCallback(async () => {
     if (!logymUser) return;
     const entries = Object.entries(daysMap).filter(([, d]) => computeDayTotals(d).kcal > 0);
     let synced = 0;
-    for (const [ymd, dayData] of entries) {
-      const kcal = computeDayTotals(dayData).kcal;
-      await pushNutritionBioToLogym(logymUser.uid, ymd, kcal);
-      synced++;
+    for (let i = 0; i < entries.length; i += 10) {
+      const chunk = entries.slice(i, i + 10);
+      await Promise.all(chunk.map(([ymd, dayData]) => pushNutritionBioToLogym(logymUser.uid, ymd, computeDayTotals(dayData).kcal)));
+      synced += chunk.length;
     }
     return synced;
   }, [logymUser, daysMap]);
@@ -151,6 +182,22 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [recipes, setRecipes] = useState([]);
   const [mealPreps, setMealPreps] = useState([]);
   const [customFoods, setCustomFoods] = useState([]);
+
+  // Optimistic: update state lokal duluan (sama seperti saveDay) supaya dua aksi beruntun
+  // (mis. tambah resep lalu langsung hapus meal-prep) gak saling menimpa lewat closure basi.
+  const saveRecipesFn = useCallback(async (items) => {
+    setRecipes(items);
+    try { await saveRecipes(user.uid, items); } catch (e) { await showAlert(`Gagal menyimpan resep: ${e.message}`); }
+  }, [user, showAlert]);
+  const saveMealPrepsFn = useCallback(async (items) => {
+    setMealPreps(items);
+    try { await saveMealPreps(user.uid, items); } catch (e) { await showAlert(`Gagal menyimpan meal-prep: ${e.message}`); }
+  }, [user, showAlert]);
+  const saveCustomFoodsFn = useCallback(async (items) => {
+    setCustomFoods(items);
+    try { await saveCustomFoods(user.uid, items); } catch (e) { await showAlert(`Gagal menyimpan custom food: ${e.message}`); }
+  }, [user, showAlert]);
+
   useEffect(() => {
     if (!user) return;
     const unsub1 = subscribeRecipes(user.uid, setRecipes);
@@ -427,9 +474,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const commonProps = {
     t, theme, user, logymUser, profile, daysMap, todayYmd,
     saveDay, ensureMonth, saveProfilePatch,
-    recipes, saveRecipesFn: (items) => saveRecipes(user.uid, items),
-    mealPreps, saveMealPrepsFn: (items) => saveMealPreps(user.uid, items),
-    customFoods, saveCustomFoodsFn: (items) => saveCustomFoods(user.uid, items),
+    recipes, saveRecipesFn,
+    mealPreps, saveMealPrepsFn,
+    customFoods, saveCustomFoodsFn,
     shareRecipe,
     aiKey: effectiveAiKeys,
     waterGoal: profile?.targets?.waterGoal,

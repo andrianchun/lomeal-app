@@ -8,6 +8,7 @@ import {
   addComment, getComments, getWeeklyLeaderboard,
 } from '../utils/communityApi';
 import { getFollowingIds, getFollowerList } from '../utils/followApi';
+import { cloudinaryThumb } from '../utils/cloudinary';
 import { containsBadWords, reportPost, getLocalHiddenPosts } from '../utils/moderationApi';
 import CreatePostModal from './CreatePostModal';
 
@@ -244,7 +245,7 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
                   {post.imageUrls.map((url, i) => (
                     <div key={i} style={{ minWidth: post.imageUrls.length === 1 ? '100%' : '85%', height: '240px' }}
                       className={`shrink-0 overflow-hidden ${post.imageUrls.length === 1 ? 'rounded-2xl' : i === 0 ? 'rounded-l-2xl' : ''} ${i === post.imageUrls.length - 1 && post.imageUrls.length > 1 ? 'rounded-r-2xl' : ''}`}>
-                      <img src={url} alt="" className="w-full h-full object-cover object-top block" loading="lazy" />
+                      <img src={cloudinaryThumb(url, 600)} alt="" className="w-full h-full object-cover object-top block" loading="lazy" />
                     </div>
                   ))}
                 </div>

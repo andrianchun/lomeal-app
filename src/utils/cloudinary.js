@@ -1,6 +1,13 @@
 export const CLOUD_NAME = "dxkhyzw50";
 export const UPLOAD_PRESET = "ml_default";
 
+// Sisip parameter transform Cloudinary (resize+compress) ke URL sebelum ditampilkan sebagai
+// thumbnail — tanpa ini, tiap render feed download gambar resolusi upload penuh.
+export const cloudinaryThumb = (url, width = 400) => {
+    if (!url || !url.includes('/upload/')) return url;
+    return url.replace('/upload/', `/upload/w_${width},q_auto,f_auto/`);
+};
+
 export const uploadToCloudinary = async (file, publicId = null, folder = null) => {
     const formData = new FormData();
     formData.append("file", file);
