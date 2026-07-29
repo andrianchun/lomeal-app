@@ -1,6 +1,6 @@
 // ============================================================
-// SINKRON KE LOGYM — SATU-SATUNYA file yang boleh menulis ke project Logym
-// (dbLogym) dari Lomeal. Dua hal:
+// SINKRON KE LOGYM — SATU-SATUNYA file yang boleh menulis ke collection Logym
+// (logym_users, project hexa-life) dari Lomeal. Dua hal:
 //  1. pushBiometricsToLogym: gender/dob/height/weight → settings.userProfile
 //     (merge:true → deep-merge, field lain milik Logym tidak tersentuh).
 //  2. pushDailyTotalsToLogym: ringkasan kalori-dimakan HARI INI → field baru
@@ -12,7 +12,7 @@
 //  4. pushTargetsToLogym: target kalori/makro (delta bulking/cutting) → Logym
 //     cuma baca, gak lagi punya preset delta independen sendiri.
 // ============================================================
-import { dbLogym } from '../firebaseLogym';
+import { db } from '../firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
 export const pushBiometricsToLogym = async (logymUid, { gender, dob, height, weight }) => {
@@ -24,7 +24,7 @@ export const pushBiometricsToLogym = async (logymUid, { gender, dob, height, wei
   if (weight !== undefined) patch.weight = weight;
   if (Object.keys(patch).length === 0) return;
   try {
-    await setDoc(doc(dbLogym, 'users', logymUid), { settings: { userProfile: patch } }, { merge: true });
+    await setDoc(doc(db, 'logym_users', logymUid), { settings: { userProfile: patch } }, { merge: true });
   } catch (e) {
     console.error('pushBiometricsToLogym error', e);
   }
@@ -33,7 +33,7 @@ export const pushBiometricsToLogym = async (logymUid, { gender, dob, height, wei
 export const pushPreferencesToLogym = async (logymUid, dietProfile, allergies) => {
   if (!logymUid) return;
   try {
-    await setDoc(doc(dbLogym, 'users', logymUid), {
+    await setDoc(doc(db, 'logym_users', logymUid), {
       lomealSync: {
         preferences: { dietProfile: dietProfile || null, allergies: allergies || null }
       }
@@ -50,7 +50,7 @@ export const pushPreferencesToLogym = async (logymUid, dietProfile, allergies) =
 export const pushTargetsToLogym = async (logymUid, targets) => {
   if (!logymUid || !targets) return;
   try {
-    await setDoc(doc(dbLogym, 'users', logymUid), {
+    await setDoc(doc(db, 'logym_users', logymUid), {
       lomealSync: {
         targets: {
           kcal: Math.round(targets.kcal || 0),
@@ -68,7 +68,7 @@ export const pushTargetsToLogym = async (logymUid, targets) => {
 export const pushDailyTotalsToLogym = async (logymUid, ymd, totals, mealsCount = 0) => {
   if (!logymUid) return;
   try {
-    await setDoc(doc(dbLogym, 'users', logymUid), {
+    await setDoc(doc(db, 'logym_users', logymUid), {
       lomealSync: {
         today: {
           ymd,
@@ -94,7 +94,7 @@ export const pushActivityOverrideToLogym = async (logymUid, ymd, burnedKcal) => 
   if (!logymUid || !ymd) return;
   const year = ymd.slice(0, 4);
   try {
-    await setDoc(doc(dbLogym, 'users', logymUid, 'history_years', year), {
+    await setDoc(doc(db, 'logym_users', logymUid, 'history_years', year), {
       [ymd]: {
         bioData: {
           activityCalories: Math.round(burnedKcal) || 0,
@@ -115,7 +115,7 @@ export const pushNutritionBioToLogym = async (logymUid, ymd, kcal) => {
   if (!logymUid || !ymd) return;
   const year = ymd.slice(0, 4);
   try {
-    await setDoc(doc(dbLogym, 'users', logymUid, 'history_years', year), {
+    await setDoc(doc(db, 'logym_users', logymUid, 'history_years', year), {
       [ymd]: {
         bioData: {
           nutritionCalories: Math.round(kcal) || 0,

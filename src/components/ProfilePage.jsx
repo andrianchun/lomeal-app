@@ -1,21 +1,20 @@
 // src/components/ProfilePage.jsx — gabungan disederhanakan dari ProfileModal.jsx +
 // SharedProfileView.jsx milik Lyfit: avatar crop+upload, nama/username (unik, dikunci
 // sekali), follower/following count, badge grid (achievements.js), post sendiri, logout.
-// Identitas & data publik SELALU ke project Logym (dbLogym/storageLogym/authLogym);
-// field privat (target, dietProfile, dst) tetap di profil Lomeal sendiri.
+// Identitas & data publik SELALU ke collection logym_* (project hexa-life, sama identitas
+// dengan Lomeal); field privat (target, dietProfile, dst) tetap di profil Lomeal sendiri.
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Cropper from 'react-easy-crop';
 import { X, Loader2, Check, Camera, LogOut, Users, Lock } from 'lucide-react';
 import { updateProfile } from 'firebase/auth';
 import { doc, setDoc, getDoc, runTransaction } from 'firebase/firestore';
-import { authLogym, dbLogym } from '../firebaseLogym';
+import { auth, db } from '../firebase';
 import { uploadImageToFirebase, deleteImageFromFirebase } from '../utils/storageLogym';
 import { registerToCommunity, updateUserProfileInFeed, getUserPosts } from '../utils/communityApi';
 import { getFollowerCount, getFollowingCount } from '../utils/followApi';
 import { ACHIEVEMENTS, checkAchievements } from '../data/achievements';
 import { DIET_PROFILES } from '../data/nutrition';
 import FollowListModal from './FollowListModal';
-import LogymConnectPrompt from './LogymConnectPrompt';
 
 const AVATAR_OUTPUT_SIZE = 512;
 const getCroppedBlob = (imageSrc, pixelCrop) => new Promise((resolve, reject) => {
@@ -73,7 +72,7 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
     if (!logymUser) return;
     (async () => {
       await registerToCommunity(logymUser.uid, { name: logymUser.displayName, photoUrl: logymUser.photoURL });
-      const snap = await getDoc(doc(dbLogym, 'community_users', logymUser.uid));
+      const snap = await getDoc(doc(db, 'logym_community_users', logymUser.uid));
       setCommunityProfile(snap.exists() ? snap.data() : null);
       const counts = await refreshCounts();
 
@@ -115,7 +114,7 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
       let photoURL = await uploadImageToFirebase(blob, `lyfit_users/${logymUser.uid}/profile/profile_pic_${Date.now()}.webp`);
       photoURL = photoURL.includes('?') ? `${photoURL}&v=${Date.now()}` : `${photoURL}?v=${Date.now()}`;
 
-      await updateProfile(authLogym.currentUser, { photoURL });
+      await updateProfile(auth.currentUser, { photoURL });
       await updateUserProfileInFeed(logymUser.uid, undefined, photoURL);
       setCommunityProfile((prev) => ({ ...prev, photoUrl: photoURL }));
       showToast('Foto profil berhasil diperbarui!');
@@ -132,8 +131,8 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
     if (username.length < 3) { await showAlert('Username minimal 3 karakter (huruf/angka/underscore).'); return; }
     setIsSavingUsername(true);
     try {
-      await runTransaction(dbLogym, async (tx) => {
-        const uRef = doc(dbLogym, 'usernames', username);
+      await runTransaction(db, async (tx) => {
+        const uRef = doc(db, 'logym_usernames', username);
         const uSnap = await tx.get(uRef);
         if (uSnap.exists()) throw new Error('Username sudah dipakai orang lain.');
         tx.set(uRef, { uid: logymUser.uid });
@@ -149,13 +148,12 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
   };
 
   if (!logymUser) {
+    // Fallback jaga-jaga — praktiknya logymUser selalu ada barengan `user` begitu login
+    // (satu identitas, satu project hexa-life, gak ada lagi proses "connect" terpisah).
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16 text-center px-6">
         <Lock size={32} className={t.textMuted} />
-        <p className={`font-bold ${t.textMain}`}>Sambungkan akunmu ke Logym buat akses Social Hub & Profil.</p>
-        <div className="w-full max-w-xs mt-2">
-          <LogymConnectPrompt t={t} />
-        </div>
+        <p className={`font-bold ${t.textMain}`}>Memuat profil...</p>
       </div>
     );
   }

@@ -1,12 +1,13 @@
 // src/utils/communityApi.js
-// Lapisan API Social Hub — SEMUA baca/tulis di sini mengarah ke project Logym
-// (dbLogym), BUKAN Firestore Lomeal sendiri. Diporting dari lyfit.app/src/utils/communityApi.js,
-// dipangkas: tanpa workout-specific (shareWorkoutToFeed, shareTemplate) — lihat "Yang
-// sengaja belum digarap" di rencana. getWeeklyLeaderboard READ-ONLY (buat halo avatar
-// top-10) — Lomeal gak nulis skor baru (posting/like di Lomeal gak nambah poin leaderboard,
-// itu murni domain aktivitas Logym), cuma nampilin siapa aja yang lagi di collection bersama.
+// Lapisan API Social Hub — baca/tulis ke collection `logym_*` di project hexa-life (Lomeal &
+// Logym satu project bareng sekarang, prefix `logym_` biar gak tabrakan sama collection app lain).
+// Diporting dari lyfit.app/src/utils/communityApi.js, dipangkas: tanpa workout-specific
+// (shareWorkoutToFeed, shareTemplate) — lihat "Yang sengaja belum digarap" di rencana.
+// getWeeklyLeaderboard READ-ONLY (buat halo avatar top-10) — Lomeal gak nulis skor baru
+// (posting/like di Lomeal gak nambah poin leaderboard, itu murni domain aktivitas Logym),
+// cuma nampilin siapa aja yang lagi di collection bersama.
 // uid selalu parameter eksplisit (bukan auth.currentUser) — portabel lintas-app.
-import { dbLogym } from '../firebaseLogym';
+import { db } from '../firebase';
 import {
   collection, addDoc, getDocs, getDoc, query, orderBy, limit,
   serverTimestamp, doc, setDoc, updateDoc, deleteDoc,
@@ -24,7 +25,7 @@ export const getCurrentWeekId = () => {
 
 export const getWeeklyLeaderboard = async () => {
   try {
-    const snap = await getDoc(doc(dbLogym, 'leaderboards', getCurrentWeekId()));
+    const snap = await getDoc(doc(db, 'logym_leaderboards', getCurrentWeekId()));
     const scores = snap.exists() ? (snap.data().scores || {}) : {};
     return Object.entries(scores)
       .map(([id, val]) => ({ id, name: val.name, photoUrl: val.photoUrl, score: val.score || 0 }))
@@ -40,7 +41,7 @@ export const getWeeklyLeaderboard = async () => {
 export const registerToCommunity = async (userId, userProfile) => {
   if (!userId) return;
   try {
-    const userRef = doc(dbLogym, 'community_users', userId);
+    const userRef = doc(db, 'logym_community_users', userId);
     await setDoc(userRef, {
       name: userProfile.name || 'Pengguna',
       photoUrl: userProfile.photoUrl || '',
@@ -55,7 +56,7 @@ export const registerToCommunity = async (userId, userProfile) => {
 // postData.type: 'user_post' | 'recipe' | 'achievement' | 'repost'
 export const createCommunityPost = async (userId, userName, userPhoto, postData) => {
   try {
-    const docRef = await addDoc(collection(dbLogym, 'community_posts'), {
+    const docRef = await addDoc(collection(db, 'logym_community_posts'), {
       userId,
       userName: userName || 'Anonim',
       userPhoto: userPhoto || null,
@@ -92,7 +93,7 @@ export const createCommunityPost = async (userId, userName, userPhoto, postData)
 // ─── Update Post ──────────────────────────────────────────────────────────────
 export const updatePost = async (postId, { text, imageUrls }) => {
   try {
-    const ref = doc(dbLogym, 'community_posts', postId);
+    const ref = doc(db, 'logym_community_posts', postId);
     await updateDoc(ref, { text, imageUrls });
   } catch (err) {
     console.error("Gagal update post:", err);
@@ -103,7 +104,7 @@ export const updatePost = async (postId, { text, imageUrls }) => {
 // ─── Delete Post ──────────────────────────────────────────────────────────────
 export const deletePost = async (postId) => {
   try {
-    await deleteDoc(doc(dbLogym, 'community_posts', postId));
+    await deleteDoc(doc(db, 'logym_community_posts', postId));
   } catch (err) {
     console.error("Gagal hapus post:", err);
     throw err;
@@ -112,7 +113,7 @@ export const deletePost = async (postId) => {
 
 // ─── Toggle Like ──────────────────────────────────────────────────────────────
 export const toggleLike = async (postId, userId, postOwnerId, fromUserName = null, fromUserPhoto = null) => {
-  const postRef = doc(dbLogym, 'community_posts', postId);
+  const postRef = doc(db, 'logym_community_posts', postId);
   const snap = await getDoc(postRef);
   if (!snap.exists()) return;
   const liked = (snap.data().likedBy || []).includes(userId);
@@ -131,7 +132,7 @@ export const toggleLike = async (postId, userId, postOwnerId, fromUserName = nul
 // --- Repost -------------------------------------------------------------------
 export const repostPost = async (userId, userName, userPhoto, originalPost, caption = '') => {
   try {
-    const docRef = await addDoc(collection(dbLogym, 'community_posts'), {
+    const docRef = await addDoc(collection(db, 'logym_community_posts'), {
       userId,
       userName: userName || 'Anonim',
       userPhoto: userPhoto || null,
@@ -164,9 +165,9 @@ export const repostPost = async (userId, userName, userPhoto, originalPost, capt
 // --- Comments -----------------------------------------------------------------
 export const addComment = async (postId, { userId, userName, userPhoto, text }, postOwnerId) => {
   try {
-    const ref = collection(dbLogym, 'community_posts', postId, 'comments');
+    const ref = collection(db, 'logym_community_posts', postId, 'comments');
     await addDoc(ref, { userId, userName: userName || 'Anonim', userPhoto: userPhoto || null, text, timestamp: serverTimestamp() });
-    await updateDoc(doc(dbLogym, 'community_posts', postId), { commentCount: increment(1) });
+    await updateDoc(doc(db, 'logym_community_posts', postId), { commentCount: increment(1) });
     if (postOwnerId && postOwnerId !== userId) {
       await sendNotification(postOwnerId, { type: 'comment', fromUserId: userId, fromUserName: userName, fromUserPhoto: userPhoto, postId });
     }
@@ -178,7 +179,7 @@ export const addComment = async (postId, { userId, userName, userPhoto, text }, 
 
 export const getComments = async (postId) => {
   try {
-    const q = query(collection(dbLogym, 'community_posts', postId, 'comments'), orderBy('timestamp', 'asc'));
+    const q = query(collection(db, 'logym_community_posts', postId, 'comments'), orderBy('timestamp', 'asc'));
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
@@ -190,7 +191,7 @@ export const getComments = async (postId) => {
 // ─── Feed ─────────────────────────────────────────────────────────────────────
 export const getGlobalFeed = async (limitCount = 30) => {
   try {
-    const q = query(collection(dbLogym, 'community_posts'), orderBy('timestamp', 'desc'), limit(limitCount));
+    const q = query(collection(db, 'logym_community_posts'), orderBy('timestamp', 'desc'), limit(limitCount));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
@@ -210,12 +211,12 @@ export const getFollowingFeed = async (followingIds = [], limitCount = 30) => {
     let allPosts = [];
     for (const chunk of chunks) {
       try {
-        const q = query(collection(dbLogym, 'community_posts'), where('userId', 'in', chunk), orderBy('timestamp', 'desc'), limit(limitCount));
+        const q = query(collection(db, 'logym_community_posts'), where('userId', 'in', chunk), orderBy('timestamp', 'desc'), limit(limitCount));
         const snap = await getDocs(q);
         allPosts = [...allPosts, ...snap.docs.map(d => ({ id: d.id, ...d.data() }))];
       } catch (err) {
         console.warn("Fallback getFollowingFeed (unindexed):", err);
-        const q = query(collection(dbLogym, 'community_posts'), where('userId', 'in', chunk), limit(100));
+        const q = query(collection(db, 'logym_community_posts'), where('userId', 'in', chunk), limit(100));
         const snap = await getDocs(q);
         allPosts = [...allPosts, ...snap.docs.map(d => ({ id: d.id, ...d.data() }))];
       }
@@ -232,12 +233,12 @@ export const getFollowingFeed = async (followingIds = [], limitCount = 30) => {
 
 export const getUserPosts = async (userId, limitCount = 30) => {
   try {
-    const q = query(collection(dbLogym, 'community_posts'), where('userId', '==', userId), orderBy('timestamp', 'desc'), limit(limitCount));
+    const q = query(collection(db, 'logym_community_posts'), where('userId', '==', userId), orderBy('timestamp', 'desc'), limit(limitCount));
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
     try {
-      const q = query(collection(dbLogym, 'community_posts'), where('userId', '==', userId), limit(200));
+      const q = query(collection(db, 'logym_community_posts'), where('userId', '==', userId), limit(200));
       const snap = await getDocs(q);
       return snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -254,7 +255,7 @@ export const getUserPosts = async (userId, limitCount = 30) => {
 export const sendNotification = async (toUserId, { type, fromUserId, fromUserName = null, fromUserPhoto = null, postId = null }) => {
   if (!toUserId || !fromUserId) return;
   try {
-    await addDoc(collection(dbLogym, 'notifications'), {
+    await addDoc(collection(db, 'logym_notifications'), {
       toUserId, type, fromUserId, fromUserName, fromUserPhoto, postId, read: false, createdAt: serverTimestamp()
     });
   } catch (err) {
@@ -264,12 +265,12 @@ export const sendNotification = async (toUserId, { type, fromUserId, fromUserNam
 
 export const getNotifications = async (userId, limitCount = 30) => {
   try {
-    const q = query(collection(dbLogym, 'notifications'), where('toUserId', '==', userId), orderBy('createdAt', 'desc'), limit(limitCount));
+    const q = query(collection(db, 'logym_notifications'), where('toUserId', '==', userId), orderBy('createdAt', 'desc'), limit(limitCount));
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
     try {
-      const q = query(collection(dbLogym, 'notifications'), where('toUserId', '==', userId), limit(200));
+      const q = query(collection(db, 'logym_notifications'), where('toUserId', '==', userId), limit(200));
       const snap = await getDocs(q);
       return snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -284,9 +285,9 @@ export const getNotifications = async (userId, limitCount = 30) => {
 
 export const markNotificationsRead = async (userId) => {
   try {
-    const q = query(collection(dbLogym, 'notifications'), where('toUserId', '==', userId), where('read', '==', false));
+    const q = query(collection(db, 'logym_notifications'), where('toUserId', '==', userId), where('read', '==', false));
     const snap = await getDocs(q);
-    const batch = writeBatch(dbLogym);
+    const batch = writeBatch(db);
     snap.docs.forEach(d => batch.update(d.ref, { read: true }));
     await batch.commit();
   } catch (err) {
@@ -296,7 +297,7 @@ export const markNotificationsRead = async (userId) => {
 
 export const shareAchievementToFeed = async (userId, userName, userPhoto, achievement) => {
   try {
-    const docRef = await addDoc(collection(dbLogym, 'community_posts'), {
+    const docRef = await addDoc(collection(db, 'logym_community_posts'), {
       type: 'achievement', userId, userName: userName || 'Anonim',
       userPhoto: userPhoto || null,
       sourceApp: 'lomeal',
@@ -315,7 +316,7 @@ export const shareAchievementToFeed = async (userId, userName, userPhoto, achiev
 export const updateUserProfileInFeed = async (userId, newName, newPhoto, newUsername, newGender, newAge) => {
   if (!userId) return;
   try {
-    const userRef = doc(dbLogym, 'community_users', userId);
+    const userRef = doc(db, 'logym_community_users', userId);
     const userUpdate = {};
     if (newName !== undefined) userUpdate.name = newName;
     if (newPhoto !== undefined) userUpdate.photoUrl = newPhoto;
@@ -326,7 +327,7 @@ export const updateUserProfileInFeed = async (userId, newName, newPhoto, newUser
       await setDoc(userRef, userUpdate, { merge: true });
     }
 
-    const postsQuery = query(collection(dbLogym, 'community_posts'), where('userId', '==', userId));
+    const postsQuery = query(collection(db, 'logym_community_posts'), where('userId', '==', userId));
     const snap = await getDocs(postsQuery);
 
     const postUpdate = {};
@@ -334,7 +335,7 @@ export const updateUserProfileInFeed = async (userId, newName, newPhoto, newUser
     if (newPhoto !== undefined) postUpdate.userPhoto = newPhoto;
 
     for (let i = 0; i < snap.docs.length; i += 450) {
-      const batch = writeBatch(dbLogym);
+      const batch = writeBatch(db);
       snap.docs.slice(i, i + 450).forEach((d) => batch.update(d.ref, postUpdate));
       await batch.commit();
     }
@@ -349,7 +350,7 @@ export const searchUsers = async (searchQuery) => {
   if (!qStr) return [];
 
   try {
-    const usersRef = collection(dbLogym, 'community_users');
+    const usersRef = collection(db, 'logym_community_users');
     const resultsMap = new Map();
 
     const usernameQ = query(usersRef, where('username', '>=', qStr), where('username', '<=', qStr + ''), limit(10));

@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "lomeal-id"
-  }
+  },
+  "targets": {
+    "hexa-life": {
+      "hosting": {
+        "lomeal": [
+          "lomeal"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

@@ -36,7 +36,7 @@ export const checkGlobalPatternCache = async (rawText) => {
     // Gunakan hash atau sanitize text untuk ID dokumen agar aman, tapi untuk MVP kita gunakan text jika pendek
     // Firestore doc ID tidak boleh mengandung /
     const docId = text.replace(/\//g, '_').substring(0, 100); 
-    const docRef = doc(db, 'globalPatternCache', docId);
+    const docRef = doc(db, 'lomeal_globalPatternCache', docId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       return snap.data().foods;
@@ -54,7 +54,7 @@ export const saveGlobalPatternCache = async (rawText, parsedFoods) => {
   try {
     const text = rawText.trim().toLowerCase();
     const docId = text.replace(/\//g, '_').substring(0, 100);
-    const docRef = doc(db, 'globalPatternCache', docId);
+    const docRef = doc(db, 'lomeal_globalPatternCache', docId);
     await setDoc(docRef, {
       originalInput: text,
       foods: parsedFoods,

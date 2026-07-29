@@ -27,7 +27,7 @@ const ANTHROPIC_MODELS = ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-
 
 async function checkRateLimit(uid) {
     const today = new Date().toISOString().split('T')[0];
-    const ref = db.collection('_aiUsage').doc(uid);
+    const ref = db.collection('lomeal__aiUsage').doc(uid);
     await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         const data = snap.exists ? snap.data() : {};
@@ -106,7 +106,7 @@ const isFallbackable = (errMsg) => {
 
 // ---------- Endpoints ----------
 
-exports.aiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall(async (data, context) => {
+exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall(async (data, context) => {
     if (!context.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
 
     const { messages, provider = 'google', model = '' } = data || {};
@@ -167,7 +167,7 @@ exports.aiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory:
         `Semua key server untuk ${provider} sedang limit. ${lastError ? lastError.message.substring(0, 100) : ''}`);
 });
 
-exports.aiVision = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB' }).https.onCall(async (data, context) => {
+exports.lomealAiVision = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB' }).https.onCall(async (data, context) => {
     if (!context.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
 
     const { imageBase64, mimeType = 'image/jpeg', prompt, provider = 'google', model = '' } = data || {};
@@ -226,46 +226,6 @@ exports.aiVision = functions.region(REGION).runWith({ timeoutSeconds: 120, memor
         `Semua key server untuk ${provider} sedang limit. ${lastError ? lastError.message.substring(0, 100) : ''}`);
 });
 
-// ---------- Jembatan identitas Lomeal → Logym (0-klik, provider apa pun) ----------
-// 2 project Firebase terpisah = OAuth client beda, jadi popup Google gak bisa
-// dipakai ulang antar keduanya. Lomeal kirim ID token-nya sendiri (provider apa
-// pun: Google/email/dst), function ini verifikasi, cari/bikin user Logym dengan
-// email yang sama, balikin custom token — Lomeal signInWithCustomToken(authLogym,
-// token) tanpa klik. verify-only app: cukup projectId, tanpa service account key
-// project lain.
-//
-// Keamanan: HANYA link ke akun Logym yang sudah ada kalau email_verified true
-// (Google selalu verified). Email/password Lomeal yang belum verifikasi TIDAK
-// pernah dicocokkan ke akun manapun — dapat identitas baru sendiri dulu, biar
-// gak ada celah orang daftar pakai email siapa aja buat ambil alih akun Logym.
-const lomealVerifyApp = admin.initializeApp({ projectId: 'lomeal-id' }, 'lomeal-verify');
-
-exports.bridgeLomealAuth = functions.region(REGION).https.onCall(async (data, context) => {
-    const { lomealIdToken } = data || {};
-    if (!lomealIdToken) throw new HttpsError('invalid-argument', 'lomealIdToken wajib diisi.');
-
-    const decoded = await admin.auth(lomealVerifyApp).verifyIdToken(lomealIdToken);
-    if (!decoded.email) throw new HttpsError('failed-precondition', 'Akun Lomeal ini tidak punya email.');
-
-    const profile = { email: decoded.email, displayName: decoded.name || undefined, photoURL: decoded.picture || undefined };
-    let logymUser;
-    if (decoded.email_verified) {
-        try {
-            logymUser = await admin.auth().getUserByEmail(decoded.email);
-        } catch {
-            logymUser = await admin.auth().createUser({ ...profile, emailVerified: true });
-        }
-    } else {
-        try {
-            logymUser = await admin.auth().createUser(profile);
-        } catch (e) {
-            if (e.code === 'auth/email-already-exists') {
-                throw new HttpsError('failed-precondition', 'Verifikasi email Lomeal-mu dulu sebelum bisa sambung ke Logym.');
-            }
-            throw e;
-        }
-    }
-
-    const customToken = await admin.auth().createCustomToken(logymUser.uid);
-    return { customToken };
-});
+// Salinan bridgeLomealAuth yang dulu pernah ada di sini (gak pernah beneran ke-deploy/dipanggil —
+// versi asli yang aktif ada di logym.app/functions) DIHAPUS. Lomeal & Logym sekarang satu project
+// Firebase (hexa-life) = satu identitas Auth bareng, jembatan token gak dibutuhkan lagi sama sekali.

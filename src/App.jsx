@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth';
 import { auth } from './firebase';
-import { authLogym, bridgeToLogym } from './firebaseLogym';
 import { buildTheme } from './theme';
 import { getLocalYMD, getMonthKey, computeAge, MEAL_SESSIONS, DEFAULT_SESSION_TIMES } from './data/constants';
 import {
@@ -13,6 +12,7 @@ import {
   subscribeCustomFoods, saveCustomFoods,
   deleteAllUserData,
 } from './utils/foodLog';
+import { subscribeDomusItems, subscribeDomusLocations } from './utils/domusSync';
 import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitProfile } from './utils/lyfitSync';
 import {
   pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym, pushNutritionBioToLogym,
@@ -194,6 +194,10 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [mealPreps, setMealPreps] = useState([]);
   const [customFoods, setCustomFoods] = useState([]);
 
+  // --- Domus Inventory ---
+  const [domusItems, setDomusItems] = useState([]);
+  const [domusLocations, setDomusLocations] = useState([]);
+
   // Optimistic: update state lokal duluan (sama seperti saveDay) supaya dua aksi beruntun
   // (mis. tambah resep lalu langsung hapus meal-prep) gak saling menimpa lewat closure basi.
   const saveRecipesFn = useCallback(async (items) => {
@@ -214,13 +218,17 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     const unsub1 = subscribeRecipes(user.uid, setRecipes);
     const unsub2 = subscribeCustomFoods(user.uid, setCustomFoods);
     const unsub3 = subscribeMealPreps(user.uid, setMealPreps);
+    const unsub4 = subscribeDomusItems(user.uid, setDomusItems);
+    const unsub5 = subscribeDomusLocations(user.uid, setDomusLocations);
     unsubsRef.current.recipes = unsub1;
     unsubsRef.current.customFoods = unsub2;
     unsubsRef.current.mealPreps = unsub3;
-    return () => { unsub1(); unsub2(); unsub3(); };
+    unsubsRef.current.domusItems = unsub4;
+    unsubsRef.current.domusLocations = unsub5;
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
   }, [user]);
 
-  // Share resep ke Social Feed (post type:'recipe') — butuh identitas Logym (lihat firebaseLogym.js).
+  // Share resep ke Social Feed (post type:'recipe').
   const shareRecipe = useCallback(async (recipe) => {
     if (!logymUser) throw new Error('Login dengan Google untuk pakai Social Hub');
     await createCommunityPost(logymUser.uid, logymUser.displayName, logymUser.photoURL, {
@@ -272,7 +280,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
   // --- Sinkron biometrik 2-arah dengan Logym (gender/dob/height/weight) ---
   // Lomeal TIDAK PERNAH sentuh kode Logym — 2 arah dicapai lewat listener
-  // terus-menerus (Logym→Lomeal) + tulis langsung ke dbLogym (Lomeal→Logym).
+  // terus-menerus (Logym→Lomeal, baca logym_users) + tulis langsung ke
+  // logym_users (Lomeal→Logym), lihat utils/biometricSync.js.
   // lastSyncedPhysicalRef mencegah ping-pong: kalau nilai baru == yang barusan
   // disinkron (dari arah mana pun), jangan tulis ulang.
   const lastSyncedPhysicalRef = useRef(null);
@@ -488,6 +497,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     recipes, saveRecipesFn,
     mealPreps, saveMealPrepsFn,
     customFoods, saveCustomFoodsFn,
+    domusItems, domusLocations,
     shareRecipe,
     aiKey: effectiveAiKeys,
     waterGoal: profile?.targets?.waterGoal,
@@ -583,8 +593,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 function App() {
   const [authState, setAuthState] = useState({ loading: true, user: null });
   const [profile, setProfile] = useState(undefined); // undefined = belum dicek, null = belum ada profil
-  const [logymUser, setLogymUser] = useState(null); // identitas Social Hub (project Logym)
-  const [logymAuthChecked, setLogymAuthChecked] = useState(false); // hindari kedip gate connect pas awal load
+  // Lomeal & Logym sekarang 1 project Firebase (hexa-life) = 1 identitas Auth yang sama —
+  // gak ada lagi "logymUser" terpisah yang perlu dijembatani (dulu authLogym + bridgeToLogym,
+  // 2 project beda). Kode yang butuh identitas Social Hub tinggal pakai authState.user langsung.
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -593,40 +604,6 @@ function App() {
     });
     return unsub;
   }, []);
-
-  useEffect(() => onAuthStateChanged(authLogym, (u) => {
-    console.log('[DEBUG authLogym listener]', u ? `${u.email} (${u.uid})` : 'null');
-    setLogymUser(u); setLogymAuthChecked(true);
-  }), []);
-
-  // 0-klik: begitu login Lomeal (provider apa pun), diam-diam sambung ke Logym lewat
-  // Cloud Function bridgeLomealAuth (lihat firebaseLogym.js#bridgeToLogym). Kalau
-  // gagal (offline, dsb), diam saja — tombol manual di ProfilePage/OnboardingFlow
-  // masih ada sebagai fallback.
-  const bridgeAttemptedRef = useRef(null); // uid terakhir yang sudah dicoba, hindari spam retry
-  useEffect(() => {
-    if (!authState.user || !logymAuthChecked) return;
-
-    // BUG FIX: Kalau logymUser sudah ada tapi emailnya beda sama Lomeal user saat ini,
-    // berarti sesi Logym lama (akun sebelumnya) masih nempel — WAJIB sign out dulu lalu re-bridge.
-    const logymEmailMismatch = logymUser && logymUser.email && authState.user.email &&
-      logymUser.email.toLowerCase() !== authState.user.email.toLowerCase();
-
-    if (logymEmailMismatch) {
-      console.warn('[DEBUG bridge] Email mismatch! Logym:', logymUser.email, '≠ Lomeal:', authState.user.email, '— sign out logym dulu');
-      bridgeAttemptedRef.current = null; // reset agar bisa bridge ulang setelah sign out
-      signOut(authLogym).catch(() => {});
-      return;
-    }
-
-    if (logymUser) return; // sudah tersambung dengan akun yang benar
-    if (bridgeAttemptedRef.current === authState.user.uid) return;
-    bridgeAttemptedRef.current = authState.user.uid;
-    console.log('[DEBUG bridge] mencoba sambung untuk lomeal uid', authState.user.uid, authState.user.email);
-    bridgeToLogym(authState.user)
-      .then(() => console.log('[DEBUG bridge] SUKSES'))
-      .catch((e) => console.warn('[DEBUG bridge] GAGAL:', e.code, e.message));
-  }, [authState.user, logymUser, logymAuthChecked]);
 
   useEffect(() => {
     if (!authState.user) return undefined;
@@ -682,25 +659,19 @@ function App() {
       <OnboardingFlow
         t={darkTheme}
         theme="dark"
-        logymUser={logymUser}
+        logymUser={authState.user}
         onComplete={handleOnboardingComplete}
       />
     );
   }
 
-  // Logout Lomeal WAJIB ikut nyabut sesi Logym — kalau tidak, sesi Logym akun lama
-  // nempel ke akun Lomeal berikutnya yang login di device yang sama (data ke-sync
-  // ke akun yang salah). Sekarang aman ditinggal ikut logout karena reconnect ke
-  // Logym otomatis 0-klik lagi (bridgeToLogym) begitu akun berikutnya login.
   const handleLogout = () => {
-    console.log('[DEBUG logout] logymUser saat ini:', logymUser?.email || 'null', '— signOut auth + authLogym dipanggil');
     signOut(auth);
-    signOut(authLogym).catch((e) => console.warn('[DEBUG logout] signOut authLogym error:', e.message));
   };
 
   return (
     <BrowserRouter>
-      <AppContent user={authState.user} profile={profile} logymUser={logymUser} onLogout={handleLogout} />
+      <AppContent user={authState.user} profile={profile} logymUser={authState.user} onLogout={handleLogout} />
     </BrowserRouter>
   );
 }

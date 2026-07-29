@@ -11,7 +11,7 @@ import {
   blockUser, unblockUser, getFollowingIds
 } from '../utils/followApi';
 import { collection, query, where, getDocs, documentId } from 'firebase/firestore';
-import { dbLogym } from '../firebaseLogym';
+import { db } from '../firebase';
 
 export default function FollowListModal({ currentUser, type, isDark, t, onClose }) {
   const [list, setList] = useState([]);
@@ -29,7 +29,7 @@ export default function FollowListModal({ currentUser, type, isDark, t, onClose 
       try {
         const [myFollowing, myBlockedSnap] = await Promise.all([
           getFollowingIds(currentUser.uid),
-          getDocs(query(collection(dbLogym, 'blocks'), where('blockerId', '==', currentUser.uid))),
+          getDocs(query(collection(db, 'logym_blocks'), where('blockerId', '==', currentUser.uid))),
         ]);
         const myBlocked = myBlockedSnap.docs.map((d) => d.data().blockedId);
 
@@ -44,7 +44,7 @@ export default function FollowListModal({ currentUser, type, isDark, t, onClose 
           const chunks = [];
           for (let i = 0; i < allUids.length; i += 30) chunks.push(allUids.slice(i, i + 30));
           for (const chunk of chunks) {
-            const cSnap = await getDocs(query(collection(dbLogym, 'community_users'), where(documentId(), 'in', chunk)));
+            const cSnap = await getDocs(query(collection(db, 'logym_community_users'), where(documentId(), 'in', chunk)));
             cSnap.docs.forEach((d) => { profiles[d.id] = d.data(); });
           }
         }

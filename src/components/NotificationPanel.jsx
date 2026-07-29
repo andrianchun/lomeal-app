@@ -1,5 +1,5 @@
 // src/components/NotificationPanel.jsx — port dari lyfit.app/src/components/NotificationPanel.jsx,
-// data dari Logym (communityApi.js sudah mengarah ke dbLogym).
+// data dari Logym (communityApi.js sudah mengarah ke collection logym_*).
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, X, Heart, MessageCircle, UserPlus, RefreshCw } from 'lucide-react';

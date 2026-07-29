@@ -1,8 +1,8 @@
-// src/utils/moderationApi.js — Social Hub, semua baca/tulis ke project Logym (dbLogym).
+// src/utils/moderationApi.js — Social Hub, baca/tulis ke collection `logym_*` di project hexa-life.
 // Diporting dari lyfit.app/src/utils/moderationApi.js, dipangkas: TANPA fungsi admin
 // (banUserGlobal/unbanUserGlobal/getBannedUsers) — panel moderasi admin di luar scope
 // pass ini, cuma fungsi lapor (report) yang dibawa.
-import { dbLogym } from '../firebaseLogym';
+import { db } from '../firebase';
 import { collection, addDoc, getDoc, doc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
 
 export const BAD_WORDS = [
@@ -39,10 +39,10 @@ export const censorBadWords = (text) => {
 
 export const reportPost = async (postId, reporterId, reason) => {
     try {
-        await addDoc(collection(dbLogym, 'community_reports'), {
+        await addDoc(collection(db, 'logym_community_reports'), {
             type: 'post', targetId: postId, reporterId, reason, timestamp: serverTimestamp()
         });
-        const postRef = doc(dbLogym, 'community_posts', postId);
+        const postRef = doc(db, 'logym_community_posts', postId);
         const postSnap = await getDoc(postRef);
         if (postSnap.exists()) {
             const currentReports = (postSnap.data().reportCount || 0) + 1;
@@ -64,7 +64,7 @@ export const reportPost = async (postId, reporterId, reason) => {
 
 export const reportUser = async (targetUserId, reporterId, reason) => {
     try {
-        await addDoc(collection(dbLogym, 'community_reports'), {
+        await addDoc(collection(db, 'logym_community_reports'), {
             type: 'user', targetId: targetUserId, reporterId, reason, timestamp: serverTimestamp()
         });
         const localBlocked = JSON.parse(localStorage.getItem('lomeal_blocked_users_local') || '[]');

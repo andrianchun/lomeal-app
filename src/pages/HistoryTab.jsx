@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Sparkles, ImageDown, Loader2, X, Bell, BellOff, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sparkles, ImageDown, Loader2, X, Bell, BellOff, Clock, ChefHat, Box } from 'lucide-react';
 import FoodPickerModal from '../components/FoodPickerModal';
 import { MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, getMonthKey, DEFAULT_SESSION_TIMES } from '../data/constants';
 import { computeDayTotals } from '../data/nutrition';
@@ -14,7 +14,7 @@ import { AI_DAILY_LIMIT } from '../data/constants';
  * tanggal maju = Meal Prep. Klik tanggal → dropdown sub-card CRUD inline.
  * Bawah: Generate Evaluasi Mingguan (Gemini, manual) + Export Image.
  */
-const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, customFoods, recipes, aiKey, showAlert, showToast, saveProfilePatch }) => {
+const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, customFoods, recipes, domusItems, aiKey, showAlert, showToast, saveProfilePatch }) => {
   const todayYmd = getLocalYMD();
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [expandedYmd, setExpandedYmd] = useState(null);
@@ -225,7 +225,12 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
                       </div>
                       {entries.map(e => (
                         <div key={e.id} className={`flex items-center justify-between pl-3 pr-1 py-1.5 mt-1 rounded-xl ${t.bgSunken}`}>
-                          <p className={`caption font-semibold flex-1 ${t.textMain}`}>{e.name}</p>
+                          <p className={`caption font-semibold flex-1 ${t.textMain}`}>
+                            {e.name}
+                            {e.source === 'ai' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500"><Sparkles size={12} strokeWidth={2.5} /></span>}
+                            {e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500"><ChefHat size={12} strokeWidth={2.5} /></span>}
+                            {e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500"><Box size={12} strokeWidth={2.5} /></span>}
+                          </p>
                           <input type="number" inputMode="numeric" defaultValue={e.grams} key={`${e.id}_${e.grams}`}
                             onBlur={(ev) => { const g = Number(ev.target.value) || 0; if (g !== e.grams) editEntryGrams(expandedYmd, s.id, e.id, g); }}
                             className={`w-12 text-right caption bg-transparent border-b ${t.border} outline-none no-spinners ${t.textMain}`} />
@@ -276,7 +281,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
       <FoodPickerModal
         t={t} theme={theme} open={!!picker}
         onClose={() => setPicker(null)}
-        customFoods={customFoods} recipes={recipes}
+        customFoods={customFoods} recipes={recipes} domusItems={domusItems}
         favoriteFoods={profile?.favoriteFoods || []}
         onAdd={(entry) => picker && addEntry(picker.ymd, picker.session, entry)}
       />

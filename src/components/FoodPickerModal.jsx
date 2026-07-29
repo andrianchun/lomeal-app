@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { X, Search, Scale, ChefHat, Plus, Star } from 'lucide-react';
+import { X, Search, Scale, ChefHat, Plus, Star, Box } from 'lucide-react';
 import { searchFoods, nutritionForAmount, FOOD_CATEGORIES } from '../data/foodDatabase';
-import { scaleNutrition, NUTRIENTS } from '../data/nutrition';
+import { scaleNutrition, NUTRIENTS, EMPTY_NUTRITION } from '../data/nutrition';
 import { makeEntry } from '../utils/foodLog';
 import { recordFoodUsage, sortFoodsByUsage } from '../utils/foodUsage';
 
@@ -13,7 +13,7 @@ const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key,
  * batch "Catat Makanan" (LogTab) atau editor gram inline (HistoryTab). Modal ini
  * gak nyimpen state porsi sendiri lagi, biar gak ada 2 cara beda buat hal yang sama.
  */
-const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], recipes = [], initialTab = 'db', favoriteFoods = [] }) => {
+const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], recipes = [], domusItems = [], initialTab = 'db', favoriteFoods = [] }) => {
   const [tab, setTab] = useState(initialTab); // 'db' | 'recipes' | 'manual'
   const [term, setTerm] = useState('');
   const [category, setCategory] = useState(null);
@@ -62,6 +62,25 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], rec
     }));
   };
 
+  const addDomusItem = (item) => {
+    // Coba tebak nutrisi dari namanya kalau bisa, kalau nggak kosongin
+    const matches = searchFoods(item.name, customFoods);
+    const bestMatch = matches.length > 0 ? matches[0] : null;
+    const baseNutr = bestMatch ? bestMatch.nutrition : { ...EMPTY_NUTRITION };
+    const grams = bestMatch?.portion?.grams || 100;
+    
+    onAdd(makeEntry({
+      name: item.name, 
+      domusItemId: item.id,
+      grams, 
+      unit: bestMatch ? bestMatch.unit : 'g',
+      nutrition: bestMatch ? nutritionForAmount(bestMatch, grams) : baseNutr, 
+      source: 'domus',
+      baseNutrition: baseNutr,
+      baseGrams: 100,
+    }));
+  };
+
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
 
   return (
@@ -76,10 +95,10 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], rec
           </div>
 
           <div className={`flex gap-1 rounded-2xl p-1 ${t.bgSunken}`}>
-            {[['db', 'Database', Search], ['recipes', 'Resep', ChefHat], ['manual', 'Manual', Scale]].map(([id, label, Icon]) => (
+            {[['db', 'Database', Search], ['recipes', 'Resep', ChefHat], ['domus', 'Domus', Box], ['manual', 'Manual', Scale]].map(([id, label, Icon]) => (
               <button key={id} onClick={() => setTab(id)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-xl body-md font-bold transition-all ${tab === id ? `${t.bgAccent} text-white shadow-glow` : t.textMuted}`}>
-                <Icon size={15} /> {label}
+                className={`flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 sm:py-3 rounded-xl text-xs sm:text-sm font-bold transition-all ${tab === id ? `${t.bgAccent} text-white shadow-glow` : t.textMuted}`}>
+                <Icon size={15} /> <span>{label}</span>
               </button>
             ))}
           </div>
@@ -130,6 +149,25 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], rec
                   </div>
                   <button onClick={() => logRecipe(r, 1)} className={`shrink-0 ml-2 px-3.5 py-2.5 rounded-xl body-md font-bold ${t.bgAccent} shadow-glow`}>+1 porsi</button>
                 </div>
+              ))}
+            </div>
+          )}
+
+          {/* ---------- TAB DOMUS ---------- */}
+          {tab === 'domus' && (
+            <div className="space-y-1.5">
+              {domusItems.length === 0 && <p className={`body-md text-center py-6 ${t.textMuted}`}>Belum ada bahan makanan di Kulkas Domus.</p>}
+              {domusItems.map(item => (
+                <button key={item.id} onClick={() => addDomusItem(item)}
+                  className={`w-full flex items-center justify-between p-3 rounded-2xl border text-left transition-transform active:scale-[0.98] ${t.border} ${t.bgCard}`}>
+                  <div className="min-w-0">
+                    <p className={`body-md ${t.textMain} truncate flex items-center gap-1`}>
+                      {item.name}
+                    </p>
+                    <p className={`caption font-medium ${t.textMuted}`}>Stok: {item.quantity || '?'}</p>
+                  </div>
+                  <span className={`shrink-0 ml-2 p-2 rounded-full ${t.bgAccentSoft} ${t.textAccent}`}><Plus size={18} /></span>
+                </button>
               ))}
             </div>
           )}

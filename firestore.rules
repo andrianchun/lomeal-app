@@ -1,3 +1,7 @@
+// VESTIGIAL — Lomeal dimigrasi ke project hexa-life (lihat src/firebase.js). Rules yang beneran
+// aktif sekarang ada di darka-app/firestore.rules (satu file master buat Darka/Domus/Lomeal/Logym),
+// deploy dari sana. File ini SENGAJA gak lagi di-reference di firebase.json (key "firestore" udah
+// dihapus) biar gak ke-deploy gak sengaja dan nimpa rules yang bener di hexa-life.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {

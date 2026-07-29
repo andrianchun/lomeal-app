@@ -6,6 +6,8 @@ import { EMPTY_NUTRITION, addNutrition, scaleNutrition, DIET_PROFILES } from '..
 import { MEAL_SESSIONS, getLocalYMD, DAY_NAMES_ID } from '../data/constants';
 import { makeEntry } from '../utils/foodLog';
 import { generateDietRecipe } from '../utils/aiFood';
+import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, markDomusItemConsumed } from '../utils/domusSync';
+import { deductStock } from '../utils/stockConverter';
 import SupplementBuilder from '../components/SupplementBuilder';
 import MedicineBuilder from '../components/MedicineBuilder';
 import DietQuestionnaireModal from '../components/DietQuestionnaireModal';
@@ -21,7 +23,7 @@ const COLORS = [
 /**
  * TAB 4: RENCANA & PROGRAM
  */
-const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showToast, showConfirm, profile, saveProfilePatch, aiKey }) => {
+const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showToast, showConfirm, profile, saveProfilePatch, aiKey }) => {
   const location = useLocation();
   const [activeTab, setActiveTab] = useState(location.state?.swipeDir === 'right' ? 'suplemen_obat' : 'resep'); // 'resep', 'suplemen_obat'
   
@@ -38,6 +40,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
   const [editingSupplement, setEditingSupplement] = useState(null);
   const [editingMedicine, setEditingMedicine] = useState(null);
   const [assigning, setAssigning] = useState(null); // resep yang sedang dijadwalkan
+  const [cookingRecipe, setCookingRecipe] = useState(null); // resep yang mau dimasak (untuk milih lokasi kulkas)
   const [ingSearch, setIngSearch] = useState('');
   const [shareBusy, setShareBusy] = useState(null);
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
@@ -92,9 +95,72 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
     return b.remainingPortions - scheduledUneaten;
   };
 
-  const startCook = async (r) => {
-    if (!(await showConfirm(`Mulai masak "${r.name}" (${r.portions} porsi)? Stok akan ditambahkan ke Kulkas.`))) return;
+  const startCook = (r) => {
+    setCookingRecipe({ ...r, selectedLocation: domusLocations?.[0]?.id || '' });
+  };
+
+  const executeCook = async () => {
+    const r = cookingRecipe;
+    if (!r) return;
     
+    // 1. Recipe Bundle System (Collective Deduction) & Reverse Data Flow
+    if (domusItems) {
+      let missingOrEmpty = [];
+      for (const ing of r.ingredients) {
+        // Find matching item in Domus (fuzzy match name)
+        const match = domusItems.find(di => 
+          di.name.toLowerCase().includes(ing.name.toLowerCase()) || 
+          ing.name.toLowerCase().includes(di.name.toLowerCase())
+        );
+
+        try {
+          if (match) {
+            const newQtyStr = deductStock(match.quantity, Number(ing.grams || 0));
+            if (newQtyStr === '0' || newQtyStr === null) {
+              await markDomusItemConsumed(match.id);
+              missingOrEmpty.push(ing.name);
+            } else {
+              await updateDomusItemQuantity(match.id, newQtyStr);
+            }
+          } else {
+            // Ingredient completely missing in Domus
+            missingOrEmpty.push(ing.name);
+          }
+        } catch (e) {
+          console.error(`Gagal potong stok untuk ${ing.name}`, e);
+        }
+      }
+
+      // Inject missing items to Domus Shopping List
+      if (missingOrEmpty.length > 0) {
+        // Deduplicate
+        const uniqueMissing = [...new Set(missingOrEmpty)];
+        for (const m of uniqueMissing) {
+          try {
+            await requestShoppingListDomus(user.uid, m);
+          } catch (e) {
+            console.error('Gagal tambah ke shopping list', e);
+          }
+        }
+      }
+    }
+
+    // 2. Convert recipe into Domus Item (Meal Prep)
+    if (r.selectedLocation) {
+      try {
+        await createDomusItem(user.uid, {
+          name: `${r.name} (Meal Prep)`,
+          locationId: r.selectedLocation,
+          quantity: `${r.portions} porsi`,
+          isFood: true,
+          sourceApp: 'lomeal',
+        });
+      } catch (err) {
+        console.error('Gagal tambah ke Domus', err);
+        showToast('Gagal menyinkronkan dengan Domus.');
+      }
+    }
+
     const existingIndex = mealPreps.findIndex(b => b.recipeId === r.id);
     if (existingIndex >= 0) {
       const existing = mealPreps[existingIndex];
@@ -122,6 +188,7 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
       saveMealPrepsFn([newBatch, ...mealPreps]);
     }
     showToast(`${r.portions} porsi ${r.name} berhasil dimasak! 👨‍🍳`);
+    setCookingRecipe(null);
   };
 
   const deleteBatch = async (b) => {
@@ -460,7 +527,44 @@ const ProgramTab = ({ t, theme, recipes, saveRecipesFn, mealPreps, saveMealPreps
 
       {activeTab === 'resep' && (
         <>
-          {/* KULKAS (STOK MEAL PREP) */}
+          {/* MODAL COOK (MASAK MEAL PREP) */}
+      {cookingRecipe && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 pb-12 sm:p-4 anim-fade-in">
+          <div className={`w-full max-w-sm rounded-3xl border shadow-2xl overflow-hidden anim-rise ${theme === 'dark' ? 'bg-[#0a1510] border-white/10' : 'bg-white border-black/10'}`}>
+            <div className={`p-5 flex items-center justify-between border-b ${t.border}`}>
+              <h2 className={`h2 ${t.textMain}`}>Mulai Masak</h2>
+              <button onClick={() => setCookingRecipe(null)} className={`p-2 rounded-xl ${t.btnBg}`}><X size={18} className={t.textMuted} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <p className={`body-md ${t.textMain}`}>Kamu akan memasak <strong>{cookingRecipe.name}</strong> sebanyak <strong>{cookingRecipe.portions} porsi</strong>.</p>
+                <p className={`caption mt-1 ${t.textMuted}`}>Hasil masakan akan disimpan sebagai Meal Prep dan disinkronkan ke Domus (Kulkas).</p>
+              </div>
+
+              {domusLocations && domusLocations.length > 0 && (
+                <div>
+                  <label className={`block caption font-bold mb-1.5 ${t.textMuted}`}>Simpan di (Domus)</label>
+                  <select
+                    className={`w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`}
+                    value={cookingRecipe.selectedLocation}
+                    onChange={e => setCookingRecipe({ ...cookingRecipe, selectedLocation: e.target.value })}
+                  >
+                    {domusLocations.map(loc => (
+                      <option key={loc.id} value={loc.id}>{loc.name} {loc.emoji}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              <button onClick={executeCook} className={`w-full py-3.5 rounded-xl h2 font-bold ${t.bgAccent} shadow-glow flex items-center justify-center gap-2 mt-4`}>
+                <ChefHat size={18} /> Simpan ke Kulkas
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ASSIGN / JADWALKAN (MEAL PREP) */}
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
               <div>

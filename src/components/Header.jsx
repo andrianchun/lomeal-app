@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, User, WifiOff, Leaf, Bell } from 'lucide-react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { dbLogym } from '../firebaseLogym';
+import { db } from '../firebase';
 
 /**
  * Top App Bar Lomeal — dibuat presisi mengikuti Header Logym asli
@@ -14,7 +14,7 @@ const Header = ({ t, theme, isOffline, logymUser, onOpenSocial, onOpenSettings, 
 
   useEffect(() => {
     if (!logymUser) { setUnreadCount(0); return undefined; }
-    const q = query(collection(dbLogym, 'notifications'), where('toUserId', '==', logymUser.uid), where('read', '==', false));
+    const q = query(collection(db, 'logym_notifications'), where('toUserId', '==', logymUser.uid), where('read', '==', false));
     return onSnapshot(q, (snap) => setUnreadCount(snap.docs.length));
   }, [logymUser]);
 

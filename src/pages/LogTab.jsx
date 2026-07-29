@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Trash2, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat } from 'lucide-react';
+import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Trash2, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box } from 'lucide-react';
 import RingChart from '../components/RingChart';
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
@@ -12,6 +12,8 @@ import { parseFoodText, analyzeSmartPhoto, compressImageTo100KB } from '../utils
 import { makeEntry, checkAndCountAiUsage } from '../utils/foodLog';
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse } from '../utils/nlpParser';
 import { uploadToCloudinary } from '../utils/cloudinary';
+import { markDomusItemConsumed, updateDomusItemQuantity } from '../utils/domusSync';
+import { deductStock } from '../utils/stockConverter';
 import SpeedDialScanner from '../components/SpeedDialScanner';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
@@ -44,7 +46,7 @@ const COLORS = [
  * Date strip → quick stats + water tracker → Meal Grid 2 kolom (piring + ring
  * makro) → Smart Input Bar (chat NL / kamera / voice / manual presisi).
  */
-const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, aiKey, showAlert, showToast, waterGoal,
+const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, domusItems, domusLocations, aiKey, showAlert, showToast, waterGoal,
   chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession }) => {
 
   const todayYmd = getLocalYMD();
@@ -135,7 +137,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     meals[sessionId] = meals[sessionId].map(x => x.id === e.id ? { ...x, isEaten: checked } : x);
     persistDay({ ...day, meals });
 
-    // 2. Manage batch stock
+    // 2. Manage batch stock and Domus stock
     if (e.batchId && mealPreps) {
       const batch = mealPreps.find(b => b.id === e.batchId);
       if (batch) {
@@ -187,6 +189,24 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
             
             showAlert(`Auto-Koreksi: ${toDelete} jadwal masa depan dihapus otomatis karena stok habis.`);
           }
+        }
+      }
+    }
+
+    // 3. Deduct Domus stock
+    if (e.domusItemId && domusItems) {
+      const domusItem = domusItems.find(i => i.id === e.domusItemId);
+      // Only deduct if we are marking it as eaten (checked), and we haven't already deducted it 
+      // (in reality we might want a mechanism to un-eat and add back stock, but this is simple for now)
+      if (domusItem && checked) {
+        // e.grams is the amount consumed in Lomeal
+        const newQty = deductStock(domusItem.quantity, e.grams || 100);
+        if (newQty === '0') {
+          markDomusItemConsumed(e.domusItemId).catch(console.error);
+          showToast(`Stok ${domusItem.name} di kulkas (Domus) habis.`);
+        } else if (newQty !== null && newQty !== domusItem.quantity) {
+          updateDomusItemQuantity(e.domusItemId, newQty).catch(console.error);
+          showToast(`Stok ${domusItem.name} di kulkas diupdate: ${newQty}`);
         }
       }
     }
@@ -1066,7 +1086,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                             }} className={`w-12 bg-transparent border-b border-dashed ${t.border} outline-none no-spinners text-center ${t.textMain}`} />
                             {e.unit || 'g'} · {Math.round(e.nutrition?.kcal || 0)} kkal
                           </span>
-                          {e.source === 'ai' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <Sparkles size={14} strokeWidth={2.5} /></span>}{e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}
+                          {e.source === 'ai' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <Sparkles size={14} strokeWidth={2.5} /></span>}{e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}{e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500">· <Box size={14} strokeWidth={2.5} /></span>}
                           {e.isMealPrep && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border shrink-0 ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>Meal Prep</span>}
                         </div>
                       </div>
@@ -1205,16 +1225,18 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
       {/* ===== FOOD PICKER — nambah ke batch aiResult yang sama kayak hasil AI, biar gak ada
           dua cara beda buat "tambah makanan" (satu sheet review buat semua sumber) ===== */}
-      <FoodPickerModal
-        t={t} theme={theme} open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        customFoods={customFoods} recipes={recipes}
-        favoriteFoods={profile?.favoriteFoods || []}
-        onAdd={(entry) => {
-          appendAiResult([entry]);
-          showToast(`${entry.name} ditambahkan ke catatan makan, silakan cek sebelum disimpan.`);
-        }}
-      />
+      {pickerOpen && (
+        <FoodPickerModal
+          t={t} theme={theme} open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          customFoods={customFoods} recipes={recipes} domusItems={domusItems}
+          favoriteFoods={profile?.favoriteFoods || []}
+          onAdd={(entry) => {
+            appendAiResult([entry], { source: 'picker' });
+            showToast(`${entry.name} ditambahkan ke catatan makan, silakan cek sebelum disimpan.`);
+          }}
+        />
+      )}
       
       {/* ===== SHEET KONFIRMASI HAPUS SESI ===== */}
       {deleteConfirm && (

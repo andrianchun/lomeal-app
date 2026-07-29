@@ -1,13 +1,12 @@
 // ============================================================
 // SINKRONISASI EKOSISTEM LOGYM (READ-ONLY!)
-// File ini hanya MEMBACA data milik aplikasi Logym (project logym-id):
-//   - users/{uid}            → settings.userProfile (biometrik), userApiKeys
-//   - users/{uid}/history_years/{year} → aktivitas & kalori terbakar harian
+// File ini hanya MEMBACA data milik aplikasi Logym, sekarang di collection `logym_users`
+// (project hexa-life, sama project sama uid dengan Lomeal — gak perlu bridge lagi):
+//   - logym_users/{uid}            → settings.userProfile (biometrik), userApiKeys
+//   - logym_users/{uid}/history_years/{year} → aktivitas & kalori terbakar harian
 // DILARANG KERAS ada operasi tulis di file ini (blueprint Fase 1).
-// Selalu dipanggil dengan logymUser.uid (uid project Logym), BUKAN uid Lomeal —
-// keduanya beda project Firebase sejak Lomeal punya project sendiri (lomeal-id).
 // ============================================================
-import { dbLogym } from '../firebaseLogym';
+import { db } from '../firebase';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
 // Susun profil Logym dari raw doc data — dipakai fetchLyfitProfile (one-shot) &
@@ -48,7 +47,7 @@ const parseLyfitProfile = (data) => {
 // untuk ditawarkan "Salin ke Lomeal" — lihat SettingsPage.jsx).
 export const fetchLyfitProfile = async (uid) => {
   try {
-    const snap = await getDoc(doc(dbLogym, 'users', uid));
+    const snap = await getDoc(doc(db, 'logym_users', uid));
     if (!snap.exists()) return null;
     return parseLyfitProfile(snap.data());
   } catch (e) {
@@ -61,7 +60,7 @@ export const fetchLyfitProfile = async (uid) => {
 // (App.jsx#dob/height/weight/gender 2-arah, lihat utils/biometricSync.js).
 export const subscribeLyfitProfile = (uid, cb) =>
   onSnapshot(
-    doc(dbLogym, 'users', uid),
+    doc(db, 'logym_users', uid),
     (snap) => cb(snap.exists() ? parseLyfitProfile(snap.data()) : null),
     () => cb(null)
   );
@@ -98,7 +97,7 @@ export const extractLyfitDay = (yearDays, ymd) => {
 // Langganan dokumen tahun berjalan Logym (read-only listener).
 export const subscribeLyfitYear = (uid, year, cb) =>
   onSnapshot(
-    doc(dbLogym, 'users', uid, 'history_years', String(year)),
+    doc(db, 'logym_users', uid, 'history_years', String(year)),
     (snap) => cb(snap.exists() ? snap.data() : {}),
     () => cb({})
   );

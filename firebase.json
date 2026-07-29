@@ -1,17 +1,14 @@
 {
-  "firestore": {
-    "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
-  },
   "functions": [
     {
       "source": "functions",
-      "codebase": "default",
+      "codebase": "lomeal",
       "ignore": ["node_modules", ".git", "*.log"],
       "predeploy": ["node ../copy-env.cjs"]
     }
   ],
   "hosting": {
+    "target": "lomeal",
     "public": "dist",
     "ignore": [
       "firebase.json",

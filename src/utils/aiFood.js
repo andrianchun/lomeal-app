@@ -106,7 +106,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null) {
   }
 
   // Fallback to server if no keys or all keys failed
-  const aiChat = httpsCallable(functions, 'aiChat');
+  const aiChat = httpsCallable(functions, 'lomealAiChat');
   try {
     const res = await aiChat({
       messages: [{ role: 'user', content: parts }],

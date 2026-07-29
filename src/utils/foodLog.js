@@ -1,15 +1,15 @@
 // ============================================================
-// LAPISAN DATA LOMEAL — akses Firestore project lomeal-id (Fase 1)
+// LAPISAN DATA LOMEAL — akses Firestore project hexa-life (dimigrasi dari lomeal-id)
 // SEMUA operasi tulis (.set/.update) di seluruh aplikasi Lomeal WAJIB
 // melewati file ini, dan file ini HANYA menulis ke sub-koleksi:
-//     /users/{uid}/food_logs/*
-// Project ini berdiri sendiri, terpisah dari project Firebase Logym/Lyfit.
+//     /lomeal_users/{uid}/food_logs/*
+// Prefix `lomeal_` biar gak tabrakan sama collection Darka/Domus/Logym di project bareng ini.
 // ============================================================
 import { db } from '../firebase';
 import { doc, setDoc, updateDoc, onSnapshot, getDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
 import { getMonthKey } from '../data/constants';
 
-const flDoc = (uid, docId) => doc(db, 'users', uid, 'food_logs', docId);
+const flDoc = (uid, docId) => doc(db, 'lomeal_users', uid, 'food_logs', docId);
 
 // ---------- PROFIL LOMEAL (konsen, kuesioner, target, pengaturan) ----------
 export const subscribeLomealProfile = (uid, cb) =>
@@ -89,7 +89,7 @@ export const saveCustomFoods = (uid, items) =>
 // Dipanggil dari SettingsPage "Zona Berbahaya" sebelum deleteUser(auth.currentUser).
 // Cuma menyentuh /users/{uid}/food_logs/* milik Lomeal — tidak pernah menyentuh Logym.
 export const deleteAllUserData = async (uid) => {
-  const snap = await getDocs(collection(db, 'users', uid, 'food_logs'));
+  const snap = await getDocs(collection(db, 'lomeal_users', uid, 'food_logs'));
   const batch = writeBatch(db);
   snap.docs.forEach((d) => batch.delete(d.ref));
   await batch.commit();

@@ -4,7 +4,6 @@ import { fetchLyfitProfile } from '../utils/lyfitSync';
 import { computeAge } from '../data/constants';
 import { DIET_PROFILES, PACES, calcTargets } from '../data/nutrition';
 import ScrollPicker from '../components/ScrollPicker';
-import LogymConnectPrompt from '../components/LogymConnectPrompt';
 
 /**
  * ALUR ONBOARDING BERJENJANG — "Digital Anamnesis" (Fase 3 & 6 blueprint)
@@ -196,18 +195,11 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
 
                 {s.key === 'connect' && (
                   <div className="flex-1 flex flex-col gap-3 overflow-y-auto hide-scrollbar">
-                    {logymUser || fromLogym ? (
-                      <div className={`p-4 rounded-2xl border-2 ${t.borderAccent} ${t.bgAccentSoft} text-center`}>
-                        <Sparkles size={22} className={`mx-auto mb-2 ${t.textAccent}`} />
-                        <p className={`body-md ${t.textMain}`}>Tersambung ke Logym!</p>
-                        <p className={`caption font-medium mt-1 ${t.textMuted}`}>Gender/DOB/tinggi/berat sudah ditarik otomatis — cek di langkah berikutnya.</p>
-                      </div>
-                    ) : (
-                      <>
-                        <p className={`caption font-medium ${t.textMuted}`}>Sudah punya akun Logym? Data fisikmu gak usah diisi ulang. Belum punya? Tetap bisa sambung sekarang buat langsung akses Social Hub nanti (identitas baru dibuatkan otomatis) — atau lewati dulu, isi manual di langkah berikutnya.</p>
-                        <LogymConnectPrompt t={t} onConnected={(user) => applyLogymPrefill(user.uid)} />
-                      </>
-                    )}
+                    <div className={`p-4 rounded-2xl border-2 ${t.borderAccent} ${t.bgAccentSoft} text-center`}>
+                      <Sparkles size={22} className={`mx-auto mb-2 ${t.textAccent}`} />
+                      <p className={`body-md ${t.textMain}`}>Tersambung ke Logym!</p>
+                      <p className={`caption font-medium mt-1 ${t.textMuted}`}>Gender/DOB/tinggi/berat sudah ditarik otomatis — cek di langkah berikutnya.</p>
+                    </div>
                   </div>
                 )}
 
