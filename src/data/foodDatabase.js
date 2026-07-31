@@ -188,10 +188,3 @@ export const nutritionForAmount = (food, grams) => {
   Object.entries(food.nutrition).forEach(([k, v]) => { out[k] = Math.round(v * factor * 10) / 10; });
   return out;
 };
-
-// ─── API FETCH: OpenFoodFacts ──────────────────────────────────────
-export const fetchOpenFoodFacts = async (query) => {
-  // DINONAKTIFKAN SESUAI PERMINTAAN USER DEMI KECEPATAN (OFFLINE FIRST)
-  // Tidak lagi menggunakan OpenFoodFacts karena lambat dan data mikronya kosong.
-  return [];
-};

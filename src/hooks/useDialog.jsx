@@ -1,18 +1,21 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { AlertCircle, CheckCircle2, Info } from 'lucide-react';
 
 /**
  * useDialog — self-contained in-app alert & confirm dialogs.
- * 
+ *
+ * Tampilan seragam sama useToast: kotak ijo muda menyala di tengah layar,
+ * teks doang tanpa ikon, dan teks panjang (mis. pesan error Firestore yang
+ * isinya path tanpa spasi) dipaksa wrap biar gak meluber keluar kotak.
+ *
  * Usage:
  *   const { dialog, showAlert, showConfirm } = useDialog(isDark);
- * 
+ *
  *   await showAlert('Berhasil disimpan!');
  *   const yes = await showConfirm('Hapus postingan ini?');
- * 
+ *
  * Render <>{dialog}</> somewhere in your JSX.
  */
-export default function useDialog(isDark = false, customBgClass = null) {
+export default function useDialog() {
   const [state, setState] = useState(null);
   const resolveRef = useRef(null);
 
@@ -23,10 +26,10 @@ export default function useDialog(isDark = false, customBgClass = null) {
   }, []);
 
   /** Show a simple informational alert. Returns a Promise that resolves when dismissed. */
-  const showAlert = useCallback((message, { title = null, type = 'info' } = {}) => {
+  const showAlert = useCallback((message, { title = null } = {}) => {
     return new Promise((resolve) => {
       resolveRef.current = resolve;
-      setState({ mode: 'alert', message, title, type });
+      setState({ mode: 'alert', message, title });
     });
   }, []);
 
@@ -38,58 +41,41 @@ export default function useDialog(isDark = false, customBgClass = null) {
     });
   }, []);
 
-  const TYPE_ICON = {
-    success: <CheckCircle2 size={22} className="text-green-500 shrink-0" />,
-    error:   <AlertCircle  size={22} className="text-rose-500 shrink-0" />,
-    info:    <Info         size={22} className="text-emerald-500 shrink-0" />,
-  };
-
   const dialog = state ? (
     <div
       className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm flex items-center justify-center px-6 animate-in fade-in duration-150 no-swipe"
       onClick={() => state.mode === 'alert' && close()}
     >
       <div
-        className={`w-full max-w-xs rounded-3xl p-5 shadow-2xl border animate-in zoom-in-95 duration-200 ${
-          isDark ? `${customBgClass || 'bg-[#0b1f16]/80 backdrop-blur-xl'} border-white/10` : 'bg-white/80 backdrop-blur-xl border-black/8'
-        }`}
+        className="w-full max-w-xs rounded-3xl p-5 bg-lime-300 text-black shadow-2xl animate-in zoom-in-95 duration-200"
         onClick={e => e.stopPropagation()}
       >
-        {/* Icon + title */}
-        <div className="flex items-start gap-3 mb-3">
-          {state.mode === 'alert' && TYPE_ICON[state.type || 'info']}
-          <div className="flex-1">
-            {state.title && (
-              <h3 className={`font-black text-base mb-1 ${isDark ? 'text-white' : 'text-black'}`}>{state.title}</h3>
-            )}
-            <p className={`text-sm leading-relaxed ${isDark ? 'text-white/70' : 'text-black/65'}`}>{state.message}</p>
-          </div>
-        </div>
+        {state.title && (
+          <h3 className="font-black text-base mb-1 text-center break-words">{state.title}</h3>
+        )}
+        <p className="text-sm leading-relaxed mb-4 text-center break-words">{state.message}</p>
 
-        {/* Buttons */}
         {state.mode === 'alert' && (
           <button
             onClick={() => close()}
-            className="w-full mt-1 py-2.5 rounded-2xl font-black text-sm bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 transition-all"
+            className="w-full py-2.5 rounded-2xl font-black text-sm bg-black text-lime-300 active:scale-95 transition-all"
           >
             OK
           </button>
         )}
 
         {state.mode === 'confirm' && (
-          <div className="flex gap-2 mt-1">
+          <div className="flex gap-2">
             <button
               onClick={() => close(false)}
-              className={`flex-1 py-2.5 rounded-2xl font-black text-sm transition-all active:scale-95 ${
-                isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-black/8 text-black hover:bg-black/12'
-              }`}
+              className="flex-1 py-2.5 rounded-2xl font-black text-sm bg-black/10 text-black active:scale-95 transition-all"
             >
               {state.cancelText}
             </button>
             <button
               onClick={() => close(true)}
               className={`flex-1 py-2.5 rounded-2xl font-black text-sm text-white active:scale-95 transition-all ${
-                state.danger ? 'bg-rose-500 hover:bg-rose-600' : 'bg-emerald-500 hover:bg-emerald-600'
+                state.danger ? 'bg-rose-600' : 'bg-black'
               }`}
             >
               {state.confirmText}

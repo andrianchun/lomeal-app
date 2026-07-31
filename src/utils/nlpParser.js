@@ -4,6 +4,19 @@ import { db } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const PATTERN_CACHE_KEY = 'lomeal_pattern_cache';
+const PATTERN_CACHE_MAX = 200; // cukup buat menu yang sering diulang; localStorage kuotanya ~5MB
+
+/**
+ * Kunci cache. WAJIB dipakai di semua sisi (tulis, baca, lokal, global) — dulu penyimpanan
+ * pakai trim().toLowerCase() sementara pencariannya cuma toLowerCase(), jadi input berspasi
+ * ekor tersimpan tapi tidak pernah ketemu lagi. Spasi ganda dan tanda baca ekor ikut
+ * dirapikan biar "nasi goreng", "Nasi  Goreng", dan "nasi goreng." kena cache yang sama.
+ */
+export const cacheKey = (rawText) => (rawText || '')
+  .toLowerCase()
+  .replace(/[.,!?;]+$/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
 
 /**
  * Caches patterns locally
@@ -18,10 +31,15 @@ export const getLocalPatternCache = () => {
 
 export const saveLocalPatternCache = (rawText, parsedFoods) => {
   try {
-    const text = rawText.trim().toLowerCase();
     const cache = getLocalPatternCache();
-    cache[text] = parsedFoods;
-    localStorage.setItem(PATTERN_CACHE_KEY, JSON.stringify(cache));
+    delete cache[cacheKey(rawText)]; // hapus dulu biar disisipkan ulang sebagai yang terbaru
+    cache[cacheKey(rawText)] = parsedFoods;
+    // Objek JS mempertahankan urutan sisip untuk kunci string, jadi yang paling lama ada di depan.
+    const keys = Object.keys(cache);
+    const trimmed = keys.length > PATTERN_CACHE_MAX
+      ? Object.fromEntries(keys.slice(keys.length - PATTERN_CACHE_MAX).map((k) => [k, cache[k]]))
+      : cache;
+    localStorage.setItem(PATTERN_CACHE_KEY, JSON.stringify(trimmed));
   } catch (e) {
     console.error('Failed to save pattern cache', e);
   }
@@ -32,10 +50,10 @@ export const saveLocalPatternCache = (rawText, parsedFoods) => {
  */
 export const checkGlobalPatternCache = async (rawText) => {
   try {
-    const text = rawText.trim().toLowerCase();
+    const text = cacheKey(rawText);
     // Gunakan hash atau sanitize text untuk ID dokumen agar aman, tapi untuk MVP kita gunakan text jika pendek
     // Firestore doc ID tidak boleh mengandung /
-    const docId = text.replace(/\//g, '_').substring(0, 100); 
+    const docId = text.replace(/\//g, '_').substring(0, 100);
     const docRef = doc(db, 'lomeal_globalPatternCache', docId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
@@ -52,7 +70,7 @@ export const checkGlobalPatternCache = async (rawText) => {
  */
 export const saveGlobalPatternCache = async (rawText, parsedFoods) => {
   try {
-    const text = rawText.trim().toLowerCase();
+    const text = cacheKey(rawText);
     const docId = text.replace(/\//g, '_').substring(0, 100);
     const docRef = doc(db, 'lomeal_globalPatternCache', docId);
     await setDoc(docRef, {
@@ -134,21 +152,18 @@ export const runLocalNlpParse = (text, customFoods = []) => {
     
     // Syarat lolos: harus cukup mirip
     if (best && (best.name.toLowerCase() === name.toLowerCase() || best.name.toLowerCase().includes(name.toLowerCase()))) {
-      let finalUnit = 'g';
       let grams = calculateGramsFromURT(qty, unitStr);
+      if (grams === null) grams = best.portion.grams * qty; // satuan gak dikenal → pakai porsi bawaan
+      // Satuan rumah tangga ("gelas") dipertahankan supaya sheet konfirmasi tetap nampilin
+      // "1 gelas", bukan "200 ml". Konversi ke g/ml baru terjadi pas dicatat (entryUnit).
+      const finalUnit = normalizeUnit(unitStr) || (best.isDrink ? 'ml' : 'g');
 
-      if (grams === null) {
-        // Unknown unit, fallback to base logic
-        grams = best.portion.grams * qty;
-        finalUnit = unitStr ? normalizeUnit(unitStr) : 'porsi';
-      } else {
-        finalUnit = unitStr ? normalizeUnit(unitStr) : 'g';
-      }
-      
       parsedFoods.push({
         name: best.name,
         grams,
         unit: finalUnit,
+        isDrink: !!best.isDrink, // dipakai buat nentuin mL vs gram waktu dicatat
+        foodId: best.id, // biar gak dibikinin duplikat baru di custom DB
         nutrition: nutritionForAmount(best, grams),
         baseNutrition: best.nutrition,
         baseGrams: 100

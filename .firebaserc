@@ -1,6 +1,6 @@
 {
   "projects": {
-    "default": "lomeal-id"
+    "default": "hexa-life"
   },
   "targets": {
     "hexa-life": {

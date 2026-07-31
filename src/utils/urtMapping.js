@@ -29,7 +29,21 @@ export const URT_DICTIONARY = {
   genggam: 50,
   batang: 20,
   siung: 5,
+  botol: 350,
+  kaleng: 330,
+  cup: 250,
 };
+
+// Satuan yang isinya cairan. Dipakai buat nentuin entri log ditulis dalam mL atau gram —
+// bukan buat konversi (konversinya tetap lewat URT_DICTIONARY di atas).
+const LIQUID_UNITS = new Set(['ml', 'gelas', 'cangkir', 'botol', 'kaleng', 'cup', 'teko']);
+export const isLiquidUnit = (unitStr) => LIQUID_UNITS.has(normalizeUnit(unitStr));
+
+// Satuan yang BOLEH nempel di entri log cuma 'g' atau 'ml' — angkanya kan berat/volume total.
+// Satuan rumah tangga (gelas, centong, potong) itu cuma buat NGURAI input, dan sudah
+// dikonversi jadi gram di URT_DICTIONARY. Kalau ikut kesimpan, log-nya jadi "200 gelas".
+export const entryUnit = (householdUnit, isDrink = false) =>
+  (isDrink || isLiquidUnit(householdUnit)) ? 'ml' : 'g';
 
 // Tabel Sinonim untuk standarisasi input user yang sering salah ketik/disingkat
 export const SYNONYMS = {

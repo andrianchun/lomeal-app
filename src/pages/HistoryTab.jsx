@@ -5,7 +5,7 @@ import { MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, getMonthKey, 
 import { computeDayTotals } from '../data/nutrition';
 import { STATUS } from '../theme';
 import { generateWeeklyEvaluation } from '../utils/aiFood';
-import { checkAndCountAiUsage } from '../utils/foodLog';
+import { checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
 import { AI_DAILY_LIMIT } from '../data/constants';
 
 /**
@@ -20,6 +20,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
   const [expandedYmd, setExpandedYmd] = useState(null);
   const [picker, setPicker] = useState(null); // { ymd, session }
   const [evalBusy, setEvalBusy] = useState(false);
+  const evalAbortRef = useRef(null);
   const [evaluation, setEvaluation] = useState(profile?.lastEvaluation?.text || null);
   const [exportBusy, setExportBusy] = useState(false);
   const exportRef = useRef(null);
@@ -121,6 +122,8 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
     const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
     if (!quota.allowed) { await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
     setEvalBusy(true);
+    const controller = new AbortController();
+    evalAbortRef.current = controller;
     try {
       const days = [];
       for (let i = 6; i >= 0; i--) {
@@ -130,13 +133,16 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
         days.push({ date: ymd, kcal: Math.round(totals.kcal), protein: Math.round(totals.protein), carbs: Math.round(totals.carbs), fat: Math.round(totals.fat), sodium: Math.round(totals.sodium), sugar: Math.round(totals.sugar), water: daysMap[ymd]?.water || 0 });
       }
       const summary = { targets: { kcal: targets.kcal, protein: targets.protein, carbs: targets.carbs, fat: targets.fat, sodium: targets.sodium, sugar: targets.sugar }, dietProfile: profile?.dietProfile, pace: profile?.pace, days };
-      const text = await generateWeeklyEvaluation(aiKey, summary);
+      const text = await generateWeeklyEvaluation(aiKey, summary, controller.signal);
       setEvaluation(text);
       saveProfilePatch({ lastEvaluation: { text, at: new Date().toISOString() } });
     } catch (e) {
+      if (e.name === 'AbortError') return refundAiUsage(user.uid); // dibatalin user — kuota dibalikin
       await showAlert(`Gagal membuat evaluasi: ${e.message}`);
-    } finally { setEvalBusy(false); }
+    } finally { setEvalBusy(false); evalAbortRef.current = null; }
   };
+
+  const cancelEvaluation = () => evalAbortRef.current?.abort();
 
   // ---------- Export Image (Canvas → kartu Instagrammable) ----------
   const exportImage = async () => {
@@ -267,10 +273,12 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
         </div>
       )}
       <div className="flex gap-2.5">
-        <button onClick={runEvaluation} disabled={evalBusy}
-          className={`flex-1 py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow flex items-center justify-center gap-2 disabled:opacity-50`}>
-          {evalBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-          Generate Evaluasi Mingguan
+        {/* Selagi jalan tombolnya berubah jadi Batal — biar request yang gak jadi dipakai
+            bisa distop dan kuota AI-nya balik, bukan cuma di-disable sampai selesai. */}
+        <button onClick={evalBusy ? cancelEvaluation : runEvaluation}
+          className={`flex-1 py-3.5 rounded-2xl ${evalBusy ? 'bg-red-500 text-white' : t.bgAccent} body-lg shadow-glow flex items-center justify-center gap-2`}>
+          {evalBusy ? <X size={16} /> : <Sparkles size={16} />}
+          {evalBusy ? 'Batalkan' : 'Generate Evaluasi Mingguan'}
         </button>
         <button onClick={exportImage} disabled={exportBusy}
           className={`px-4 py-3.5 rounded-2xl border ${t.border} ${t.btnBg} ${t.textMain} flex items-center gap-1.5 body-md disabled:opacity-50`}>

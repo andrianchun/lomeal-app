@@ -6,8 +6,9 @@
 // Prefix `lomeal_` biar gak tabrakan sama collection Darka/Domus/Logym di project bareng ini.
 // ============================================================
 import { db } from '../firebase';
-import { doc, setDoc, updateDoc, onSnapshot, getDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, onSnapshot, getDoc, collection, getDocs, writeBatch, deleteField, increment } from 'firebase/firestore';
 import { getMonthKey } from '../data/constants';
+import { uploadImageToFirebase } from './storageLogym';
 
 const flDoc = (uid, docId) => doc(db, 'lomeal_users', uid, 'food_logs', docId);
 
@@ -30,7 +31,9 @@ export const saveLomealProfile = (uid, data) =>
 export const subscribeMonth = (uid, monthKey, cb) =>
   onSnapshot(flDoc(uid, `log_${monthKey}`), (snap) => {
     if (!snap.exists() && snap.metadata.fromCache) return;
-    cb(snap.exists() ? (snap.data().days || {}) : {});
+    const days = snap.exists() ? (snap.data().days || {}) : {};
+    migrateInlinePhotos(uid, monthKey, days);
+    cb(days);
   });
 
 export const getMonth = async (uid, monthKey) => {
@@ -38,12 +41,56 @@ export const getMonth = async (uid, monthKey) => {
   return snap.exists() ? (snap.data().days || {}) : {};
 };
 
-export const saveDay = async (uid, ymd, dayData) => {
+// `photos` sengaja dibuang di sini — foto disimpan di dokumennya sendiri (lihat di bawah).
+// eslint-disable-next-line no-unused-vars
+export const saveDay = async (uid, ymd, { photos, ...dayData }) => {
   const docRef = flDoc(uid, `log_${getMonthKey(ymd)}`);
   try {
     await updateDoc(docRef, { [`days.${ymd}`]: dayData });
   } catch (e) {
     await setDoc(docRef, { days: { [ymd]: dayData } }, { merge: true });
+  }
+};
+
+// ---------- FOTO SESI (file di Firebase Storage, URL-nya di photos_YYYY-MM-DD) ----------
+// Dulu foto disimpan base64 (~100KB/biji) langsung di dokumen log bulanan. 8 foto sebulan aja
+// udah nembus limit 1 MiB/dokumen Firestore, dan begitu lewat SEMUA penyimpanan bulan itu gagal
+// — termasuk sekadar ngetik nama makanan. Sekarang: file naik ke Storage, Firestore cuma nyimpen
+// URL-nya (~100 byte), dipisah per hari biar dokumen bulanan gak kesenggol sama sekali.
+export const uploadMealPhoto = async (uid, ymd, sessionId, dataUrl) => {
+  const blob = await (await fetch(dataUrl)).blob();
+  return uploadImageToFirebase(blob, `lomeal_users/${uid}/meal_photos/${ymd}_${sessionId}_${Date.now()}.webp`);
+};
+
+export const subscribeDayPhotos = (uid, ymd, cb) =>
+  onSnapshot(flDoc(uid, `photos_${ymd}`), (snap) => cb(snap.exists() ? snap.data() : {}));
+
+export const saveDayPhotos = (uid, ymd, photos) =>
+  setDoc(flDoc(uid, `photos_${ymd}`), photos, { merge: false });
+
+// Sekali jalan per bulan: foto base64 lama yang masih nyangkut di dokumen bulanan diangkat ke
+// Storage, dokumen bulanannya nyusut di bawah 1 MiB dan bisa ditulis lagi.
+const migratedMonths = new Set();
+const migrateInlinePhotos = async (uid, monthKey, days) => {
+  const ymds = Object.keys(days).filter((ymd) => Object.keys(days[ymd]?.photos || {}).length > 0);
+  if (!ymds.length || migratedMonths.has(monthKey)) return;
+  migratedMonths.add(monthKey);
+  try {
+    const batch = writeBatch(db);
+    for (const ymd of ymds) {
+      const urls = {};
+      for (const [sessionId, val] of Object.entries(days[ymd].photos)) {
+        urls[sessionId] = (typeof val === 'string' && val.startsWith('data:'))
+          ? await uploadMealPhoto(uid, ymd, sessionId, val)
+          : val;
+      }
+      batch.set(flDoc(uid, `photos_${ymd}`), urls, { merge: true });
+      batch.update(flDoc(uid, `log_${monthKey}`), { [`days.${ymd}.photos`]: deleteField() });
+    }
+    await batch.commit();
+  } catch (e) {
+    migratedMonths.delete(monthKey); // gagal (offline / rules Storage?) — coba lagi di snapshot berikutnya
+    console.error('Migrasi foto gagal:', e);
   }
 };
 
@@ -105,3 +152,10 @@ export const checkAndCountAiUsage = async (uid, ymd, limit = 10) => {
   await setDoc(ref, { aiUsage: { date: ymd, count: count + 1 } }, { merge: true });
   return { allowed: true, remaining: limit - count - 1 };
 };
+
+// Kuota dipotong SEBELUM request (biar gak bisa di-spam paralel), jadi kalau user pencet X
+// di tengah jalan jatahnya dibalikin — request yang dibatalin gak boleh ikut kehitung.
+// ponytail: increment(-1) tanpa cek tanggal — kalau pas batalnya persis lewat tengah malam,
+// user cuma dapat 1 jatah lebih di hari berikutnya. Gak worth satu read tambahan.
+export const refundAiUsage = (uid) =>
+  updateDoc(flDoc(uid, 'profile'), { 'aiUsage.count': increment(-1) }).catch(() => {});

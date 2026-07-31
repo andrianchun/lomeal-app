@@ -45,6 +45,28 @@ export const addNutrition = (a, b, factor = 1) => {
   return out;
 };
 
+// Cek silang kalori lewat faktor Atwater: protein & karbo 4 kkal/g, lemak 9 kkal/g.
+// Dua kasus yang ditangani:
+//  1. kcal kosong/0 padahal makro terisi (sering kejadian pas OCR label kelewat baris "Energi")
+//     → diisi hasil hitungan, daripada 0 kkal masuk log diam-diam.
+//  2. kcal ADA tapi meleset jauh dari makronya → angkanya TIDAK ditimpa (yang benar bisa jadi
+//     malah kcal-nya; alkohol & serat gak masuk rumus ini), cuma ditandai biar user ngecek.
+const KCAL_TOLERANCE = 0.25;
+export const kcalFromMacros = (n) =>
+  (Number(n?.protein) || 0) * 4 + (Number(n?.carbs) || 0) * 4 + (Number(n?.fat) || 0) * 9;
+
+export const reconcileKcal = (n) => {
+  const nutrition = { ...(n || {}) };
+  const fromMacros = kcalFromMacros(nutrition);
+  const kcal = Number(nutrition.kcal) || 0;
+  if (fromMacros <= 0) return { nutrition, suspect: false };
+  if (kcal <= 0) {
+    nutrition.kcal = Math.round(fromMacros);
+    return { nutrition, suspect: false }; // dihitung dari makro, bukan tebakan — gak perlu ditandai
+  }
+  return { nutrition, suspect: Math.abs(kcal - fromMacros) / fromMacros > KCAL_TOLERANCE };
+};
+
 export const scaleNutrition = (n, factor) => {
   const out = {};
   NUTRIENTS.forEach(({ key }) => { out[key] = (Number(n?.[key]) || 0) * factor; });

@@ -1,5 +1,5 @@
-import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Trash2, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box } from 'lucide-react';
+import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
+import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Trash2, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download } from 'lucide-react';
 import RingChart from '../components/RingChart';
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
@@ -8,16 +8,17 @@ import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT
 import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS } from '../data/nutrition';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
-import { parseFoodText, analyzeSmartPhoto, compressImageTo100KB } from '../utils/aiFood';
-import { makeEntry, checkAndCountAiUsage } from '../utils/foodLog';
-import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse } from '../utils/nlpParser';
-import { uploadToCloudinary } from '../utils/cloudinary';
+import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageTo100KB, toDataUrl, PHOTO_KEEPSAKE } from '../utils/aiFood';
+import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto } from '../utils/foodLog';
+import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
+import { deleteImageFromFirebase } from '../utils/storageLogym';
+import { isNativeApp, captureToFile } from '../utils/nativeCamera';
 import { markDomusItemConsumed, updateDomusItemQuantity } from '../utils/domusSync';
 import { deductStock } from '../utils/stockConverter';
 import SpeedDialScanner from '../components/SpeedDialScanner';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
-import { URT_DICTIONARY, normalizeUnit } from '../utils/urtMapping';
+import { URT_DICTIONARY, normalizeUnit, entryUnit } from '../utils/urtMapping';
 
 // Satuan yang bisa dipilih user di sheet hasil AI — dikonversi otomatis ke gram
 // lewat URT_DICTIONARY (tabel ukuran rumah tangga generik, lihat urtMapping.js).
@@ -46,7 +47,7 @@ const COLORS = [
  * Date strip → quick stats + water tracker → Meal Grid 2 kolom (piring + ring
  * makro) → Smart Input Bar (chat NL / kamera / voice / manual presisi).
  */
-const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, domusItems, domusLocations, aiKey, showAlert, showToast, waterGoal,
+const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, domusItems, domusLocations, aiKey, showAlert, showConfirm, showToast, waterGoal,
   chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession }) => {
 
   const todayYmd = getLocalYMD();
@@ -66,12 +67,118 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
   const detailPhotoRef = useRef(null);
+  const detailCameraRef = useRef(null);
   const recogRef = useRef(null);
 
   const drinkTemplates = profile?.drinkTemplates || [];
   const medicines = profile?.medicines || [];
 
   const day = daysMap[selectedYmd] || { meals: {}, water: 0 };
+  // Foto sesi hidup di dokumen terpisah (photos_YYYY-MM-DD) supaya dokumen log bulanan
+  // gak kena limit 1 MiB Firestore — lihat komentar di utils/foodLog.js.
+  // Upload makan waktu ~1 detik. Kalau daftarnya ditaruh di state biasa, nambah 2 foto beruntun
+  // bikin yang kedua nulis pakai daftar lama dari closure → foto pertama ilang. Jadi ref yang
+  // jadi sumber kebenaran, state cuma buat micu render ulang.
+  const photosRef = useRef({});
+  const [pendingPhotos, setPendingPhotos] = useState({}); // preview lokal selama upload jalan
+  const [, forceRender] = useReducer((n) => n + 1, 0);
+  const applyPhotos = (next) => { photosRef.current = next; forceRender(); };
+  useEffect(() => {
+    applyPhotos({});
+    if (!user) return;
+    return subscribeDayPhotos(user.uid, selectedYmd, applyPhotos);
+  }, [user, selectedYmd]);
+
+  // Satu sesi bisa punya banyak foto. Tiap foto nyimpen `originalUrl` (file asli hasil upload)
+  // di samping `url` (versi yang dipajang). Editor crop SELALU buka originalUrl, jadi crop
+  // berulang gak numpuk-numpuk bikin makin kecil & burik, dan bisa dibalikin ke asli.
+  // Format lama (1 URL string per sesi) tetap kebaca.
+  const storedPhotos = (sessionId) => {
+    const v = photosRef.current?.[sessionId];
+    if (!v) return [];
+    return Array.isArray(v) ? v : [{ id: 'legacy', url: v, originalUrl: v }];
+  };
+
+  // Yang dipajang = yang udah tersimpan + yang lagi diproses (preview lokal).
+  const photosOf = (sessionId) => [...storedPhotos(sessionId), ...(pendingPhotos[sessionId] || [])];
+
+  const writePhotos = async (sessionId, list) => {
+    const next = { ...photosRef.current };
+    if (list.length) next[sessionId] = list; else delete next[sessionId];
+    applyPhotos(next); // optimistic, sama polanya kayak saveDay di App.jsx
+    await saveDayPhotos(user.uid, selectedYmd, next);
+  };
+
+  // Foto langsung kelihatan detik itu juga lewat object URL lokal — kompresi (~1 detik untuk
+  // foto belasan MP) dan upload jalan di belakang. Preview disimpan terpisah dari daftar
+  // tersimpan supaya gak ketiban snapshot Firestore yang datang di tengah proses.
+  const addPhoto = async (sessionId, fileOrDataUrl) => {
+    const isFile = typeof fileOrDataUrl !== 'string';
+    const tempId = `tmp_${Date.now()}`;
+    const localUrl = isFile ? URL.createObjectURL(fileOrDataUrl) : fileOrDataUrl;
+    setPendingPhotos((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: tempId, url: localUrl, pending: true }] }));
+    try {
+      const dataUrl = isFile ? (await compressImage(fileOrDataUrl, PHOTO_KEEPSAKE)).dataUrl : fileOrDataUrl;
+      const url = await uploadMealPhoto(user.uid, selectedYmd, sessionId, dataUrl);
+      await writePhotos(sessionId, [...storedPhotos(sessionId), { id: `p_${Date.now()}`, url, originalUrl: url }]);
+    } catch (e) {
+      showAlert(`Gagal menyimpan foto: ${e.message}`);
+    } finally {
+      setPendingPhotos((prev) => ({ ...prev, [sessionId]: (prev[sessionId] || []).filter((p) => p.id !== tempId) }));
+      if (isFile) URL.revokeObjectURL(localUrl);
+    }
+  };
+
+  // Di APK: jepret lewat kamera native, hasilnya OTOMATIS masuk galeri HP (saveToGallery).
+  // Di browser: jatuh balik ke <input capture> — web gak boleh nulis ke galeri.
+  const openCamera = async (onFile, inputRef) => {
+    if (isNativeApp()) {
+      try {
+        const file = await captureToFile();
+        if (file) return onFile(file);
+      } catch (e) {
+        if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka kamera: ${e.message}`);
+        return;
+      }
+    }
+    inputRef.current?.click();
+  };
+
+  // Simpan ke HP. Di Android, share sheet-nya ngasih opsi "Simpan ke Galeri/Foto";
+  // kalau Web Share gak ada (desktop), jatuhnya jadi unduhan biasa.
+  const downloadPhoto = async (sessionId, photo) => {
+    try {
+      const blob = await (await fetch(photo.url)).blob();
+      const file = new File([blob], `lomeal-${selectedYmd}-${sessionId}.webp`, { type: blob.type || 'image/webp' });
+      if (navigator.canShare?.({ files: [file] })) return await navigator.share({ files: [file], title: 'Foto Lomeal' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = file.name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      if (e.name !== 'AbortError') showAlert(`Gagal menyimpan foto ke HP: ${e.message}`);
+    }
+  };
+
+  const removePhoto = async (sessionId, photo) => {
+    if (!(await showConfirm('Hapus foto ini? Foto yang dihapus tidak bisa dikembalikan.', { title: 'Hapus Foto', confirmText: 'Hapus', danger: true }))) return;
+    await writePhotos(sessionId, photosOf(sessionId).filter((p) => p.id !== photo.id));
+    deleteImageFromFirebase(photo.url); // file di Storage ikut dibuang biar gak numpuk jadi tagihan
+    if (photo.originalUrl !== photo.url) deleteImageFromFirebase(photo.originalUrl);
+  };
+
+  // dataUrl null = balik ke foto asli.
+  const replacePhoto = async (sessionId, photo, dataUrl) => {
+    try {
+      const url = dataUrl ? await uploadMealPhoto(user.uid, selectedYmd, sessionId, dataUrl) : photo.originalUrl;
+      await writePhotos(sessionId, photosOf(sessionId).map((p) => (p.id === photo.id ? { ...p, url } : p)));
+      if (photo.url !== photo.originalUrl) deleteImageFromFirebase(photo.url); // versi crop yang lama
+    } catch (e) {
+      showAlert(`Gagal menyimpan foto: ${e.message}`);
+    }
+  };
+
   const isFuture = selectedYmd > todayYmd;
   const totals = useMemo(() => computeDayTotals(day, !isFuture), [day, isFuture]);
   const targets = day.targetSnapshot || profile?.targets || {};
@@ -212,12 +319,6 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     }
   };
 
-  const setSessionPhoto = (sessionId, photoUrl) => {
-    const photos = { ...(day.photos || {}) };
-    photos[sessionId] = photoUrl;
-    persistDay({ ...day, photos });
-  };
-
   const setSessionTime = (sessionId, timeStr) => {
     const sessionTimes = { ...(day.sessionTimes || {}) };
     sessionTimes[sessionId] = timeStr;
@@ -286,7 +387,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     setAiAbortController(controller);
 
     // 1. CEK CACHE LOKAL (0 Detik)
-    const normalizedText = text.toLowerCase();
+    const normalizedText = cacheKey(text); // kunci yang sama persis dipakai waktu nyimpan
     const localCache = getLocalPatternCache();
     if (localCache[normalizedText]) {
        appendAiResult(localCache[normalizedText], { isOffline: true });
@@ -295,7 +396,27 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
        return;
     }
 
-    // 2. CEK FIREBASE GLOBAL CACHE
+    // 2. PARSER LOKAL (0 detik, offline) — dijalanin SEBELUM cache global, karena cache global
+    // itu getDoc ke Firestore alias round-trip jaringan. Kalau makanannya sebenernya ada di
+    // database (bawaan atau custom milik user), gak ada alasan nunggu jaringan duluan.
+    try {
+      // customFoods datang dari prop (dokumen custom_foods). Dulu di sini dibaca dari
+      // profile.customFoods yang GAK PERNAH ADA isinya → parser lokal gak pernah lihat
+      // makanan custom user, jadi selalu jatuh ke AI dan kerasa lemot.
+      const localResult = runLocalNlpParse(text, customFoods);
+
+      if (localResult && localResult.foods?.length > 0) {
+          saveLocalPatternCache(text, localResult.foods);
+          appendAiResult(localResult.foods, { isOffline: true }); // Tanda diproses lokal
+          setChatText('');
+          setAiAbortController(null);
+          return;
+      }
+    } catch (e) {
+      console.warn("Offline NLP parsing failed, fallback ke AI:", e);
+    }
+
+    // 3. CEK FIREBASE GLOBAL CACHE (hasil parse user lain untuk teks yang sama persis)
     setAiBusy(true); // Tampilkan indikator proses untuk network request
     const globalFoods = await checkGlobalPatternCache(normalizedText);
     if (globalFoods && globalFoods.length > 0) {
@@ -307,25 +428,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
        return;
     }
 
-    // 3. OFFLINE NLP SMART SEARCH LOKAL
-    try {
-      const customFoods = Object.values(profile?.customFoods || {});
-      const localResult = runLocalNlpParse(text, customFoods);
-
-      if (localResult && localResult.foods?.length > 0) {
-          saveLocalPatternCache(text, localResult.foods);
-          // Optional: bisa save ke global pattern juga, tapi lokal mungkin kurang standar
-          appendAiResult(localResult.foods, { isOffline: true }); // Tanda diproses lokal
-          setChatText('');
-          setAiAbortController(null);
-          setAiBusy(false);
-          return;
-      }
-    } catch (e) {
-      console.warn("Offline NLP parsing failed, fallback ke AI:", e);
-    }
-
-    // 2. FALLBACK KE AI (Jika teks kompleks/nama makanan aneh)
+    // 4. FALLBACK KE AI (Jika teks kompleks/nama makanan aneh)
     if (!(await guardAi())) {
        setAiAbortController(null);
        return;
@@ -341,7 +444,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       }
       else await showAlert('AI tidak menemukan makanan pada teks itu. Coba lebih spesifik, mis. "nasi 1 centong, ayam goreng 1 potong".');
     } catch (e) {
-      if (e.name === 'AbortError') return; // ignored
+      if (e.name === 'AbortError') return refundAiUsage(user.uid); // dibatalin user — kuota dibalikin
       await showAlert(`Maaf, gagal memproses: ${e.message}`);
     } finally {
       setAiBusy(false);
@@ -357,30 +460,25 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     }
   };
 
-  const handleDetailPhotoUpload = async (e, sessionId) => {
+  const handleDetailPhotoUpload = (e, sessionId) => {
     const file = e.target.files?.[0];
+    e.target.value = null; // langsung direset: foto yang sama masih bisa dipilih lagi tanpa nunggu upload
     if (!file) return;
-    try {
-      const { dataUrl } = await compressImageTo100KB(file);
-      const photos = { ...(day.photos || {}) };
-      photos[sessionId] = dataUrl;
-      persistDay({ ...day, photos });
-    } catch(err) {
-      showAlert(`Gagal memproses foto: ${err.message}`);
-    }
-    e.target.value = null;
+    // File mentah langsung dilempar: preview muncul seketika, kompresi ke versi
+    // kenang-kenangan (1600px) dan upload-nya jalan di belakang (addPhoto sudah pegang error-nya).
+    addPhoto(sessionId, file);
   };
 
-  const handleReanalyzeSessionPhoto = async (sessionId) => {
-    const photoBase64 = day.photos?.[sessionId];
-    if (!photoBase64) return;
+  const handleReanalyzeSessionPhoto = async (sessionId, photoSrc) => {
+    if (!photoSrc) return;
     if (!(await guardAi())) return;
-    
+
     const controller = new AbortController();
     setAiAbortController(controller);
     setAiBusy(true);
-    
+
     try {
+      const photoBase64 = await toDataUrl(photoSrc);
       const mimeType = photoBase64.substring(photoBase64.indexOf(":") + 1, photoBase64.indexOf(";"));
       const rawBase64 = photoBase64.split(",")[1];
       const res = await analyzeSmartPhoto(aiKey, rawBase64, mimeType, controller.signal);
@@ -432,7 +530,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       persistDay({ ...day, meals: { ...(day.meals || {}), [sessionId]: sorted } });
       showAlert('Berhasil dianalisa! Silakan hapus item yang berlipat/salah.');
     } catch (err) {
-      if (err.name === 'AbortError') return;
+      if (err.name === 'AbortError') return refundAiUsage(user.uid);
       console.error(err);
       showAlert(err.message || 'Gagal menganalisa foto.');
     } finally {
@@ -469,7 +567,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       }
       else await showAlert('AI tidak mengenali makanan di foto. Coba sudut/cahaya lain, atau input manual.');
     } catch (e) {
-      if (e.name === 'AbortError') return;
+      if (e.name === 'AbortError') return refundAiUsage(user.uid);
       await showAlert(`Gagal memindai foto: ${e.message}`);
     } finally { 
       setAiBusy(false); 
@@ -478,10 +576,12 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   };
 
   const confirmAiResult = async () => {
-    const { foods, photoDataUrl } = aiResult;
+    const { foods, photoDataUrl, photoFile } = aiResult;
     const meals = { ...(day.meals || {}) };
     const isFirstEntry = (meals[aiTargetSession] || []).length === 0;
-    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: 'g', nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai' }));
+    // Satuan diambil dari hasil parse, bukan dipaku 'g' — minuman jadi mL. `f.unit` bisa berupa
+    // satuan rumah tangga ("gelas") dari AI; entryUnit yang nerjemahin ke g/ml.
+    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: entryUnit(f.unit, f.isDrink), nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai' }));
     
     meals[aiTargetSession] = [
       ...(meals[aiTargetSession] || []),
@@ -489,40 +589,50 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     ];
     
     let newDay = { ...day, meals };
-    
+
+    // Minuman ikut nambah hitungan cairan harian — sebelumnya "matcha latte 1 gelas" masuk
+    // sebagai makanan doang dan tracker air tetap 0 mL.
+    const drinkMl = newEntries.reduce((sum, e) => sum + (e.unit === 'ml' ? (Number(e.grams) || 0) : 0), 0);
+    if (drinkMl > 0) newDay.water = (day.water || 0) + drinkMl;
+
     if (selectedYmd === todayYmd && isFirstEntry && newEntries.length > 0) {
       const sessionTimes = { ...(day.sessionTimes || {}) };
       sessionTimes[aiTargetSession] = newEntries[0].time;
       newDay.sessionTimes = sessionTimes;
     }
-    // Simpan foto lokal super cepat (tanpa Cloud Storage)
-    if (photoDataUrl) {
-      const photos = { ...(day.photos || {}) };
-      photos[aiTargetSession] = photoDataUrl;
-      newDay.photos = photos;
-    }
+    // Foto ikut disimpan (nambah, gak nimpa). Yang diarsip versi 1600px dari file aslinya —
+    // photoDataUrl cuma versi kecil 800px yang tadi dikirim ke AI.
+    if (photoFile || photoDataUrl) addPhoto(aiTargetSession, photoFile || photoDataUrl);
     
-    // Simpan ke DB Custom jika dicentang
+    // Simpan ke DB Custom jika dicentang — LEWATI yang namanya sudah ada (di database bawaan
+    // maupun custom). Dulu tiap catatan selalu bikin entri baru, jadi "matcha latte" numpuk
+    // puluhan kali dan bikin database custom membengkak.
     if (saveToDb && foods.length > 0) {
       const updatedCustomFoods = [...customFoods];
+      const known = new Set(updatedCustomFoods.map((c) => c.name?.trim().toLowerCase()));
       foods.forEach(f => {
+        const name = (f.name || 'Bahan Custom').trim();
+        const key = name.toLowerCase();
+        if (f.foodId || known.has(key) || searchFoods(name, []).some((d) => d.name.toLowerCase() === key)) return;
+        known.add(key);
         const factor = f.grams > 0 ? (100 / f.grams) : 1;
         const per100 = {};
         Object.keys(f.nutrition || {}).forEach(k => { per100[k] = Math.round((f.nutrition[k] || 0) * factor * 10) / 10; });
-        
+
+        const isDrink = entryUnit(f.unit, f.isDrink) === 'ml';
         updatedCustomFoods.push({
           id: `custom_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          name: f.name || 'Bahan Custom',
-          category: 'packaged',
-          unit: 'g',
-          isDrink: false,
-          portion: { label: '100g', grams: 100 },
+          name,
+          category: isDrink ? 'drink' : 'packaged',
+          unit: isDrink ? 'ml' : 'g',
+          isDrink,
+          portion: { label: isDrink ? '100ml' : '100g', grams: 100 },
           nutrition: per100,
           source: 'Custom',
           isCustom: true,
         });
       });
-      saveCustomFoodsFn(updatedCustomFoods);
+      if (updatedCustomFoods.length > customFoods.length) saveCustomFoodsFn(updatedCustomFoods);
     }
     
     persistDay(newDay);
@@ -621,7 +731,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       return e.isEaten !== undefined ? e.isEaten : (isMealPrep ? false : !isFuture);
     });
     const sTotals = eatenEntries.reduce((acc, e) => addNutrition(acc, e.nutrition), { ...EMPTY_NUTRITION });
-    const photo = day.photos?.[session.id];
+    const sessionPhotos = photosOf(session.id);
+    const photo = sessionPhotos[0]?.url;
     const hasFood = entries.length > 0;
     const allPlanned = hasFood && eatenEntries.length === 0;
     const segments = eatenEntries.length > 0 ? [
@@ -634,13 +745,18 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       <button onClick={() => setDetailSession(session.id)}
         className={`rounded-3xl border p-3.5 flex flex-col items-center ${t.border} ${t.bgCard} transition-transform active:scale-[0.98]`}>
         {/* Piring lingkaran dililit Ring Chart makro sesi */}
-        <RingChart size={104} stroke={7} segments={segments} progress={hasFood && allPlanned ? 0 : (hasFood ? null : 0)}>
-          <div className={`w-[78px] h-[78px] rounded-full overflow-hidden flex items-center justify-center transition-opacity duration-300 ${allPlanned ? 'opacity-30' : ''}`}>
-            {photo
-              ? <img src={photo} alt={session.label} className="w-full h-full object-cover" />
-              : <span className="text-3xl">{session.emoji}</span>}
-          </div>
-        </RingChart>
+        <div className="relative">
+          <RingChart size={104} stroke={7} segments={segments} progress={hasFood && allPlanned ? 0 : (hasFood ? null : 0)}>
+            <div className={`w-[78px] h-[78px] rounded-full overflow-hidden flex items-center justify-center transition-opacity duration-300 ${allPlanned ? 'opacity-30' : ''}`}>
+              {photo
+                ? <img src={photo} alt={session.label} className="w-full h-full object-cover" />
+                : <span className="text-3xl">{session.emoji}</span>}
+            </div>
+          </RingChart>
+          {sessionPhotos.length > 1 && (
+            <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-full bg-black/70 text-white caption font-bold backdrop-blur-md">{sessionPhotos.length}</span>
+          )}
+        </div>
         <p className={`body-md mt-2 ${t.textMain}`}>{session.label}</p>
         <p className={`caption font-medium ${t.textMuted} flex items-center justify-center gap-1`}>
           {session.id === 'drink' ? (
@@ -799,7 +915,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                mainIcon={Camera} 
                mainColorClass={`p-3.5 rounded-full ${t.btnBg} ${t.textAccent}`}
                disabled={aiBusy}
-               onSelectCamera={() => cameraRef.current?.click()}
+               onSelectCamera={() => openCamera(runPhotoScan, cameraRef)}
                onSelectGallery={() => galleryRef.current?.click()}
              />
           </div>
@@ -934,6 +1050,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                           <p className={`caption font-medium ${t.textMuted}`}>
                             {Math.round(f.nutrition?.kcal || 0)} kkal · P {Math.round(f.nutrition?.protein || 0)}g · K {Math.round(f.nutrition?.carbs || 0)}g · L {Math.round(f.nutrition?.fat || 0)}g
                           </p>
+                          {/* AI sudah lama ngasih penanda ini tapi belum pernah ditampilkan:
+                              tebakannya ragu, atau kalorinya gak nyambung sama makronya. */}
+                          {f.lowConfidence && (
+                            <p className="caption font-bold text-amber-500 mt-0.5">Estimasi kasar — cek angkanya</p>
+                          )}
                         </div>
                         <div className="shrink-0 flex flex-col items-center gap-0.5">
                           <div className={`px-3 py-1.5 rounded-xl ${t.bgSunken}`}>
@@ -988,35 +1109,50 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           <div onClick={(e) => e.stopPropagation()}
             className={`w-full max-w-sm max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl anim-rise`}>
             
-            {/* Header / Foto Section */}
-            <div className={`relative h-48 w-full shrink-0 ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} flex flex-col items-center justify-center overflow-hidden`}>
-               {day.photos?.[detailSession] ? (
-                 <>
-                   <img src={day.photos[detailSession]} alt="Session" className="absolute inset-0 w-full h-full object-cover" />
-                   <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80" />
-                   <div className="absolute top-3 right-3 flex gap-2">
-                     <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, url: day.photos[detailSession] })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95"><Edit2 size={16} /></button>
-                     <button onClick={() => {
-                        const photos = { ...(day.photos || {}) };
-                        delete photos[detailSession];
-                        persistDay({ ...day, photos });
-                     }} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95"><X size={16} /></button>
+            {/* Header / Foto Section — bisa lebih dari satu foto, digeser ke samping */}
+            <div className={`relative h-48 w-full shrink-0 ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
+               <div className="flex h-full w-full overflow-x-auto snap-x snap-mandatory hide-scrollbar">
+                 {photosOf(detailSession).map((p) => (
+                   <div key={p.id} className="relative h-full w-full shrink-0 snap-center">
+                     <img src={p.url} alt="Session" className="absolute inset-0 w-full h-full object-cover" />
+                     <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80" />
+                     {p.pending ? (
+                       <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 text-white caption font-bold backdrop-blur-md">
+                         <Loader2 size={12} className="animate-spin" /> Menyimpan
+                       </div>
+                     ) : (
+                       <>
+                         <div className="absolute top-3 right-3 flex gap-2">
+                           <button onClick={() => downloadPhoto(detailSession, p)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP"><Download size={16} /></button>
+                           <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: p })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95"><Edit2 size={16} /></button>
+                           <button onClick={() => removePhoto(detailSession, p)} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95"><X size={16} /></button>
+                         </div>
+                         <div className="absolute bottom-4 inset-x-4 flex items-center gap-2">
+                           <button onClick={() => handleReanalyzeSessionPhoto(detailSession, p.url)} disabled={aiBusy} className={`flex-1 py-2 rounded-xl bg-emerald-500/90 text-white caption font-bold shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2 backdrop-blur-md ${aiBusy ? 'opacity-50' : ''}`}>
+                             {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Analisa Ulang
+                           </button>
+                         </div>
+                       </>
+                     )}
                    </div>
-                   <div className="absolute bottom-4 inset-x-4 flex items-center gap-2">
-                     <button onClick={() => handleReanalyzeSessionPhoto(detailSession)} disabled={aiBusy} className={`flex-1 py-2 rounded-xl bg-emerald-500/90 text-white caption font-bold shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2 backdrop-blur-md ${aiBusy ? 'opacity-50' : ''}`}>
-                       {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Analisa Ulang
+                 ))}
+                 {/* Tile terakhir: nambah foto lagi — foto lama TIDAK ketimpa */}
+                 <div className={`h-full shrink-0 snap-center flex flex-col items-center justify-center gap-2 ${photosOf(detailSession).length ? 'w-32 border-l border-white/10' : 'w-full'}`}>
+                   <div className="flex items-center gap-3">
+                     <button onClick={() => openCamera((file) => addPhoto(detailSession, file), detailCameraRef)}
+                       className={`p-4 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`} aria-label="Jepret foto">
+                       <Camera size={24} />
+                     </button>
+                     <button onClick={() => detailPhotoRef.current?.click()}
+                       className={`p-4 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`} aria-label="Pilih dari galeri">
+                       <Image size={24} />
                      </button>
                    </div>
-                 </>
-               ) : (
-                 <div className="flex flex-col items-center gap-2">
-                   <button onClick={() => detailPhotoRef.current?.click()} className={`p-4 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`}>
-                     <Camera size={24} />
-                   </button>
                    <span className={`caption font-medium ${t.textMuted}`}>Tambah Foto</span>
                  </div>
-               )}
+               </div>
                <input ref={detailPhotoRef} type="file" accept="image/*" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
+               <input ref={detailCameraRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
             </div>
 
             <div className="flex-1 overflow-y-auto hide-scrollbar p-5">
@@ -1252,10 +1388,13 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
               <button onClick={() => {
                 const meals = { ...(day.meals || {}) };
                 delete meals[deleteConfirm];
-                const photos = { ...(day.photos || {}) };
-                delete photos[deleteConfirm];
                 const hidden = [...(day.hiddenSessions || []), deleteConfirm];
-                persistDay({ ...day, meals, photos, hiddenSessions: hidden });
+                photosOf(deleteConfirm).forEach((p) => {
+                  deleteImageFromFirebase(p.url);
+                  if (p.originalUrl !== p.url) deleteImageFromFirebase(p.originalUrl);
+                });
+                writePhotos(deleteConfirm, []);
+                persistDay({ ...day, meals, hiddenSessions: hidden });
                 setDeleteConfirm(null);
                 setDetailSession(null);
               }} className="flex-1 py-3 rounded-2xl bg-red-500/80 text-white body-md font-medium shadow-glow">Hapus</button>
@@ -1265,19 +1404,19 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       )}
 
       {/* ===== IMAGE CROPPER MODAL ===== */}
-      <ImageCropperModal 
+      {/* Selalu buka FOTO ASLI, bukan hasil crop sebelumnya — biar crop berulang gak makin burik. */}
+      <ImageCropperModal
         open={!!editingPhotoObj}
-        imageSrc={editingPhotoObj?.url}
+        imageSrc={editingPhotoObj?.photo?.originalUrl}
         onClose={() => setEditingPhotoObj(null)}
         onComplete={(croppedBase64) => {
-          if (editingPhotoObj?.sessionId) {
-            const photos = { ...(day.photos || {}) };
-            photos[editingPhotoObj.sessionId] = croppedBase64;
-            persistDay({ ...day, photos });
-          }
+          replacePhoto(editingPhotoObj.sessionId, editingPhotoObj.photo, croppedBase64);
           setEditingPhotoObj(null);
         }}
-        t={t}
+        onReset={editingPhotoObj?.photo?.url !== editingPhotoObj?.photo?.originalUrl ? () => {
+          replacePhoto(editingPhotoObj.sessionId, editingPhotoObj.photo, null);
+          setEditingPhotoObj(null);
+        } : undefined}
       />
 
     </div>

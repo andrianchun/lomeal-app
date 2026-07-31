@@ -1,11 +1,12 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star } from 'lucide-react';
-import { searchFoods, FOOD_CATEGORIES, fetchOpenFoodFacts } from '../data/foodDatabase';
+import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star, Trash2 } from 'lucide-react';
+import { searchFoods, FOOD_CATEGORIES } from '../data/foodDatabase';
 import { NUTRIENTS } from '../data/nutrition';
 import { compressImageTo100KB, analyzeSmartPhoto } from '../utils/aiFood';
 import { playSoundEffect } from '../utils/audio';
-import { checkAndCountAiUsage } from '../utils/foodLog';
+import { checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
+import { isNativeApp, captureToFile } from '../utils/nativeCamera';
 import { sortFoodsByUsage } from '../utils/foodUsage';
 import ImageCropperModal from '../components/ImageCropperModal';
 import SpeedDialScanner from '../components/SpeedDialScanner';
@@ -47,60 +48,69 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   const [scanning, setScanning] = useState(false);
   const [ocrStatus, setOcrStatus] = useState('');
   const [cropFile, setCropFile] = useState(null);
+  const scanAbortRef = useRef(null);
+  // Cropper minta URL, bukan File. Object URL-nya dilepas lagi biar gak bocor memori.
+  const [cropSrc, setCropSrc] = useState(null);
+  useEffect(() => {
+    if (!cropFile) { setCropSrc(null); return; }
+    const url = URL.createObjectURL(cropFile);
+    setCropSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [cropFile]);
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
 
-  // ── Online API State (OpenFoodFacts) ─────────────────────────────
-  const [onlineFoods, setOnlineFoods] = useState([]);
-  const [onlineLoading, setOnlineLoading] = useState(false);
-  
-  const searchTimeoutRef = useRef(null);
-
-  useEffect(() => {
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    
-    if (term.trim().length >= 3) {
-      setOnlineLoading(true);
-      searchTimeoutRef.current = setTimeout(async () => {
-        const fetched = await fetchOpenFoodFacts(term);
-        setOnlineFoods(fetched);
-        setOnlineLoading(false);
-      }, 800);
-    } else {
-      setOnlineFoods([]);
-      setOnlineLoading(false);
-    }
-    
-    return () => {
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    };
-  }, [term]);
-
+  // Pencarian online (OpenFoodFacts) sudah dimatikan sejak lama karena lambat dan data
+  // mikronya kosong — state, debounce 800ms, dan spinner-nya ikut dibuang. Database bawaan
+  // (TKPI) + custom milik user semuanya offline, jadi hasilnya langsung keluar.
   const results = useMemo(() => {
-    if (viewMode === 'custom') {
-      let list = searchFoods(term, customFoods).filter(f => f.isCustom);
-      if (category) list = list.filter((f) => f.category === category);
-      return sortFoodsByUsage(list, favoriteFoods).slice(0, 80);
-    } else {
-      let localList = searchFoods(term, customFoods);
-      let combined = [...localList, ...onlineFoods];
-
-      const seen = new Set();
-      let uniqueList = [];
-      for (const item of combined) {
-        const key = item.name.toLowerCase().trim();
-        if (!seen.has(key)) {
-          seen.add(key);
-          uniqueList.push(item);
-        }
-      }
-
-      if (category) uniqueList = uniqueList.filter((f) => f.category === category);
-      return sortFoodsByUsage(uniqueList, favoriteFoods).slice(0, 150);
-    }
-  }, [term, category, customFoods, onlineFoods, viewMode, favoriteFoods]);
+    const list = searchFoods(term, customFoods);
+    const filtered = viewMode === 'custom' ? list.filter((f) => f.isCustom) : list;
+    const byCategory = category ? filtered.filter((f) => f.category === category) : filtered;
+    return sortFoodsByUsage(byCategory, favoriteFoods).slice(0, viewMode === 'custom' ? 80 : 150);
+  }, [term, category, customFoods, viewMode, favoriteFoods]);
 
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
+
+  // Sebelum ini, tiap catatan AI selalu bikin entri custom baru tanpa cek nama, jadi satu
+  // "Matcha Latte" bisa numpuk puluhan kali. Pembuatannya sudah dicegah di LogTab; ini
+  // buat beresin yang terlanjur numpuk.
+  const duplicateNames = useMemo(() => {
+    const seen = new Set();
+    return customFoods.filter((f) => {
+      const key = f.name?.trim().toLowerCase();
+      if (seen.has(key)) return true;
+      seen.add(key);
+      return false;
+    }).length;
+  }, [customFoods]);
+
+  const cleanDuplicates = async () => {
+    if (!(await showConfirm(`Ada ${duplicateNames} makanan dengan nama dobel. Sisakan satu saja untuk tiap nama?`, { title: 'Bersihkan Duplikat', confirmText: 'Bersihkan' }))) return;
+    const seen = new Set();
+    const cleaned = customFoods.filter((f) => {
+      const key = f.name?.trim().toLowerCase();
+      if (seen.has(key)) return false; // yang disisakan entri paling awal
+      seen.add(key);
+      return true;
+    });
+    saveCustomFoodsFn(cleaned);
+    await showAlert(`${customFoods.length - cleaned.length} entri dobel dihapus.`);
+  };
+
+  // Entri custom yang dibuat sebelum perbaikan satuan tersimpan isDrink:false & unit:'g',
+  // jadi minuman lama kecatat gram kalau diketik tanpa satuan. Ditandai ulang sekali jalan.
+  // Cocokkan per KATA UTUH biar "es" gak nyeret "es krim", dan kecualikan bentuk non-cair.
+  useEffect(() => {
+    if (!customFoods.length) return;
+    const DRINK_WORDS = /\b(latte|kopi|coffee|teh|tea|jus|juice|susu|milk|soda|smoothie|matcha|boba|sirup|kefir|kombucha)\b/i;
+    const NOT_DRINK = /\b(krim|kental|bubuk|powder|keripik|permen|roti|kue)\b/i;
+    const fixed = customFoods.map((f) => {
+      if (f.isDrink || !f.name || !DRINK_WORDS.test(f.name) || NOT_DRINK.test(f.name)) return f;
+      return { ...f, isDrink: true, unit: 'ml', category: 'drink', portion: { ...f.portion, label: '100ml' } };
+    });
+    if (fixed.some((f, i) => f !== customFoods[i])) saveCustomFoodsFn(fixed);
+  }, [customFoods, saveCustomFoodsFn]);
 
   const openNewForm = () => { setForm(emptyForm()); setEditing('new'); };
   const openEditForm = (food) => {
@@ -116,13 +126,15 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     if (scanning || ocrStatus) return;
     setScanning(true);
     setOcrStatus('Menganalisis foto...');
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
     try {
       const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
       if (!quota.allowed) { await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
-      
+
       const { base64, mimeType } = await compressImageTo100KB(file);
-      const res = await analyzeSmartPhoto(aiKey, base64, mimeType);
-      
+      const res = await analyzeSmartPhoto(aiKey, base64, mimeType, controller.signal);
+
       let parsed = {};
       if (res.type === 'label') {
         parsed = {
@@ -148,11 +160,29 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         ? 'Tabel nutrisi berhasil dipindai oleh AI! Silakan cek & koreksi angkanya.' 
         : 'Makanan di piring berhasil ditebak AI! Silakan simpan ke database.');
     } catch (err) {
+      if (err.name === 'AbortError') return refundAiUsage(user.uid); // dibatalin user — kuota dibalikin
       await showAlert(err.message === 'OUT_OF_SCOPE' ? 'Foto ini tidak terbaca sebagai tabel gizi atau makanan.' : `Gagal scan: ${err.message}`);
     } finally {
       setOcrStatus('');
       setScanning(false);
+      scanAbortRef.current = null;
     }
+  };
+
+  const cancelScan = () => scanAbortRef.current?.abort();
+
+  // Di APK: kamera native (jepretannya sekalian masuk galeri HP). Di browser: input file biasa.
+  const openCamera = async () => {
+    if (isNativeApp()) {
+      try {
+        const file = await captureToFile();
+        if (file) return setCropFile(file);
+      } catch (e) {
+        if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka kamera: ${e.message}`);
+        return;
+      }
+    }
+    cameraRef.current?.click();
   };
 
   const handleScanLabel = async (e) => {
@@ -327,22 +357,36 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
           <button onClick={() => { openNewForm(); playSoundEffect('click', soundEnabled); }} className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl ${t.bgAccent} body-md shadow-glow`}>
             <Plus size={16} /> Tambah Manual
           </button>
+          {duplicateNames > 0 && (
+            <button onClick={cleanDuplicates} className={`shrink-0 px-3 h-[48px] rounded-2xl border ${t.border} ${t.btnBg} ${t.textMain} caption font-bold flex items-center gap-1.5`}>
+              <Trash2 size={14} /> {duplicateNames} dobel
+            </button>
+          )}
           <div className={`shrink-0 w-16 h-[48px] rounded-2xl border ${t.borderAccentSoft} ${t.bgAccentSoft} relative flex items-center justify-center`}>
             {ocrStatus ? (
               <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
                 <div className="absolute inset-0 bg-amber-500/20 dark:bg-amber-400/20 w-full origin-left" style={{ animation: 'progressFill 10s cubic-bezier(0.1, 0.8, 0.2, 1) forwards' }} />
               </div>
             ) : null}
-            <div className="relative z-10 w-full h-full">
-              <SpeedDialScanner 
-                mainIcon={Camera}
-                direction="down"
-                mainColorClass={`w-full h-full ${t.textAccent} bg-transparent`}
-                disabled={scanning || !!ocrStatus}
-                onSelectCamera={() => cameraRef.current?.click()}
-                onSelectGallery={() => galleryRef.current?.click()}
-              />
-            </div>
+            {/* Selagi scan jalan, tombolnya jadi Batal — bukan cuma di-disable. Kuota AI
+                balik kalau dibatalin (lihat runOcrScan). */}
+            {scanning ? (
+              <button onClick={cancelScan} aria-label="Batalkan scan"
+                className="relative z-10 w-full h-full flex items-center justify-center rounded-2xl bg-red-500 text-white active:scale-95">
+                <X size={18} />
+              </button>
+            ) : (
+              <div className="relative z-10 w-full h-full">
+                <SpeedDialScanner
+                  mainIcon={Camera}
+                  direction="down"
+                  mainColorClass={`w-full h-full ${t.textAccent} bg-transparent`}
+                  disabled={!!ocrStatus}
+                  onSelectCamera={openCamera}
+                  onSelectGallery={() => galleryRef.current?.click()}
+                />
+              </div>
+            )}
           </div>
           <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handleScanLabel} className="hidden" />
           <input ref={galleryRef} type="file" accept="image/*" onChange={handleScanLabel} className="hidden" />
@@ -377,26 +421,30 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
               </button>
             </div>
           ))}
-          {results.length === 0 && !onlineLoading && (
+          {results.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 opacity-60">
               <Database size={40} className={`mb-3 ${t.textMuted}`} />
               <p className={`body-md text-center ${t.textMuted}`}>Tidak ada hasil yang ditemukan.</p>
-              {viewMode === 'all' && term.length > 0 && term.length < 3 && (
-                <p className={`caption text-center mt-2 ${t.textAccent}`}>Ketik minimal 3 huruf untuk mencari dari 3jt+ database online.</p>
+              {viewMode === 'all' && term.length > 0 && (
+                <p className={`caption text-center mt-2 ${t.textAccent}`}>Belum ada di database? Tambahkan manual atau scan label kemasannya di tab Custom.</p>
               )}
             </div>
           )}
         </div>
       </div>
 
-      {/* ===== CROPPER MODAL ===== */}
+      {/* ===== CROPPER MODAL =====
+          Props-nya dulu salah nama semua (isOpen/imageFile/onCropComplete) padahal komponennya
+          minta open/imageSrc/onComplete — modalnya gak pernah kebuka, jadi scan-nya kelihatan
+          kayak tombol mati. */}
       <ImageCropperModal
-        isOpen={!!cropFile}
-        imageFile={cropFile}
+        open={!!cropFile}
+        imageSrc={cropSrc}
         onClose={() => setCropFile(null)}
-        onCropComplete={(croppedFile) => {
+        onComplete={async (croppedDataUrl) => {
           setCropFile(null);
-          if (croppedFile) runOcrScan(croppedFile);
+          const blob = await (await fetch(croppedDataUrl)).blob();
+          runOcrScan(blob);
         }}
       />
     </div>

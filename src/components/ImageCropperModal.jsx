@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
-import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
+import React, { useState, useRef, useEffect } from 'react';
+import ReactCrop, { centerCrop, makeAspectCrop, convertToPixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { X, Check, RotateCw } from 'lucide-react';
+import { X, Check, RotateCw, Loader2 } from 'lucide-react';
 
 function centerAspectCrop(mediaWidth, mediaHeight, aspect) {
   return centerCrop(
@@ -19,23 +19,34 @@ function centerAspectCrop(mediaWidth, mediaHeight, aspect) {
   );
 }
 
-export default function ImageCropperModal({ 
-  open, 
-  onClose, 
-  imageSrc, 
+// onReset (opsional): balikin ke foto asli sebelum di-crop. Editor SELALU membuka file asli,
+// jadi crop berulang gak numpuk (crop dari hasil crop = makin kecil & makin burik).
+export default function ImageCropperModal({
+  open,
+  onClose,
+  imageSrc,
   onComplete,
-  t 
+  onReset,
 }) {
   const [crop, setCrop] = useState();
   const [completedCrop, setCompletedCrop] = useState(null);
   const [rotate, setRotate] = useState(0);
+  const [busy, setBusy] = useState(false);
   const imgRef = useRef(null);
+
+  // Komponen ini gak pernah di-unmount (cuma return null), jadi state crop foto sebelumnya
+  // bakal nempel di foto berikutnya kalau gak direset tiap ganti gambar.
+  useEffect(() => { setCrop(undefined); setCompletedCrop(null); setRotate(0); }, [imageSrc]);
 
   if (!open || !imageSrc) return null;
 
   function onImageLoad(e) {
     const { width, height } = e.currentTarget;
-    setCrop(centerAspectCrop(width, height, 1));
+    const initial = centerAspectCrop(width, height, 1);
+    setCrop(initial);
+    // Tanpa ini, user yang cuma buka editor lalu langsung tap Simpan (gak geser kotak crop)
+    // bikin completedCrop tetap null → tombolnya kelihatan gak ngefek apa-apa.
+    setCompletedCrop(convertToPixelCrop(initial, width, height));
   }
 
   async function handleConfirm() {
@@ -43,7 +54,7 @@ export default function ImageCropperModal({
       onClose();
       return;
     }
-    
+    setBusy(true);
     const image = imgRef.current;
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -78,7 +89,10 @@ export default function ImageCropperModal({
       canvas.height
     );
     
-    const base64Url = canvas.toDataURL('image/jpeg', 0.85);
+    // Hasilnya naik ke Storage (bukan lagi base64 di Firestore), jadi gak perlu dijepit
+    // sampai ~100KB — kualitasnya dijaga biar foto kenang-kenangan gak burik.
+    const base64Url = canvas.toDataURL('image/webp', 0.85);
+    setBusy(false);
     onComplete(base64Url);
   }
 
@@ -106,6 +120,9 @@ export default function ImageCropperModal({
             ref={imgRef}
             alt="Crop me"
             src={imageSrc}
+            // Foto sekarang diambil dari URL Firebase Storage (beda origin). Tanpa ini canvas-nya
+            // ke-taint dan toDataURL() lempar SecurityError — persis gejala "tap Simpan gak ngapa-ngapain".
+            crossOrigin="anonymous"
             style={{ transform: `rotate(${rotate}deg)`, maxHeight: '70vh', objectFit: 'contain' }}
             onLoad={onImageLoad}
           />
@@ -113,12 +130,21 @@ export default function ImageCropperModal({
       </div>
       
       <div className="p-5 pb-8 bg-gradient-to-t from-black to-transparent">
-        <button 
-          onClick={handleConfirm}
-          className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-500/30 active:scale-95 transition-transform"
-        >
-          <Check size={20} /> Simpan Perubahan
-        </button>
+        <div className="flex gap-2">
+          {onReset && (
+            <button onClick={onReset} disabled={busy}
+              className="px-4 py-4 rounded-2xl bg-white/10 text-white font-bold active:scale-95 transition-transform disabled:opacity-50">
+              Foto Asli
+            </button>
+          )}
+          <button
+            onClick={handleConfirm}
+            disabled={busy}
+            className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-500/30 active:scale-95 transition-transform disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={20} className="animate-spin" /> : <Check size={20} />} Simpan Perubahan
+          </button>
+        </div>
       </div>
     </div>
   );

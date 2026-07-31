@@ -47,7 +47,10 @@ async function callGoogle(key, model, systemPrompt, contents) {
     const chain = [preferred, ...GOOGLE_MODELS.filter(m => m !== preferred)];
     const payload = {
         system_instruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
-        contents
+        contents,
+        // Semua pemakai endpoint ini ngambil ANGKA GIZI, bukan ngobrol. Tanpa ini temperature
+        // default (~1.0) bikin foto yang sama balik dengan estimasi beda-beda tiap dijalankan.
+        generationConfig: { temperature: 0, topP: 0.1 }
     };
     for (let i = 0; i < chain.length; i++) {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${chain[i]}:generateContent?key=${key}`, {
@@ -229,3 +232,5 @@ exports.lomealAiVision = functions.region(REGION).runWith({ timeoutSeconds: 120,
 // Salinan bridgeLomealAuth yang dulu pernah ada di sini (gak pernah beneran ke-deploy/dipanggil —
 // versi asli yang aktif ada di logym.app/functions) DIHAPUS. Lomeal & Logym sekarang satu project
 // Firebase (hexa-life) = satu identitas Auth bareng, jembatan token gak dibutuhkan lagi sama sekali.
+
+// force deploy env vars

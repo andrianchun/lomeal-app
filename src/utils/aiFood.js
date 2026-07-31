@@ -9,6 +9,7 @@
 // ============================================================
 import { functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
+import { reconcileKcal } from '../data/nutrition';
 
 const MODELS = ['gemini-1.5-flash-8b', 'gemini-1.5-flash', 'gemini-1.5-pro'];
 
@@ -36,7 +37,17 @@ const clampNutrition = (n) => {
   });
   return out;
 };
-const clampFoods = (foods) => (foods || []).map(f => ({ ...f, nutrition: clampNutrition(f.nutrition) }));
+const clampFoods = (foods) => (foods || []).map((f) => {
+  const { nutrition, suspect } = reconcileKcal(clampNutrition(f.nutrition));
+  return { ...f, nutrition, lowConfidence: f.lowConfidence || suspect };
+});
+
+const abortIfCancelled = (signal) => {
+  if (!signal?.aborted) return;
+  const e = new Error('Aborted');
+  e.name = 'AbortError';
+  throw e;
+};
 
 async function callGeminiWithKey(apiKey, parts, signal = null) {
   let lastErr = 'Unknown error';
@@ -45,7 +56,10 @@ async function callGeminiWithKey(apiKey, parts, signal = null) {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts }] }),
+        // Tanpa generationConfig, Gemini pakai temperature default (~1.0) alias sampling acak —
+        // foto yang SAMA PERSIS bisa balik 450 kkal terus 620 kkal. Buat ekstraksi angka gizi
+        // kita mau jawaban yang stabil, bukan yang kreatif.
+        body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, topP: 0.1 } }),
         signal,
       });
       if (res.ok) {
@@ -77,11 +91,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null) {
   if (keys.length > 0) {
     let lastErr = 'Unknown error';
     for (const key of keys) {
-      if (signal?.aborted) {
-        const e = new Error('Aborted');
-        e.name = 'AbortError';
-        throw e;
-      }
+      abortIfCancelled(signal);
       try {
         return await callGeminiWithKey(key, parts, signal);
       } catch (err) {
@@ -99,11 +109,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null) {
     console.warn('Personal key failed, falling back to server...', lastErr);
   }
 
-  if (signal?.aborted) {
-    const e = new Error('Aborted');
-    e.name = 'AbortError';
-    throw e;
-  }
+  abortIfCancelled(signal);
 
   // Fallback to server if no keys or all keys failed
   const aiChat = httpsCallable(functions, 'lomealAiChat');
@@ -113,13 +119,16 @@ async function callGemini(apiKeyOrKeys, parts, signal = null) {
       provider: 'google',
       model: 'gemini-3.5-flash'
     });
+    // httpsCallable gak bisa di-abort — jadi hasilnya yang dibuang kalau user udah batal,
+    // biar sheet hasil AI gak tetap nongol sesudah pencet X.
+    abortIfCancelled(signal);
     let text = res.data?.text || '{}';
     text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
     const parsed = JSON.parse(text);
     if (parsed.error === 'OUT_OF_SCOPE') throw new Error('OUT_OF_SCOPE');
     return parsed;
   } catch (err) {
-    if (err.message === 'OUT_OF_SCOPE') throw err;
+    if (err.name === 'AbortError' || err.message === 'OUT_OF_SCOPE') throw err;
     throw new Error('Backend AI Error: ' + err.message);
   }
 }
@@ -149,15 +158,18 @@ Catatan:
 - Untuk piring, estimasi porsi (gram) dan gizinya (prioritas masakan Indonesia).
 - Format balasan WAJIB JSON murni sesuai skema.` },
     { inlineData: { mimeType: mimeType, data: base64Image } },
-  ]);
-  if (res.type === 'label' && res.per100) return { ...res, per100: clampNutrition(res.per100) };
+  ], signal);
+  if (res.type === 'label' && res.per100) {
+    const { nutrition, suspect } = reconcileKcal(clampNutrition(res.per100));
+    return { ...res, per100: nutrition, lowConfidence: res.lowConfidence || suspect };
+  }
   if (res.foods) return { ...res, foods: clampFoods(res.foods) };
   return res;
 };
 
 // --- 4. Konsultan Gemini: Evaluasi Mingguan (HANYA via tombol manual, Fase 4) ---
-export const generateWeeklyEvaluation = async (apiKey, weekSummary) => {
-  const res = await callGemini(apiKey, [{ text: `${SAFETY_PREFIX}\n\nTUGAS: Kamu konsultan gizi yang empatik. Berdasarkan ringkasan 7 hari berikut (JSON), tulis TEPAT SATU paragraf (4-6 kalimat) umpan balik hangat berbahasa Indonesia: apresiasi hal baik, sorot 1-2 area perbaikan konkret, tutup dengan semangat. Jangan mendiagnosis penyakit.\nFormat balasan: {"evaluation":"..."}\n\nDATA:\n${JSON.stringify(weekSummary)}` }]);
+export const generateWeeklyEvaluation = async (apiKey, weekSummary, signal = null) => {
+  const res = await callGemini(apiKey, [{ text: `${SAFETY_PREFIX}\n\nTUGAS: Kamu konsultan gizi yang empatik. Berdasarkan ringkasan 7 hari berikut (JSON), tulis TEPAT SATU paragraf (4-6 kalimat) umpan balik hangat berbahasa Indonesia: apresiasi hal baik, sorot 1-2 area perbaikan konkret, tutup dengan semangat. Jangan mendiagnosis penyakit.\nFormat balasan: {"evaluation":"..."}\n\nDATA:\n${JSON.stringify(weekSummary)}` }], signal);
   return res.evaluation || '';
 };
 
@@ -172,32 +184,52 @@ Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang d
 };
 
 // --- Kompresi foto on-device ke ≤100KB (blueprint Fase 5) ---
-export const compressImageTo100KB = (file) => new Promise((resolve, reject) => {
+// Foto sesi sekarang disimpan sebagai URL Firebase Storage, sedangkan Gemini butuh bytes inline.
+// Foto lama yang masih base64 langsung lewat apa adanya.
+export const toDataUrl = async (src) => {
+  if (src.startsWith('data:')) return src;
+  const blob = await (await fetch(src)).blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+// maxSide/maxChars dipisah karena dua kebutuhannya beda jauh:
+//  - buat DIKIRIM KE AI: 800px, kecil-kecil aja, Gemini vision udah pinter (default).
+//  - buat DISIMPAN sebagai kenang-kenangan: PHOTO_KEEPSAKE di bawah — gede & tajam,
+//    toh masuknya ke Storage, bukan ke dokumen Firestore yang dibatasi 1 MiB.
+export const PHOTO_KEEPSAKE = { maxSide: 1600, maxChars: 2_000_000, quality: 0.85 };
+
+export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {
   const img = new Image();
   const url = URL.createObjectURL(file);
   img.onload = () => {
     URL.revokeObjectURL(url);
     const canvas = document.createElement('canvas');
     let { width, height } = img;
-    const maxSide = 800; // Dikurangi agar makin kencang, Gemini vision udah pinter
     if (Math.max(width, height) > maxSide) {
       const s = maxSide / Math.max(width, height);
       width = Math.round(width * s); height = Math.round(height * s);
     }
     canvas.width = width; canvas.height = height;
     canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-    
+
     // Pindah ke WebP untuk hemat space drastis
-    let quality = 0.6;
-    let dataUrl = canvas.toDataURL('image/webp', quality);
-    
-    while (dataUrl.length > 136000 && quality > 0.25) {
-      quality -= 0.1;
-      dataUrl = canvas.toDataURL('image/webp', quality);
+    let q = quality;
+    let dataUrl = canvas.toDataURL('image/webp', q);
+
+    while (dataUrl.length > maxChars && q > 0.25) {
+      q -= 0.1;
+      dataUrl = canvas.toDataURL('image/webp', q);
     }
     resolve({ base64: dataUrl.split(',')[1], dataUrl, mimeType: 'image/webp' });
   };
   img.onerror = reject;
   img.src = url;
 });
+
+export const compressImageTo100KB = (file) => compressImage(file);
 

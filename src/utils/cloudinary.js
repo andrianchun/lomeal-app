@@ -1,43 +1,8 @@
-export const CLOUD_NAME = "dxkhyzw50";
-export const UPLOAD_PRESET = "ml_default";
-
-// Sisip parameter transform Cloudinary (resize+compress) ke URL sebelum ditampilkan sebagai
-// thumbnail — tanpa ini, tiap render feed download gambar resolusi upload penuh.
+// Upload sudah 100% pindah ke Firebase Storage (lihat utils/storageLogym.js).
+// Yang tersisa cuma ini: URL foto post LAMA di feed masih nunjuk ke Cloudinary, jadi
+// transform thumbnail-nya tetap dipakai biar gambar lama gak di-download resolusi penuh.
+// Buat URL Firebase Storage fungsi ini otomatis no-op.
 export const cloudinaryThumb = (url, width = 400) => {
     if (!url || !url.includes('/upload/')) return url;
     return url.replace('/upload/', `/upload/w_${width},q_auto,f_auto/`);
-};
-
-export const uploadToCloudinary = async (file, publicId = null, folder = null) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", UPLOAD_PRESET);
-    
-    // Jika ada folder spesifik
-    if (folder) {
-        formData.append("folder", folder);
-    }
-
-    // Jika upload preset mengizinkan custom public_id, ini akan menimpa foto lama
-    if (publicId) {
-        formData.append("public_id", publicId);
-    }
-
-    try {
-        const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
-            method: "POST",
-            body: formData,
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) {
-            throw new Error(data.error?.message || "Gagal upload ke Cloudinary");
-        }
-        
-        return data.secure_url;
-    } catch (error) {
-        console.error("Cloudinary upload error:", error);
-        throw error;
-    }
 };
