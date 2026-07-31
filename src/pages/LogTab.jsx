@@ -1063,8 +1063,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                           </div>
                           <select value={unit} onChange={(e) => {
                             const newUnit = e.target.value;
-                            const newUnitWeight = (newUnit === 'g' || newUnit === 'ml') ? 1 : URT_DICTIONARY[newUnit];
-                            setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, unit: newUnit, grams: Math.round(qty * newUnitWeight) } : x) }));
+                            setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, unit: newUnit } : x) }));
                           }} className={`bg-transparent text-[10px] font-bold outline-none text-center ${t.textMuted}`}>
                             {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
                           </select>
