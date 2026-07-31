@@ -1,11 +1,12 @@
 {
   "name": "lomeal",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:ota": "vite build && node scripts/build-ota.js",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
@@ -15,6 +16,7 @@
     "@capacitor/camera": "^8.2.1",
     "@capacitor/core": "^8.3.4",
     "@capacitor/local-notifications": "^8.2.0",
+    "@capgo/capacitor-updater": "^8.51.3",
     "autoprefixer": "^10.5.0",
     "capacitor-health-connect": "^0.7.0",
     "firebase": "^12.14.0",
@@ -36,6 +38,8 @@
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",
+    "archiver": "^8.0.0",
+    "dotenv": "^17.4.2",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.34.1",
     "eslint-plugin-react-hooks": "^4.6.0",

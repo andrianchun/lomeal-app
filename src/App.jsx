@@ -21,6 +21,9 @@ import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutriti
 import { computeDayTotals, calcTargets } from './data/nutrition';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { CapacitorUpdater } from '@capgo/capacitor-updater';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { db } from './firebase';
 import useDialog from './hooks/useDialog';
 import useToast from './hooks/useToast';
 
@@ -40,6 +43,7 @@ import SocialHub from './pages/SocialHub';
 import SettingsPage from './pages/SettingsPage';
 import NotificationPanel from './components/NotificationPanel';
 import PwaUpdater from './components/PwaUpdater';
+import UpdaterAlert from './components/UpdaterAlert';
 import { createCommunityPost } from './utils/communityApi';
 import AdminDashboard from './pages/AdminDashboard';
 
@@ -55,6 +59,98 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [socialOpen, setSocialOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [otaState, setOtaState] = useState({ open: false, force: false, url: '', version: '', notes: '' });
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    
+    CapacitorUpdater.notifyAppReady();
+
+    const unsubOta = onSnapshot(doc(db, 'lomeal_settings', 'ota_update'), async (snap) => {
+      try {
+        if (snap.exists()) {
+          const data = snap.data();
+          // Pakai localStorage sebagai sumber kebenaran versi yang sudah ter-apply,
+          // karena CapacitorUpdater.current() return-nya nested dan tidak reliable.
+          const appliedVer = localStorage.getItem('lomeal_applied_ota') || '0.0.0';
+          
+          if (data.ota_version && data.ota_version !== appliedVer) {
+            const dismissed = localStorage.getItem('lomeal_dismissed_ota');
+            if (!data.is_forced && dismissed === data.ota_version) {
+              setOtaState(prev => ({
+                ...prev,
+                open: false,
+                force: data.is_forced,
+                url: data.ota_url,
+                version: data.ota_version,
+                notes: data.release_notes
+              }));
+            } else {
+              setOtaState({
+                open: true,
+                force: data.is_forced,
+                url: data.ota_url,
+                version: data.ota_version,
+                notes: data.release_notes
+              });
+            }
+          } else {
+            // Versi sama — pastikan popup tertutup
+            setOtaState(prev => ({ ...prev, open: false }));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to check OTA', err);
+      }
+    });
+
+    return () => unsubOta();
+  }, []);
+
+  const [downloadProgress, setDownloadProgress] = useState(null);
+
+  useEffect(() => {
+    let dlListener;
+    if (CapacitorUpdater) {
+      CapacitorUpdater.addListener('download', (info) => {
+        setDownloadProgress(Math.round(info.percent));
+      }).then(l => dlListener = l);
+    }
+    return () => {
+      if (dlListener) dlListener.remove();
+    };
+  }, []);
+
+  const handleUpdate = async () => {
+    try {
+      setDownloadProgress(0);
+      if (!otaState.force) {
+        setOtaState(prev => ({ ...prev, open: false }));
+        // don't toast if showing progress in settings, but if dashboard, maybe keep it?
+      }
+      const bundle = await CapacitorUpdater.download({
+        url: otaState.url,
+        version: otaState.version,
+      });
+      // Simpan versi SEBELUM set() karena set() akan destroy JS context
+      localStorage.setItem('lomeal_applied_ota', otaState.version);
+      localStorage.removeItem('lomeal_dismissed_ota');
+      await CapacitorUpdater.set(bundle);
+      setDownloadProgress(null);
+    } catch (err) {
+      console.error('OTA Update failed:', err);
+      // Rollback localStorage jika gagal
+      localStorage.removeItem('lomeal_applied_ota');
+      setDownloadProgress(null);
+      if (otaState.force) {
+        alert('Gagal mengunduh pembaruan. Silakan periksa koneksi internet Anda.');
+      } else {
+        showToast('Gagal mengunduh pembaruan.', 'error');
+      }
+    }
+  };
+
+
 
   // Draft Smart Input AI Lomeal (LogTab) diangkat ke sini (bukan state lokal LogTab) supaya
   // tetap ada kalau user pindah tab lain lalu balik lagi — react-router unmount komponen tab
@@ -534,7 +630,18 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       <BottomNav t={t} activeTab={path} setActiveTab={setActiveTab} />
 
       {/* Overlays / Modals */}
-      <PwaUpdater t={t} isDark={theme === 'dark'} />
+      {!Capacitor.isNativePlatform() && <PwaUpdater t={t} isDark={theme === 'dark'} />}
+      <UpdaterAlert 
+        open={otaState.open} 
+        force={otaState.force} 
+        releaseNotes={otaState.notes}
+        theme={t}
+        onUpdate={handleUpdate}
+        onClose={() => {
+          localStorage.setItem('lomeal_dismissed_ota', otaState.version);
+          setOtaState(prev => ({ ...prev, open: false }));
+        }}
+      />
 
       {socialOpen && (
         <SocialHub
@@ -575,6 +682,11 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
           showAlert={showAlert}
           showToast={showToast}
           showConfirm={showConfirm}
+          otaAvailable={otaState.version && otaState.version !== (localStorage.getItem('lomeal_applied_ota') || '0.0.0')}
+          otaState={otaState}
+          currentVer={localStorage.getItem('lomeal_applied_ota') || '0.0.0'}
+          onUpdateApp={handleUpdate}
+          downloadProgress={downloadProgress}
           exportData={exportData}
           handleImportFile={handleImportFile}
           onToggleHealthConnect={handleToggleHealthConnect}

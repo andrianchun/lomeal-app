@@ -286,8 +286,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         parsed = {
           name: res.name || '',
           grams: res.servingGrams || 100,
-          kcal: res.per100?.kcal ?? '',
-          ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, res.per100?.[k] ?? ''])),
+          kcal: res.nutrition?.kcal ?? '',
+          ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, res.nutrition?.[k] ?? ''])),
         };
       } else {
         const first = res.foods?.[0];

@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   X, Moon, Sun, Globe, Volume2, VolumeX, Timer, Download, Upload, CalendarDays,
   Bell, BellOff, Clock, Activity, Scale, Ruler, Thermometer, Plus,
-  MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw,
+  MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw, DownloadCloud
 } from 'lucide-react';
 import { getLang } from '../i18n';
 
@@ -82,7 +82,8 @@ const SettingsPage = ({
   onClose, onLogout, showAlert, showConfirm,
   exportData, handleImportFile,
   onToggleHealthConnect, healthConnected, healthAvailable,
-  onDeleteAccount, syncAllNutritionToLogym, lomealUser,
+  onDeleteAccount, syncAllNutritionToLogym, lomealUser, 
+  otaAvailable, otaState, currentVer, onUpdateApp, downloadProgress,
 }) => {
   const [activeTab, setActiveTab] = useState('preferensi');
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
@@ -380,6 +381,59 @@ const SettingsPage = ({
               {!healthAvailable && (
                 <p className={`text-[10px] ${t.textMuted} leading-tight`}>Aktif di aplikasi Android (Capacitor) — belum tersedia di browser web.</p>
               )}
+            </Section>
+
+            {/* PEMBARUAN APLIKASI */}
+            <Section title="Pembaruan Aplikasi" icon={DownloadCloud} t={t}>
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <span className={`font-bold text-sm ${t.textMain}`}>
+                    Lomeal v{currentVer}
+                  </span>
+                  {otaAvailable && (
+                    <span className="text-[10px] font-bold text-rose-500">
+                      Versi {otaState.version} Tersedia!
+                    </span>
+                  )}
+                </div>
+                {otaAvailable && downloadProgress === null ? (
+                  <button
+                    onClick={onUpdateApp}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.bgAccent} text-white shadow-sm active:scale-95`}
+                  >
+                    Update
+                  </button>
+                ) : downloadProgress !== null && downloadProgress !== undefined ? (
+                  <button
+                    disabled
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.btnBg} ${t.textMuted}`}
+                  >
+                    Mengunduh {downloadProgress}%
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.btnBg} ${t.textMuted} opacity-70`}
+                  >
+                    Terbaru
+                  </button>
+                )}
+              </div>
+              
+              {downloadProgress !== null && downloadProgress !== undefined && (
+                <div className="w-full bg-black/10 dark:bg-white/10 rounded-full h-1.5 mt-3 overflow-hidden">
+                  <div 
+                    className={`${t.bgAccent} h-1.5 rounded-full transition-all duration-200 ease-out`} 
+                    style={{ width: `${downloadProgress}%` }}
+                  />
+                </div>
+              )}
+
+              <p className={`text-[10px] ${t.textMuted} leading-tight mt-2`}>
+                {otaAvailable 
+                  ? "Ada pembaruan baru yang bisa langsung kamu unduh." 
+                  : "Kamu sudah menggunakan versi terbaru Lomeal."}
+              </p>
             </Section>
 
             {/* BACKUP & RESTORE */}

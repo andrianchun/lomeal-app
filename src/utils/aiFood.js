@@ -148,20 +148,20 @@ export const analyzeSmartPhoto = async (apiKey, base64Image, mimeType = 'image/j
   const res = await callGemini(apiKey, [
     { text: `${SAFETY_PREFIX}\n\nTUGAS: Analisis foto ini secara pintar.
 Jika foto ini adalah tabel Informasi Nilai Gizi (kemasan):
-Kembalikan JSON: {"type":"label","name":"nama produk","servingSize":"takaran tertulis","servingGrams":number,"lowConfidence":boolean,"per100":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number,"satFat":number,"iron":number,"calcium":number,"purine":0}}
+Kembalikan JSON: {"type":"label","name":"nama produk","servingSize":"takaran tertulis","servingGrams":number,"lowConfidence":boolean,"nutrition":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number,"satFat":number,"iron":number,"calcium":number,"purine":0}}
 
 Jika foto ini adalah makanan/minuman (piring/gelas):
 Kembalikan JSON: {"type":"plate","foods":[{"name":"nama","grams":number,"lowConfidence":boolean,"nutrition":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number,"satFat":number,"iron":number,"calcium":number,"purine":0}}]}
 
 Catatan:
-- Untuk label, konversi nilai gizi ke PER 100 GRAM/ML.
+- Untuk label, EKSTRAK NILAI GIZI SESUAI DENGAN TAKARAN SAJI (JANGAN DIKONVERSI KE 100 GRAM).
 - Untuk piring, estimasi porsi (gram) dan gizinya (prioritas masakan Indonesia).
 - Format balasan WAJIB JSON murni sesuai skema.` },
     { inlineData: { mimeType: mimeType, data: base64Image } },
   ], signal);
-  if (res.type === 'label' && res.per100) {
-    const { nutrition, suspect } = reconcileKcal(clampNutrition(res.per100));
-    return { ...res, per100: nutrition, lowConfidence: res.lowConfidence || suspect };
+  if (res.type === 'label' && res.nutrition) {
+    const { nutrition, suspect } = reconcileKcal(clampNutrition(res.nutrition));
+    return { ...res, nutrition, lowConfidence: res.lowConfidence || suspect };
   }
   if (res.foods) return { ...res, foods: clampFoods(res.foods) };
   return res;
