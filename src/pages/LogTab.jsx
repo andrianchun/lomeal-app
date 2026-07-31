@@ -8,7 +8,7 @@ import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT
 import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS } from '../data/nutrition';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
-import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageTo100KB, toDataUrl, PHOTO_KEEPSAKE } from '../utils/aiFood';
+import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, toDataUrl, PHOTO_KEEPSAKE } from '../utils/aiFood';
 import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto } from '../utils/foodLog';
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
@@ -63,7 +63,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const [waterEdit, setWaterEdit] = useState(false);
   const [listening, setListening] = useState(false);
   const [rackExpanded, setRackExpanded] = useState(false);
-  const [saveToDb, setSaveToDb] = useState(true); // Default simpan ke custom DB
+  const [saveToDb, setSaveToDb] = useState(false); // Default jangan simpan ke custom DB agar tidak menumpuk
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
   const detailPhotoRef = useRef(null);
@@ -117,6 +117,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     const tempId = `tmp_${Date.now()}`;
     const localUrl = isFile ? URL.createObjectURL(fileOrDataUrl) : fileOrDataUrl;
     setPendingPhotos((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: tempId, url: localUrl, pending: true }] }));
+    await new Promise(r => setTimeout(r, 50)); // Jeda 50ms agar UI merender preview SEBELUM thread diblokir kompresi!
     try {
       const dataUrl = isFile ? (await compressImage(fileOrDataUrl, PHOTO_KEEPSAKE)).dataUrl : fileOrDataUrl;
       const url = await uploadMealPhoto(user.uid, selectedYmd, sessionId, dataUrl);
@@ -428,6 +429,20 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
        return;
     }
 
+    // 3.5 TIER 2 API (OpenFoodFacts)
+    setAiBusy(true);
+    const apiSearch = await import('../utils/apiSearch');
+    const offResult = await apiSearch.searchOpenFoodFacts(normalizedText);
+    if (offResult && offResult.foods?.length > 0) {
+       saveLocalPatternCache(text, offResult.foods);
+       saveGlobalPatternCache(text, offResult.foods);
+       appendAiResult(offResult.foods, { isOffline: false, source: 'openfoodfacts' });
+       setChatText('');
+       setAiAbortController(null);
+       setAiBusy(false);
+       return;
+    }
+
     // 4. FALLBACK KE AI (Jika teks kompleks/nama makanan aneh)
     if (!(await guardAi())) {
        setAiAbortController(null);
@@ -435,6 +450,18 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     }
     setAiBusy(true);
     try {
+      // LOG SEARCH MISS ANONIMOUSLY (untuk trend catcher / kurasi)
+      const safeText = text.trim().toLowerCase().substring(0, 100);
+      if (safeText.length > 2) {
+         import('firebase/firestore').then(({ doc, setDoc, increment }) => {
+            setDoc(doc(import('../firebase').then(m => m.db), 'lomeal_search_misses', safeText.replace(/\//g, '_')), {
+               query: safeText,
+               count: increment(1),
+               lastSearched: new Date().toISOString()
+            }, { merge: true }).catch(() => {});
+         });
+      }
+
       const res = await parseFoodText(aiKey, text, controller.signal, customFoods);
       if (res.foods?.length) {
          saveLocalPatternCache(text, res.foods);
@@ -546,8 +573,9 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     const controller = new AbortController();
     setAiAbortController(controller);
     setAiBusy(true);
+    await new Promise(r => setTimeout(r, 50)); // Jeda 50ms agar UI tulisan "Memproses..." dirender instan!
     try {
-      const { base64, dataUrl, mimeType } = await compressImageTo100KB(file);
+      const { base64, dataUrl, mimeType } = await compressImageForAI(file);
       const res = await analyzeSmartPhoto(aiKey, base64, mimeType, controller.signal);
       
       let items = [];
@@ -579,8 +607,27 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     const { foods, photoDataUrl, photoFile } = aiResult;
     const meals = { ...(day.meals || {}) };
     const isFirstEntry = (meals[aiTargetSession] || []).length === 0;
-    // Satuan diambil dari hasil parse, bukan dipaku 'g' — minuman jadi mL. `f.unit` bisa berupa
-    // satuan rumah tangga ("gelas") dari AI; entryUnit yang nerjemahin ke g/ml.
+    // 1. Lacak sinyal koreksi manual (jika kalori akhir diedit jauh dari prediksi awal AI)
+    foods.forEach(f => {
+       if (f.baseNutrition && f.nutrition) {
+          const expectedKcal = Math.round(f.baseNutrition.kcal * (f.grams / (f.baseGrams || 100)));
+          const actualKcal = Math.round(f.nutrition.kcal);
+          if (Math.abs(expectedKcal - actualKcal) > 20) {
+             const safeName = f.name.trim().toLowerCase().replace(/\//g, '_').substring(0, 100);
+             import('firebase/firestore').then(({ doc, setDoc, increment }) => {
+                setDoc(doc(import('../firebase').then(m => m.db), 'lomeal_correction_signals', safeName), {
+                   foodName: f.name,
+                   oldKcal: expectedKcal,
+                   newKcal: actualKcal,
+                   count: increment(1),
+                   reportedAt: new Date().toISOString(),
+                   type: 'correction'
+                }, { merge: true }).catch(() => {});
+             });
+          }
+       }
+    });
+
     const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: entryUnit(f.unit, f.isDrink), nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai' }));
     
     meals[aiTargetSession] = [

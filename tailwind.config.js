@@ -31,6 +31,19 @@ export default {
         background: '#f8fafc',
         surface: '#ffffff',
       },
+      fontSize: {
+        'xs': ['12px', '1.3'],
+        'sm': ['12px', '1.3'],
+        'base': ['12px', '1.3'], // Base is now 12px for smaller UI elements 
+        'md': ['19px', '1.5'],
+        'lg': ['19px', '1.5'], // Large maps to 19px
+        'xl': ['19px', '1.5'],
+        '2xl': ['31px', '1.2'], // 2xl+ maps to 31px (headings)
+        '3xl': ['31px', '1.2'],
+        '4xl': ['31px', '1.2'],
+        '5xl': ['31px', '1.2'],
+        '6xl': ['31px', '1.2'],
+      },
       fontFamily: {
         sans: ['"Inter"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         heading: ['"Sora"', 'ui-sans-serif', 'system-ui', 'sans-serif'],

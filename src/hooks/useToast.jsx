@@ -33,7 +33,7 @@ export default function useToast() {
       {toasts.map((tst) => (
         <div
           key={tst.id}
-          className="w-full max-w-xs rounded-3xl px-5 py-4 bg-lime-300 text-black shadow-2xl anim-rise"
+          className="w-full max-w-xs rounded-3xl px-5 py-4 bg-gradient-to-br from-green-500 to-green-600 text-white shadow-2xl anim-rise"
         >
           <p className="text-sm font-bold text-center leading-relaxed break-words">{tst.message}</p>
         </div>

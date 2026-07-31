@@ -234,3 +234,33 @@ exports.lomealAiVision = functions.region(REGION).runWith({ timeoutSeconds: 120,
 // Firebase (hexa-life) = satu identitas Auth bareng, jembatan token gak dibutuhkan lagi sama sekali.
 
 // force deploy env vars
+
+exports.lomealTrendCatcher = functions.region(REGION).pubsub.schedule('every 24 hours').onRun(async (context) => {
+    const snapshot = await db.collection('lomeal_search_misses').where('count', '>=', 5).get();
+    if (snapshot.empty) return null;
+
+    for (const doc of snapshot.docs) {
+        const query = doc.data().query;
+        const prompt = `Lakukan riset mendalam mengenai nutrisi rata-rata untuk makanan/produk: "${query}". Format output JSON murni: {"foods":[{"name":"${query}","grams":100,"unit":"g","nutrition":{"kcal":0,"protein":0,"carbs":0,"fat":0,"sodium":0,"sugar":0,"cholesterol":0,"satFat":0,"iron":0,"calcium":0,"purine":0}}]}`;
+        
+        try {
+            const keys = getSharedKeys().filter(k => detectKeyProvider(k) === 'google');
+            if (keys.length > 0) {
+                const res = await callGoogle(keys[0], 'gemini-1.5-flash', '', [{ parts: [{ text: prompt }] }]);
+                const parsed = JSON.parse(res);
+                if (parsed.foods && parsed.foods.length > 0) {
+                    await db.collection('lomeal_pending_foods').add({
+                        ...parsed.foods[0],
+                        source: 'Automated Research',
+                        searchCount: doc.data().count,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    await doc.ref.delete();
+                }
+            }
+        } catch (e) {
+            console.error('Failed to research', query, e);
+        }
+    }
+    return null;
+});

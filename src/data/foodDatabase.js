@@ -1,6 +1,6 @@
 // ============================================================
 // DATABASE PANGAN BAWAAN LOMEAL (seed offline)
-// Sumber utama nilai gizi: TKPI — Tabel Komposisi Pangan Indonesia
+// Sumber utama nilai gizi: TKPI â€” Tabel Komposisi Pangan Indonesia
 // (Kemenkes RI / panganku.org), dilengkapi USDA FDC untuk bahan
 // yang tidak tercakup, dan estimasi purin dari tabel klinis umum.
 // Semua nilai per 100 g (atau per 100 ml untuk minuman, unit: 'ml').
@@ -24,23 +24,24 @@ const F = (id, name, category, portionLabel, portionGrams, n, opts = {}) => ({
     vitB12: n[23] || 0, vitC: n[24] || 0, vitD: n[25] || 0, vitE: n[26] || 0, vitK: n[27] || 0,
   },
   source: opts.source || 'TKPI',
+  image: opts.image || null,
 });
 
 export const FOOD_CATEGORIES = [
-  { id: 'staple',  label: 'Makanan Pokok', emoji: '🍚' },
-  { id: 'protein', label: 'Lauk Pauk',     emoji: '🍗' },
-  { id: 'veggie',  label: 'Sayuran',       emoji: '🥬' },
-  { id: 'fruit',   label: 'Buah',          emoji: '🍌' },
-  { id: 'dish',    label: 'Masakan Jadi',  emoji: '🍛' },
-  { id: 'snack',   label: 'Jajanan',       emoji: '🍢' },
-  { id: 'drink',   label: 'Minuman',       emoji: '🥤' },
-  { id: 'packaged',label: 'Kemasan',       emoji: '🛒' },
+  { id: 'staple',  label: 'Makanan Pokok', emoji: 'ðŸš' },
+  { id: 'protein', label: 'Lauk Pauk',     emoji: 'ðŸ—' },
+  { id: 'veggie',  label: 'Sayuran',       emoji: 'ðŸ¥¬' },
+  { id: 'fruit',   label: 'Buah',          emoji: 'ðŸŒ' },
+  { id: 'dish',    label: 'Masakan Jadi',  emoji: 'ðŸ›' },
+  { id: 'snack',   label: 'Jajanan',       emoji: 'ðŸ¢' },
+  { id: 'drink',   label: 'Minuman',       emoji: 'ðŸ¥¤' },
+  { id: 'packaged',label: 'Kemasan',       emoji: 'ðŸ›’' },
 ];
 
 //                                                    kcal  prot  carb  fat  sodium sugar chol satFat iron  calc  purine
 const OLD_FOOD_DB = [
   // ---------- MAKANAN POKOK ----------
-  F('nasi-putih',      'Nasi Putih',            'staple', '1 centong (100g)', 100, [ 180,  3.0, 39.8,  0.3,    1,  0.1,   0,  0.1, 0.2,   25,  10]),
+  F('nasi-putih',      'Nasi Putih',            'staple', '1 centong (100g)', 100, [ 180,  3.0, 39.8,  0.3,    1,  0.1,   0,  0.1, 0.2,   25,  10], { image: 'https://images.unsplash.com/photo-1536304929831-ee1ca9d44906?auto=format&fit=crop&w=200&q=80' }),
   F('nasi-merah',      'Nasi Merah',            'staple', '1 centong (100g)', 100, [ 149,  2.8, 32.5,  0.4,    2,  0.3,   0,  0.1, 0.8,   12,  10]),
   F('nasi-uduk',       'Nasi Uduk',             'staple', '1 porsi (150g)',   150, [ 195,  3.5, 32.0,  6.0,  180,  0.3,   0,  4.2, 0.5,   30,  10]),
   F('nasi-goreng',     'Nasi Goreng',           'staple', '1 piring (250g)',  250, [ 168,  4.5, 22.0,  7.0,  420,  1.5,  35,  1.8, 1.0,   30,  25]),
@@ -60,8 +61,8 @@ const OLD_FOOD_DB = [
   // ---------- LAUK PAUK ----------
   F('ayam-dada',       'Dada Ayam (tanpa kulit, matang)', 'protein', '1 potong (100g)', 100, [ 165, 31.0,  0.0,  3.6,   74,  0.0,  85,  1.0, 1.0,   15, 140], { source: 'USDA' }),
   F('ayam-paha',       'Paha Ayam (dengan kulit, matang)','protein', '1 potong (100g)', 100, [ 232, 23.3,  0.0, 15.5,   87,  0.0,  98,  4.2, 1.3,   12, 140], { source: 'USDA' }),
-  F('ayam-goreng',     'Ayam Goreng',           'protein', '1 potong (100g)',  100, [ 260, 21.9,  6.5, 16.0,  350,  0.5,  89,  4.5, 1.4,   20, 140]),
-  F('telur-rebus',     'Telur Ayam Rebus',      'protein', '1 butir (55g)',     55, [ 155, 12.6,  1.1, 10.6,  124,  1.1, 373,  3.3, 1.2,   50,   5]),
+  F('ayam-goreng',     'Ayam Goreng',           'protein', '1 potong (100g)',  100, [ 260, 21.9,  6.5, 16.0,  350,  0.5,  89,  4.5, 1.4,   20, 140], { image: 'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?auto=format&fit=crop&w=200&q=80' }),
+  F('telur-rebus',     'Telur Ayam Rebus',      'protein', '1 butir (55g)',     55, [ 155, 12.6,  1.1, 10.6,  124,  1.1, 373,  3.3, 1.2,   50,   5], { image: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?auto=format&fit=crop&w=200&q=80' }),
   F('telur-goreng',    'Telur Ceplok / Dadar',  'protein', '1 butir (60g)',     60, [ 196, 13.6,  0.9, 15.3,  207,  0.4, 401,  4.3, 1.9,   62,   5]),
   F('tempe-goreng',    'Tempe Goreng',          'protein', '1 potong (50g)',    50, [ 225, 17.0,  9.0, 15.0,   10,  0.5,   0,  2.5, 2.3,  120, 100]),
   F('tempe-mentah',    'Tempe (mentah)',        'protein', '1 papan kecil (100g)', 100, [ 201, 20.8, 13.5,  8.8,    9,  0.5,   0,  1.8, 4.0,  155, 100]),
@@ -175,7 +176,12 @@ export const searchFoods = (term, customFoods = []) => {
   const q = (term || '').toLowerCase().trim();
   const all = [...customFoods, ...FOOD_DB];
   if (!q) return all;
-  return all.filter(f => f.name.toLowerCase().includes(q));
+  
+  const words = q.split(/\s+/);
+  return all.filter(f => {
+    const name = f.name.toLowerCase();
+    return words.every(w => name.includes(w));
+  });
 };
 
 export const getFoodById = (id, customFoods = []) =>
@@ -187,4 +193,42 @@ export const nutritionForAmount = (food, grams) => {
   const out = {};
   Object.entries(food.nutrition).forEach(([k, v]) => { out[k] = Math.round(v * factor * 10) / 10; });
   return out;
+};
+
+const GENERIC_IMAGES = [
+  'https://images.unsplash.com/photo-1490818387583-1b5ba4597b6d?w=400&q=80',
+  'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
+  'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80',
+  'https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?w=400&q=80',
+  'https://images.unsplash.com/photo-1504630083234-14187a9df0f5?w=400&q=80',
+  'https://images.unsplash.com/photo-1493770348161-369560ae357d?w=400&q=80',
+  'https://images.unsplash.com/photo-1473093226795-af9932fe5856?w=400&q=80',
+  'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=400&q=80',
+];
+
+export const getDefaultImageForFood = (name) => {
+  const q = name.toLowerCase();
+  
+  if (q.includes('ayam') || q.includes('chicken')) return 'https://images.unsplash.com/photo-1626082896492-766af4eb65ed?w=400&q=80';
+  if (q.includes('sapi') || q.includes('daging') || q.includes('kambing') || q.includes('beef')) return 'https://images.unsplash.com/photo-1603048297172-c92544798d5e?w=400&q=80';
+  if (q.includes('telur') || q.includes('egg')) return 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?w=400&q=80';
+  if (q.includes('nasi') || q.includes('beras') || q.includes('rice')) return 'https://images.unsplash.com/photo-1516684732162-861afe655615?w=400&q=80';
+  if (q.includes('sawi') || q.includes('bayam') || q.includes('daun') || q.includes('kangkung') || q.includes('sayur') || q.includes('kubis') || q.includes('selada')) return 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?w=400&q=80';
+  if (q.includes('tempe') || q.includes('tahu') || q.includes('tofu')) return 'https://images.unsplash.com/photo-1662991035653-33924df39c1f?w=400&q=80';
+  if (q.includes('ikan') || q.includes('lele') || q.includes('nila') || q.includes('gurame') || q.includes('salmon')) return 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?w=400&q=80';
+  if (q.includes('udang') || q.includes('cumi') || q.includes('kepiting') || q.includes('seafood')) return 'https://images.unsplash.com/photo-1565680018434-b513d5e5fd47?w=400&q=80';
+  if (q.includes('kacang') || q.includes('kedelai')) return 'https://images.unsplash.com/photo-1570135894165-274737d998f8?w=400&q=80';
+  if (q.includes('buah') || q.includes('mangga') || q.includes('jeruk') || q.includes('melon') || q.includes('semangka') || q.includes('pepaya') || q.includes('fruit')) return 'https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=400&q=80';
+  if (q.includes('pisang') || q.includes('banana')) return 'https://images.unsplash.com/photo-1603833665858-e61d17a86224?w=400&q=80';
+  if (q.includes('apel') || q.includes('apple')) return 'https://images.unsplash.com/photo-1560806887-1e4cd0b6f447?w=400&q=80';
+  if (q.includes('roti') || q.includes('kue') || q.includes('biskuit') || q.includes('cake') || q.includes('bread')) return 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80';
+  if (q.includes('susu') || q.includes('milk') || q.includes('keju') || q.includes('cheese') || q.includes('yogurt')) return 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400&q=80';
+  if (q.includes('mie') || q.includes('bihun') || q.includes('pasta') || q.includes('spaghetti')) return 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=400&q=80';
+  if (q.includes('minyak') || q.includes('lemak') || q.includes('margarin') || q.includes('mentega') || q.includes('oil') || q.includes('butter')) return 'https://images.unsplash.com/photo-1474926256244-672195f19024?w=400&q=80';
+  if (q.includes('kopi') || q.includes('teh') || q.includes('minuman') || q.includes('air') || q.includes('es ') || q.includes('sirup')) return 'https://images.unsplash.com/photo-1544149021-d1a2959828e1?w=400&q=80';
+  if (q.includes('sambal') || q.includes('cabai') || q.includes('pedas') || q.includes('saus')) return 'https://images.unsplash.com/photo-1596662951482-0c4ba74a6df6?w=400&q=80';
+  
+  let sum = 0;
+  for (let i = 0; i < name.length; i++) sum += name.charCodeAt(i);
+  return GENERIC_IMAGES[sum % GENERIC_IMAGES.length];
 };

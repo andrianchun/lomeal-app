@@ -188,20 +188,34 @@ Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang d
 // Foto lama yang masih base64 langsung lewat apa adanya.
 export const toDataUrl = async (src) => {
   if (src.startsWith('data:')) return src;
-  const blob = await (await fetch(src)).blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
+  
+  try {
+    const blob = await (await fetch(src)).blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (err) {
+    console.log('Fetching image directly failed, falling back to CORS proxy...', err);
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(src)}`;
+    const blob = await (await fetch(proxyUrl)).blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
 };
 
 // maxSide/maxChars dipisah karena dua kebutuhannya beda jauh:
 //  - buat DIKIRIM KE AI: 800px, kecil-kecil aja, Gemini vision udah pinter (default).
 //  - buat DISIMPAN sebagai kenang-kenangan: PHOTO_KEEPSAKE di bawah — gede & tajam,
 //    toh masuknya ke Storage, bukan ke dokumen Firestore yang dibatasi 1 MiB.
-export const PHOTO_KEEPSAKE = { maxSide: 1600, maxChars: 2_000_000, quality: 0.85 };
+export const PHOTO_KEEPSAKE = { maxSide: 1200, maxChars: 680000, quality: 0.8 };
+export const PHOTO_AI = { maxSide: 1600, maxChars: 2500000, quality: 0.9 };
 
 export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {
   const img = new Image();
@@ -231,5 +245,5 @@ export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality 
   img.src = url;
 });
 
-export const compressImageTo100KB = (file) => compressImage(file);
+export const compressImageForAI = (file) => compressImage(file, PHOTO_AI);
 

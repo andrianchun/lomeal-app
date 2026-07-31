@@ -47,7 +47,7 @@ export default function useDialog() {
       onClick={() => state.mode === 'alert' && close()}
     >
       <div
-        className="w-full max-w-xs rounded-3xl p-5 bg-lime-300 text-black shadow-2xl animate-in zoom-in-95 duration-200"
+        className="w-full max-w-xs rounded-3xl p-5 bg-gradient-to-br from-green-500 to-green-600 text-white shadow-2xl animate-in zoom-in-95 duration-200"
         onClick={e => e.stopPropagation()}
       >
         {state.title && (
@@ -58,7 +58,7 @@ export default function useDialog() {
         {state.mode === 'alert' && (
           <button
             onClick={() => close()}
-            className="w-full py-2.5 rounded-2xl font-black text-sm bg-black text-lime-300 active:scale-95 transition-all"
+            className="w-full py-2.5 rounded-2xl font-black text-sm bg-white text-green-700 active:scale-95 transition-all shadow-sm"
           >
             OK
           </button>
@@ -68,14 +68,14 @@ export default function useDialog() {
           <div className="flex gap-2">
             <button
               onClick={() => close(false)}
-              className="flex-1 py-2.5 rounded-2xl font-black text-sm bg-black/10 text-black active:scale-95 transition-all"
+              className="flex-1 py-2.5 rounded-2xl font-black text-sm bg-black/15 text-white active:scale-95 transition-all"
             >
               {state.cancelText}
             </button>
             <button
               onClick={() => close(true)}
-              className={`flex-1 py-2.5 rounded-2xl font-black text-sm text-white active:scale-95 transition-all ${
-                state.danger ? 'bg-rose-600' : 'bg-black'
+              className={`flex-1 py-2.5 rounded-2xl font-black text-sm active:scale-95 transition-all shadow-sm ${
+                state.danger ? 'bg-red-500 text-white' : 'bg-white text-green-700'
               }`}
             >
               {state.confirmText}
