@@ -7,7 +7,7 @@ import TargetSettingsModal from '../components/TargetSettingsModal';
 import BiometricSettingsModal from '../components/BiometricSettingsModal';
 import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS } from '../data/nutrition';
 import { STATUS, statusFor, MACRO_COLORS } from '../theme';
-import { getLocalYMD } from '../data/constants';
+import { MEAL_SESSIONS, getLocalYMD, getMonthKey } from '../data/constants';
 import { pushActivityOverrideToLogym } from '../utils/biometricSync';
 import SwipeInput from '../components/SwipeInput';
 
@@ -15,7 +15,25 @@ import SwipeInput from '../components/SwipeInput';
  * TAB 1: DASHBOARD — Pusat Pantau Imersif (Fase 5 blueprint).
  * Murni panel pemantauan; tidak ada aksi input/edit di sini.
  */
-const DashboardTab = ({ t, theme, user, logymUser, profile, daysMap, lyfitToday, lyfitYearData, saveProfilePatch, todayYmd = getLocalYMD() }) => {
+const DashboardTab = ({ 
+  t, theme, user, logymUser, profile, daysMap, lyfitToday, lyfitYearData, saveProfilePatch, todayYmd = getLocalYMD(),
+  showAlert, showToast, ensureMonth
+}) => {
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [showProfileInfo, setShowProfileInfo] = useState(false);
+
+  // === Pastikan data 7 hari terakhir dimuat ===
+  useEffect(() => {
+    if (!ensureMonth) return;
+    const monthsToLoad = new Set();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      monthsToLoad.add(getMonthKey(getLocalYMD(d)));
+    }
+    monthsToLoad.forEach(m => ensureMonth(m));
+  }, [ensureMonth]);
+
   const targets = profile?.targets || {};
   const dietProfile = profile?.dietProfile;
 

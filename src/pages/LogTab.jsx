@@ -4,7 +4,7 @@ import RingChart from '../components/RingChart';
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
-import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS } from '../data/constants';
+import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS, MONTH_NAMES_ID, getMonthKey } from '../data/constants';
 import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS } from '../data/nutrition';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
@@ -48,10 +48,18 @@ const COLORS = [
  * makro) → Smart Input Bar (chat NL / kamera / voice / manual presisi).
  */
 const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, domusItems, domusLocations, aiKey, showAlert, showConfirm, showToast, waterGoal,
-  chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession }) => {
+  chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession, ensureMonth }) => {
 
   const todayYmd = getLocalYMD();
   const [selectedYmd, setSelectedYmd] = useState(todayYmd);
+
+  // === Pastikan bulan dari tanggal yang dipilih dimuat ===
+  useEffect(() => {
+    if (ensureMonth && selectedYmd) {
+      ensureMonth(getMonthKey(selectedYmd));
+    }
+  }, [selectedYmd, ensureMonth]);
+
   const [pickerOpen, setPickerOpen] = useState(false); // FoodPicker terbuka? (nambah ke batch aiResult yang sama)
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
   const [copySourceSession, setCopySourceSession] = useState(null);
