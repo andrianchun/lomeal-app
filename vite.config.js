@@ -45,6 +45,10 @@ export default defineConfig({
         // user harus hapus data/cache dulu. NetworkFirst: online selalu HTML terbaru,
         // offline jatuh ke salinan terakhir.
         navigateFallback: null,
+        // index.html HARUS keluar dari precache. Workbox memetakan '/' ke entri precache
+        // 'index.html' (directoryIndex), jadi selama dia masih di precache, rute NetworkFirst
+        // di bawah tidak pernah kebagian menangani navigasi dan HTML lama tetap tersaji.
+        globIgnores: ['index.html'],
         runtimeCaching: [
           {
             urlPattern: ({ request }) => request.mode === 'navigate',

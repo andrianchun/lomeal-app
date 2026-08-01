@@ -18,11 +18,16 @@ const BUMPS = ['patch', 'minor', 'major'];
 const args = process.argv.slice(2);
 const forced = args.includes('force');
 const bump = args.find(a => BUMPS.includes(a)) || 'patch';
-const notes = args.find(a => a !== 'force' && !BUMPS.includes(a));
-
-const unknown = args.filter(a => a !== 'force' && !BUMPS.includes(a) && a !== notes);
-if (unknown.length) {
-  console.error(`Argumen tidak dikenal: ${unknown.join(', ')}. Pakai: [patch|minor|major] [force] ["catatan rilis"]`);
+// Sisa argumen = catatan rilis. Ditulis apa adanya ke version.json dan tampil di
+// kartu/modal update, jadi kalimat lengkap — bukan satu kata asal.
+const rest = args.filter(a => a !== 'force' && !BUMPS.includes(a));
+if (rest.length > 1) {
+  console.error(`Catatan rilis harus satu argumen (pakai tanda kutip): ${rest.join(' | ')}`);
+  process.exit(1);
+}
+const notes = rest[0];
+if (notes && !/\s/.test(notes)) {
+  console.error(`Catatan rilis "${notes}" cuma satu kata — kelihatan seperti salah ketik.\nPakai: npm run release [patch|minor|major] [force] ["kalimat catatan rilis"]`);
   process.exit(1);
 }
 
