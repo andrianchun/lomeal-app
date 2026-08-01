@@ -45,7 +45,6 @@ import NotificationPanel from './components/NotificationPanel';
 import PwaUpdater from './components/PwaUpdater';
 import UpdaterAlert from './components/UpdaterAlert';
 import { createCommunityPost } from './utils/communityApi';
-import AdminDashboard from './pages/AdminDashboard';
 
 const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const settings = profile?.settings || {};
@@ -623,7 +622,6 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
         <Route path="/history" element={<HistoryTab {...commonProps} />} />
         <Route path="/program" element={<ProgramTab {...commonProps} />} />
         <Route path="/fooddb" element={<FoodDbTab {...commonProps} />} />
-        <Route path="/admin" element={<AdminDashboard user={user} t={t} />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
 

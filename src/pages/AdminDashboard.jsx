@@ -1,21 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+
 import { Check, X, Edit, AlertTriangle, ArrowLeft, DownloadCloud } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, getDocs, deleteDoc, doc, setDoc } from 'firebase/firestore';
 
-export default function AdminDashboard({ user, t }) {
-  const navigate = useNavigate();
+export default function AdminDashboard({ user, t, embedded }) {
   const [pendingFoods, setPendingFoods] = useState([]);
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Check email
-  useEffect(() => {
-    if (user?.email !== 'untheryan@gmail.com') {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [user, navigate]);
+
 
   const loadData = async () => {
     setLoading(true);
@@ -93,15 +88,17 @@ export default function AdminDashboard({ user, t }) {
   if (user?.email !== 'untheryan@gmail.com') return null;
 
   return (
-    <div className={`min-h-screen ${t.bgApp} ${t.textMain} pb-24`}>
-      <div className={`${t.bgCard} p-4 flex items-center sticky top-0 z-10 border-b ${t.border}`}>
-        <button onClick={() => navigate(-1)} className={`p-2 rounded-full ${t.btnBg} mr-3`}>
-          <ArrowLeft size={20} />
-        </button>
-        <h1 className="text-lg font-bold">Admin Dashboard</h1>
-      </div>
+    <div className={embedded ? 'space-y-4' : `min-h-screen ${t.bgApp} ${t.textMain} pb-24`}>
+      {!embedded && (
+        <div className={`${t.bgCard} p-4 flex items-center sticky top-0 z-10 border-b ${t.border}`}>
+          <button onClick={() => window.history.back()} className={`p-2 rounded-full ${t.btnBg} mr-3`}>
+            <ArrowLeft size={20} />
+          </button>
+          <h1 className="text-lg font-bold">Admin Panel</h1>
+        </div>
+      )}
 
-      <div className="p-4 space-y-8">
+      <div className={embedded ? '' : 'p-4' + ' space-y-8'}>
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
             <DownloadCloud className="text-blue-500" /> OTA Update Control

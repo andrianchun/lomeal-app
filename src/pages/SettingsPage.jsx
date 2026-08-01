@@ -8,6 +8,7 @@ import {
   MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw, DownloadCloud
 } from 'lucide-react';
 import { getLang } from '../i18n';
+import AdminDashboard from './AdminDashboard';
 
 const FAQ_ITEMS_ID = [
   { q: 'Bagaimana cara sinkronisasi data antar HP dan laptop?', a: 'Cukup login pakai akun Google yang sama di semua perangkat. Data otomatis tersinkron lewat cloud dalam hitungan detik.' },
@@ -120,7 +121,8 @@ const SettingsPage = ({
 
   // Swipe kiri/kanan pindah tab Preferensi/FAQ/Lanjutan — pola sama kayak swipe lokal
   // ProfileModal Logym (modal ini udah .no-swipe jadi gak bentrok sama swipe global App.jsx).
-  const SETTINGS_TABS = ['preferensi', 'faq', 'lanjutan'];
+  const isAdmin = lomealUser?.email === 'untheryan@gmail.com';
+  const SETTINGS_TABS = ['preferensi', 'faq', 'lanjutan', ...(isAdmin ? ['admin'] : [])];
   const swipeRef = useRef({ x: 0, y: 0 });
   const handleSwipeStart = (e) => {
     if (e.target.closest('input[type="range"]')) return;
@@ -153,7 +155,7 @@ const SettingsPage = ({
       </div>
 
       <div className={`flex border-b ${t.border} px-2 shrink-0 overflow-x-auto hide-scrollbar`}>
-        {[['preferensi', lang.tabPreferensi], ['faq', lang.tabFaq], ['lanjutan', lang.tabLanjutan]].map(([id, label]) => (
+        {[['preferensi', lang.tabPreferensi], ['faq', lang.tabFaq], ['lanjutan', lang.tabLanjutan], ...(isAdmin ? [['admin', 'Admin']] : [])].map(([id, label]) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -229,6 +231,12 @@ const SettingsPage = ({
                 ))}
               </div>
             </Section>
+          </div>
+        )}
+
+        {activeTab === 'admin' && isAdmin && (
+          <div className="animate-in fade-in duration-300">
+            <AdminDashboard user={lomealUser} t={t} embedded={true} />
           </div>
         )}
 
