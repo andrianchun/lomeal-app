@@ -1,5 +1,8 @@
 # Lomeal — catatan untuk agent / IDE
 
+> Mau memakai sistem OTA ini di proyek lain (logym, darka, domus, tokoto)?
+> Panduan portnya ada di [OTA-TEMPLATE.md](OTA-TEMPLATE.md).
+
 ## Rilis & versi
 
 `package.json` adalah **satu-satunya** sumber versi. Jangan pernah mengetik nomor versi
