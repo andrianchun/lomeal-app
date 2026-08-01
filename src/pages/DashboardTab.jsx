@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Flame, Activity, AlertTriangle, Pencil, Check, X, Settings, ChevronUp, ChevronDown, Scale } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tooltip, Cell } from 'recharts';
 import RingChart from '../components/RingChart';
