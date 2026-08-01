@@ -210,12 +210,14 @@ export const toDataUrl = async (src) => {
   }
 };
 
-// maxSide/maxChars dipisah karena dua kebutuhannya beda jauh:
-//  - buat DIKIRIM KE AI: 800px, kecil-kecil aja, Gemini vision udah pinter (default).
-//  - buat DISIMPAN sebagai kenang-kenangan: PHOTO_KEEPSAKE di bawah — gede & tajam,
-//    toh masuknya ke Storage, bukan ke dokumen Firestore yang dibatasi 1 MiB.
+// Tiga kebutuhan, tiga ukuran:
+//  - PHOTO_AI      : dikirim ke Gemini, makin tajam makin akurat tebakannya.
+//  - PHOTO_KEEPSAKE: yang diarsipkan di Storage sebagai kenang-kenangan.
+//  - PHOTO_THUMB   : yang dipajang di kartu sesi & strip. Tanpa ini tiap kartu mengunduh
+//                    berkas arsip penuh — 5 foto sehari ≈ 2MB kuota data tiap hari dibuka.
 export const PHOTO_KEEPSAKE = { maxSide: 1200, maxChars: 680000, quality: 0.8 };
 export const PHOTO_AI = { maxSide: 1600, maxChars: 2500000, quality: 0.9 };
+export const PHOTO_THUMB = { maxSide: 400, maxChars: 120000, quality: 0.7 };
 
 export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {
   const img = new Image();

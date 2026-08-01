@@ -8,7 +8,7 @@ import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT
 import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS } from '../data/nutrition';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
-import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, toDataUrl, PHOTO_KEEPSAKE } from '../utils/aiFood';
+import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, toDataUrl, PHOTO_KEEPSAKE, PHOTO_THUMB } from '../utils/aiFood';
 import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto } from '../utils/foodLog';
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
@@ -132,6 +132,25 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     await saveDayPhotos(user.uid, selectedYmd, next);
   };
 
+  // Sekali unggah menghasilkan DUA berkas: arsip (dipakai saat foto dibuka/diedit/diunduh)
+  // dan thumbnail ~30KB (dipakai kartu sesi & strip). Tanpa thumb, tiap kartu menarik berkas
+  // arsip penuh dan sehari dengan 5 foto habis ~2MB kuota tiap dibuka.
+  const uploadPhotoPair = async (sessionId, source) => {
+    const blob = typeof source === 'string' ? await (await fetch(source)).blob() : source;
+    const [full, thumb] = await Promise.all([
+      compressImage(blob, PHOTO_KEEPSAKE),
+      compressImage(blob, PHOTO_THUMB),
+    ]);
+    const [url, thumbUrl] = await Promise.all([
+      uploadMealPhoto(user.uid, selectedYmd, sessionId, full.dataUrl),
+      uploadMealPhoto(user.uid, selectedYmd, `${sessionId}_thumb`, thumb.dataUrl),
+    ]);
+    return { url, thumbUrl };
+  };
+
+  // Berkas yang sudah tidak dirujuk lagi dibuang biar tidak menumpuk jadi tagihan Storage.
+  const dropFiles = (...urls) => [...new Set(urls.filter(Boolean))].forEach(deleteImageFromFirebase);
+
   // Foto langsung kelihatan detik itu juga lewat object URL lokal — kompresi (~1 detik untuk
   // foto belasan MP) dan upload jalan di belakang. Preview disimpan terpisah dari daftar
   // tersimpan supaya gak ketiban snapshot Firestore yang datang di tengah proses.
@@ -142,9 +161,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     setPendingPhotos((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: tempId, url: localUrl, pending: true }] }));
     await new Promise(r => setTimeout(r, 50)); // Jeda 50ms agar UI merender preview SEBELUM thread diblokir kompresi!
     try {
-      const dataUrl = isFile ? (await compressImage(fileOrDataUrl, PHOTO_KEEPSAKE)).dataUrl : fileOrDataUrl;
-      const url = await uploadMealPhoto(user.uid, selectedYmd, sessionId, dataUrl);
-      await writePhotos(sessionId, [...storedPhotos(sessionId), { id: `p_${Date.now()}`, url, originalUrl: url }]);
+      const { url, thumbUrl } = await uploadPhotoPair(sessionId, fileOrDataUrl);
+      await writePhotos(sessionId, [
+        ...storedPhotos(sessionId),
+        { id: `p_${Date.now()}`, url, originalUrl: url, thumbUrl, originalThumbUrl: thumbUrl },
+      ]);
     } catch (e) {
       showAlert(`Gagal menyimpan foto: ${e.message}`);
     } finally {
@@ -187,17 +208,22 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
   const removePhoto = async (sessionId, photo) => {
     if (!(await showConfirm('Hapus foto ini? Foto yang dihapus tidak bisa dikembalikan.', { title: 'Hapus Foto', confirmText: 'Hapus', danger: true }))) return;
-    await writePhotos(sessionId, photosOf(sessionId).filter((p) => p.id !== photo.id));
-    deleteImageFromFirebase(photo.url); // file di Storage ikut dibuang biar gak numpuk jadi tagihan
-    if (photo.originalUrl !== photo.url) deleteImageFromFirebase(photo.originalUrl);
+    await writePhotos(sessionId, storedPhotos(sessionId).filter((p) => p.id !== photo.id));
+    dropFiles(photo.url, photo.originalUrl, photo.thumbUrl, photo.originalThumbUrl);
   };
 
-  // dataUrl null = balik ke foto asli.
+  // dataUrl null = balik ke foto asli. Thumbnail ikut diperbarui, kalau tidak strip masih
+  // memajang versi sebelum di-crop. Versi asli & thumb aslinya sengaja disimpan terus supaya
+  // "Foto Asli" tidak perlu mengunduh ulang apa pun.
   const replacePhoto = async (sessionId, photo, dataUrl) => {
     try {
-      const url = dataUrl ? await uploadMealPhoto(user.uid, selectedYmd, sessionId, dataUrl) : photo.originalUrl;
-      await writePhotos(sessionId, photosOf(sessionId).map((p) => (p.id === photo.id ? { ...p, url } : p)));
-      if (photo.url !== photo.originalUrl) deleteImageFromFirebase(photo.url); // versi crop yang lama
+      const next = dataUrl
+        ? await uploadPhotoPair(sessionId, dataUrl)
+        : { url: photo.originalUrl, thumbUrl: photo.originalThumbUrl || photo.originalUrl };
+      await writePhotos(sessionId, storedPhotos(sessionId).map((p) => (p.id === photo.id ? { ...p, ...next } : p)));
+      // Buang hasil crop yang barusan digantikan — tapi jangan sentuh berkas aslinya.
+      if (photo.url !== photo.originalUrl) dropFiles(photo.url);
+      if (photo.thumbUrl && photo.thumbUrl !== photo.originalThumbUrl) dropFiles(photo.thumbUrl);
     } catch (e) {
       showAlert(`Gagal menyimpan foto: ${e.message}`);
     }
@@ -800,7 +826,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     });
     const sTotals = eatenEntries.reduce((acc, e) => addNutrition(acc, e.nutrition), { ...EMPTY_NUTRITION });
     const sessionPhotos = photosOf(session.id);
-    const photo = sessionPhotos[0]?.url;
+    // Kartu cuma 78px — pakai thumbnail. Foto lama tanpa thumb jatuh balik ke berkas penuh.
+    const photo = sessionPhotos[0] && (sessionPhotos[0].thumbUrl || sessionPhotos[0].url);
     const hasFood = entries.length > 0;
     const allPlanned = hasFood && eatenEntries.length === 0;
     const segments = eatenEntries.length > 0 ? [
@@ -1181,7 +1208,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                <div className="flex h-full w-full overflow-x-auto snap-x snap-mandatory hide-scrollbar">
                  {photosOf(detailSession).map((p) => (
                    <div key={p.id} className="relative h-full w-full shrink-0 snap-center">
-                     <img src={p.url} alt="Session" className="absolute inset-0 w-full h-full object-cover" />
+                     <img src={p.thumbUrl || p.url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80" />
                      {p.pending ? (
                        <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 text-white caption font-bold backdrop-blur-md">
@@ -1456,10 +1483,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                 const meals = { ...(day.meals || {}) };
                 delete meals[deleteConfirm];
                 const hidden = [...(day.hiddenSessions || []), deleteConfirm];
-                photosOf(deleteConfirm).forEach((p) => {
-                  deleteImageFromFirebase(p.url);
-                  if (p.originalUrl !== p.url) deleteImageFromFirebase(p.originalUrl);
-                });
+                storedPhotos(deleteConfirm).forEach((p) => dropFiles(p.url, p.originalUrl, p.thumbUrl, p.originalThumbUrl));
                 writePhotos(deleteConfirm, []);
                 persistDay({ ...day, meals, hiddenSessions: hidden });
                 setDeleteConfirm(null);

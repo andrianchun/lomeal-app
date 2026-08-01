@@ -32,11 +32,12 @@ export default function ImageCropperModal({
   const [completedCrop, setCompletedCrop] = useState(null);
   const [rotate, setRotate] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const imgRef = useRef(null);
 
   // Komponen ini gak pernah di-unmount (cuma return null), jadi state crop foto sebelumnya
   // bakal nempel di foto berikutnya kalau gak direset tiap ganti gambar.
-  useEffect(() => { setCrop(undefined); setCompletedCrop(null); setRotate(0); }, [imageSrc]);
+  useEffect(() => { setCrop(undefined); setCompletedCrop(null); setRotate(0); setLoadError(false); }, [imageSrc]);
 
   if (!open || !imageSrc) return null;
 
@@ -109,6 +110,13 @@ export default function ImageCropperModal({
       </div>
       
       <div className="flex-1 flex items-center justify-center p-4 overflow-hidden">
+        {loadError && (
+          <div className="absolute inset-x-8 top-1/2 -translate-y-1/2 rounded-3xl bg-lime-300 text-black p-5 text-center">
+            <p className="text-sm font-bold leading-relaxed break-words">
+              Foto tidak bisa dimuat untuk diedit. Coba lagi saat koneksi stabil — kalau tetap gagal, foto ini perlu diunggah ulang.
+            </p>
+          </div>
+        )}
         <ReactCrop
           crop={crop}
           onChange={(_, percentCrop) => setCrop(percentCrop)}
@@ -118,13 +126,18 @@ export default function ImageCropperModal({
         >
           <img
             ref={imgRef}
-            alt="Crop me"
+            alt=""
             src={imageSrc}
-            // Foto sekarang diambil dari URL Firebase Storage (beda origin). Tanpa ini canvas-nya
-            // ke-taint dan toDataURL() lempar SecurityError — persis gejala "tap Simpan gak ngapa-ngapain".
+            // Foto diambil dari URL Firebase Storage (beda origin). Tanpa ini canvas-nya ke-taint
+            // dan toDataURL() lempar SecurityError. KONSEKUENSINYA: bucket WAJIB punya konfigurasi
+            // CORS, kalau tidak gambarnya gagal dimuat sama sekali (lihat onError di bawah).
             crossOrigin="anonymous"
             style={{ transform: `rotate(${rotate}deg)`, maxHeight: '70vh', objectFit: 'contain' }}
             onLoad={onImageLoad}
+            onError={() => {
+              console.error('[Cropper] Gagal memuat foto lintas-origin. Bucket Storage kemungkinan belum punya konfigurasi CORS untuk origin ini.');
+              setLoadError(true);
+            }}
           />
         </ReactCrop>
       </div>
