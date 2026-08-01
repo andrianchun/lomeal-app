@@ -12,9 +12,11 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // 'prompt' supaya user lihat kartu "Pembaruan Tersedia" (src/components/PwaUpdater.jsx)
-      // dan tidak ke-reload paksa di tengah ngetik — simetris dengan UpdaterAlert di APK.
+      // 'prompt': service worker tidak pernah reload halaman sendiri. Yang memutuskan kapan
+      // update dipasang adalah UpdaterAlert, dari hasil cek /ota/version.json — sama seperti APK.
       registerType: 'prompt',
+      // 'auto' meng-inject registerSW.js ke index.html, jadi SW terdaftar sejak halaman dibuka
+      // (dulu registrasinya nebeng komponen di dalam area login, jadi baru jalan setelah login).
       injectRegister: 'auto',
       manifest: {
         name: 'Lomeal Nutrition Tracker',
@@ -38,6 +40,22 @@ export default defineConfig({
         // tapi dinaikkan sedikit untuk jaga-jaga total payload gabungan).
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
+        // Navigasi TIDAK boleh dilayani dari precache. Kalau index.html lama disajikan SW,
+        // reload sesudah update tetap memuat aplikasi versi lama — inilah yang dulu bikin
+        // user harus hapus data/cache dulu. NetworkFirst: online selalu HTML terbaru,
+        // offline jatuh ke salinan terakhir.
+        navigateFallback: null,
+        runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'lomeal-html',
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 1 },
+            },
+          },
+        ],
       },
     }),
   ],

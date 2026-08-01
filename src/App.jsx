@@ -40,7 +40,6 @@ import FoodDbTab from './pages/FoodDbTab';
 import SocialHub from './pages/SocialHub';
 import SettingsPage from './pages/SettingsPage';
 import NotificationPanel from './components/NotificationPanel';
-import PwaUpdater from './components/PwaUpdater';
 import UpdaterAlert from './components/UpdaterAlert';
 import { createCommunityPost } from './utils/communityApi';
 
@@ -61,24 +60,31 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [currentVer, setCurrentVer] = useState(__APP_VERSION__);
 
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
+    const isNative = Capacitor.isNativePlatform();
+    if (isNative) CapacitorUpdater.notifyAppReady();
 
-    CapacitorUpdater.notifyAppReady();
+    // SATU jalur cek untuk PWA dan APK: sama-sama baca /ota/version.json.
+    // Di web dulu deteksinya nebeng service worker, jadi tidak pernah tahu nomor versi
+    // dan tidak bisa dipaksa — sekarang dua-duanya pakai sumber yang sama.
+    // Path relatif di web (dev tidak punya /ota -> 404, aman); native butuh URL absolut.
+    const otaUrl = isNative ? 'https://lomeal.web.app/ota/version.json' : '/ota/version.json';
 
-    // Check OTA update via version.json on Hosting to make it fully automatic (no Firestore push needed)
     const checkOta = async () => {
       try {
         // Versi yang JALAN ditanyakan ke plugin, bukan ke localStorage: kalau Capgo rollback
         // ke bundle builtin (notifyAppReady timeout / crash), localStorage bakal bohong dan
         // app nyangkut di kode lama sambil merasa sudah update.
+        // Di web, versi yang jalan = versi yang ter-bundle di JS yang sedang dieksekusi.
         let installedVer = __APP_VERSION__;
-        try {
-          const { bundle } = await CapacitorUpdater.current();
-          if (bundle?.version && bundle.version !== 'builtin') installedVer = bundle.version;
-        } catch { /* pakai versi bawaan build */ }
+        if (isNative) {
+          try {
+            const { bundle } = await CapacitorUpdater.current();
+            if (bundle?.version && bundle.version !== 'builtin') installedVer = bundle.version;
+          } catch { /* pakai versi bawaan build */ }
+        }
         setCurrentVer(installedVer);
 
-        const res = await fetch('https://lomeal.web.app/ota/version.json?t=' + Date.now());
+        const res = await fetch(`${otaUrl}?t=${Date.now()}`, { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
 
@@ -113,53 +119,64 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     };
 
     checkOta();
-    
-    // Check every time app resumes from background
+
+    // Tiga pemicu supaya update muncul sendiri tanpa user refresh/hapus cache:
+    // saat dibuka, saat kembali ke foreground, dan tiap 15 menit selama app terbuka
+    // (yang terakhir bikin update darurat nyusul user yang lagi pakai app berjam-jam).
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') checkOta();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    const poll = setInterval(checkOta, 15 * 60 * 1000);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(poll);
     };
   }, []);
 
   const [downloadProgress, setDownloadProgress] = useState(null);
 
   useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
     let dlListener;
-    if (CapacitorUpdater) {
-      CapacitorUpdater.addListener('download', (info) => {
-        setDownloadProgress(Math.round(info.percent));
-      }).then(l => dlListener = l);
-    }
+    CapacitorUpdater.addListener('download', (info) => {
+      setDownloadProgress(Math.round(info.percent));
+    }).then(l => dlListener = l);
     return () => {
       if (dlListener) dlListener.remove();
     };
   }, []);
 
   const handleUpdate = async () => {
-    try {
+    localStorage.removeItem('lomeal_dismissed_ota');
+
+    // Web: index.html di-serve NetworkFirst (lihat vite.config.js), jadi reload biasa
+    // sudah pasti dapat HTML + chunk baru. Tidak ada yang perlu diunduh manual.
+    if (!Capacitor.isNativePlatform()) {
       setDownloadProgress(0);
-      if (!otaState.force) {
-        setOtaState(prev => ({ ...prev, open: false }));
-        // don't toast if showing progress in settings, but if dashboard, maybe keep it?
-      }
+      const reg = await navigator.serviceWorker?.getRegistration();
+      // Suruh SW lama minggir dulu kalau sudah ada penggantinya yang nunggu,
+      // supaya reload tidak disajikan aset lama olehnya.
+      if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      window.location.reload();
+      return;
+    }
+
+    try {
+      // Kartu/modal sengaja TIDAK ditutup: progress bar-nya tampil di situ, karena
+      // bundle-nya puluhan MB dan tanpa indikator user ngira tombolnya macet.
+      setDownloadProgress(0);
       const bundle = await CapacitorUpdater.download({
         url: otaState.url,
         version: otaState.version,
       });
-      // Bersihkan SEBELUM set() karena set() akan destroy JS context.
-      // Versi terpasang tidak perlu dicatat manual — dibaca dari CapacitorUpdater.current().
-      localStorage.removeItem('lomeal_dismissed_ota');
-      await CapacitorUpdater.set(bundle);
-      setDownloadProgress(null);
+      await CapacitorUpdater.set(bundle); // destroy JS context — baris setelah ini tidak jalan
     } catch (err) {
       console.error('OTA Update failed:', err);
       setDownloadProgress(null);
       if (otaState.force) {
-        alert('Gagal mengunduh pembaruan. Silakan periksa koneksi internet Anda.');
+        showAlert('Gagal mengunduh pembaruan. Periksa koneksi internetmu lalu coba lagi.', { title: 'Update gagal' });
       } else {
         showToast('Gagal mengunduh pembaruan.', 'error');
       }
@@ -645,12 +662,14 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       <BottomNav t={t} activeTab={path} setActiveTab={setActiveTab} />
 
       {/* Overlays / Modals */}
-      {!Capacitor.isNativePlatform() && <PwaUpdater t={t} isDark={theme === 'dark'} />}
-      <UpdaterAlert 
-        open={otaState.open} 
-        force={otaState.force} 
+      <UpdaterAlert
+        open={otaState.open}
+        force={otaState.force}
         releaseNotes={otaState.notes}
         theme={t}
+        currentVersion={currentVer}
+        newVersion={otaState.version}
+        progress={downloadProgress}
         onUpdate={handleUpdate}
         onClose={() => {
           localStorage.setItem('lomeal_dismissed_ota', otaState.version);

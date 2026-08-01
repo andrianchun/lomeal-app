@@ -50,11 +50,12 @@ output.on('close', function() {
   kept.slice(0, KEEP).forEach(f => fs.copyFileSync(path.join(archivePath, f), path.join(otaPath, f)));
 
   // version.json ditulis SETELAH zip selesai, supaya manifest tidak pernah menunjuk zip yang gagal dibuat.
+  // OTA_FORCE/OTA_NOTES di-set oleh scripts/release.js (`npm run release force "catatan"`).
   fs.writeFileSync(path.join(otaPath, 'version.json'), JSON.stringify({
     ota_version: version,
     ota_url: `https://lomeal.web.app/ota/${zipName}`,
-    is_forced: false,
-    release_notes: `Pembaruan v${version}`
+    is_forced: process.env.OTA_FORCE === '1',
+    release_notes: process.env.OTA_NOTES || `Pembaruan v${version}`
   }, null, 2));
   console.log(`OTA siap (v${version}). Zip ter-deploy: ${kept.slice(0, KEEP).join(', ')}`);
 });
