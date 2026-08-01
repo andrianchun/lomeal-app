@@ -37,6 +37,19 @@ Pengaturan → Lanjutan.
 | PWA / browser | `location.reload()` — index.html di-serve NetworkFirst, jadi selalu dapat HTML + chunk terbaru | instan, tidak ada unduhan besar |
 | APK Android | Capgo mengunduh bundle `.zip` lalu `CapacitorUpdater.set()` | progress bar %, bundle ~48 MB |
 
+### Jembatan `update_0118.zip` — jangan dihapus
+
+Bundle **bawaan APK** yang terpasang sekarang adalah kode lama yang cuma membaca Firestore
+`lomeal_settings/ota_update`, dan dokumen itu menunjuk permanen ke `update_0118.zip`.
+Bundle itu aktif lagi setiap user menghapus data aplikasi atau install ulang APK.
+
+Karena itu `scripts/build-ota.js` selalu menerbitkan ulang `update_0118.zip` berisi build
+**terbaru**. Kalau file itu hilang, Firebase Hosting melayani `index.html` (kena rewrite SPA)
+dengan status 200, Capgo gagal meng-unzip, dan user dapat pesan "periksa koneksi internet"
+padahal koneksinya normal. Ini sudah pernah terjadi dua kali.
+
+Baru boleh dihapus setelah APK di-build ulang dan disebarkan dengan bundle bawaan versi baru.
+
 **Jangan pernah memasukkan `index.html` ke precache service worker.** Workbox memetakan `/` ke
 entri precache `index.html`, jadi kalau ikut ter-precache, reload sesudah update tetap menyajikan
 aplikasi versi lama — inilah yang dulu memaksa user hapus data/cache. Lihat `globIgnores` dan
