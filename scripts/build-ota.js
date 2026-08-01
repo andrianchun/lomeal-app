@@ -8,6 +8,11 @@ const __dirname = path.dirname(__filename);
 
 const distPath = path.resolve(__dirname, '../dist');
 const otaPath = path.resolve(__dirname, '../dist/ota');
+// vite build mengosongkan dist/ tiap rilis, jadi zip lama ikut hilang dan client yang masih
+// menunjuk URL lama dapat HTML (kena rewrite SPA) — bukan 404 — lalu gagal unzip.
+// Arsip di luar dist supaya selamat, dan beberapa versi terakhir ikut ter-deploy lagi.
+const archivePath = path.resolve(__dirname, '../.ota-archive');
+const KEEP = 3;
 
 // Versi selalu diambil dari package.json — JANGAN oper versi lewat argumen.
 // Bump versi dilakukan otomatis oleh scripts/release.js.
@@ -33,6 +38,17 @@ const archive = new ZipArchive({
 
 output.on('close', function() {
   console.log(archive.pointer() + ' total bytes');
+
+  // Simpan ke arsip, buang yang paling tua, lalu kembalikan sisanya ke dist/ota
+  // supaya ikut ter-deploy dan URL rilis sebelumnya tetap hidup.
+  fs.mkdirSync(archivePath, { recursive: true });
+  fs.copyFileSync(outputPath, path.join(archivePath, zipName));
+  const kept = fs.readdirSync(archivePath)
+    .filter(f => f.endsWith('.zip'))
+    .sort((a, b) => fs.statSync(path.join(archivePath, b)).mtimeMs - fs.statSync(path.join(archivePath, a)).mtimeMs);
+  kept.slice(KEEP).forEach(f => fs.rmSync(path.join(archivePath, f)));
+  kept.slice(0, KEEP).forEach(f => fs.copyFileSync(path.join(archivePath, f), path.join(otaPath, f)));
+
   // version.json ditulis SETELAH zip selesai, supaya manifest tidak pernah menunjuk zip yang gagal dibuat.
   fs.writeFileSync(path.join(otaPath, 'version.json'), JSON.stringify({
     ota_version: version,
@@ -40,7 +56,7 @@ output.on('close', function() {
     is_forced: false,
     release_notes: `Pembaruan v${version}`
   }, null, 2));
-  console.log(`OTA ${zipName} + version.json siap (v${version}).`);
+  console.log(`OTA siap (v${version}). Zip ter-deploy: ${kept.slice(0, KEEP).join(', ')}`);
 });
 
 archive.on('warning', function(err) {
