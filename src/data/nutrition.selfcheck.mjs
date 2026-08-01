@@ -1,7 +1,7 @@
 // Cek cepat inti perhitungan gizi. Jalanin: node src/data/nutrition.selfcheck.mjs
 // Tanpa framework — nutrition.js nol impor, jadi bisa jalan di node polos.
 import assert from 'node:assert/strict';
-import { EMPTY_NUTRITION, addNutrition, scaleNutrition, computeDayTotals, reconcileKcal } from './nutrition.js';
+import { EMPTY_NUTRITION, addNutrition, scaleNutrition, computeDayTotals, reconcileKcal, nutritionForAmount } from './nutrition.js';
 
 // ---------- addNutrition ----------
 const a = { ...EMPTY_NUTRITION, kcal: 100, protein: 10 };
@@ -46,11 +46,17 @@ assert.deepEqual(computeDayTotals({ meals: {} }), EMPTY_NUTRITION);
 
 assert.equal(computeDayTotals({ meals: { pagi: [entry(100), entry(50)] } }).kcal, 150);
 
-// Sesi yang disembunyikan gak boleh ikut kehitung.
+// hiddenSessions = slot sesi kosong yang disembunyikan, BUKAN "buang makanannya".
+// Sesi yang pernah dihapus lalu diisi lagi wajib ikut kehitung.
 assert.equal(
   computeDayTotals({ meals: { pagi: [entry(100)], siang: [entry(500)] }, hiddenSessions: ['siang'] }).kcal,
+  600,
+  'sesi hidden yang ADA ISINYA tetap dihitung',
+);
+assert.equal(
+  computeDayTotals({ meals: { pagi: [entry(100)], siang: [] }, hiddenSessions: ['siang'] }).kcal,
   100,
-  'sesi di hiddenSessions harus dilewati',
+  'sesi hidden yang kosong gak nambah apa-apa',
 );
 
 // isEaten:false = direncanakan tapi belum dimakan.
@@ -65,5 +71,17 @@ assert.equal(computeDayTotals({ meals: { pagi: [entry(100, { isMealPrep: true, i
 
 // defaultEaten=false dipakai buat tanggal masa depan (rencana, bukan riwayat).
 assert.equal(computeDayTotals({ meals: { pagi: [entry(100)] } }, false).kcal, 0);
+
+// ---------- penskalaan takaran saji (bug label OCR) ----------
+const per100 = { kcal: 500, protein: 10, vitB12: 0.1 };
+
+// Snack takaran 35 g dengan label 500 kkal/100 g = 175 kkal, BUKAN 500.
+assert.equal(nutritionForAmount({ nutrition: per100 }, 35).kcal, 175);
+// Susu 250 ml dengan 61 kkal/100 ml = 152,5 kkal, bukan 61.
+assert.equal(nutritionForAmount({ nutrition: { kcal: 61 } }, 250).kcal, 152.5);
+// Takaran 100 = apa adanya.
+assert.equal(nutritionForAmount({ nutrition: per100 }, 100).kcal, 500);
+// Nutrien skala mcg gak boleh amblas jadi 0 di porsi kecil (dulu dibulatkan ke 0,1).
+assert.equal(nutritionForAmount({ nutrition: per100 }, 30).vitB12, 0.03);
 
 console.log('nutrition OK');

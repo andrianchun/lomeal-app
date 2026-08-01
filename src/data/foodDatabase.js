@@ -188,12 +188,9 @@ export const getFoodById = (id, customFoods = []) =>
   customFoods.find(f => f.id === id) || FOOD_DB.find(f => f.id === id) || null;
 
 // Nutrisi aktual untuk `grams` gram/ml dari sebuah entri makanan (nilai DB per 100)
-export const nutritionForAmount = (food, grams) => {
-  const factor = (Number(grams) || 0) / 100;
-  const out = {};
-  Object.entries(food.nutrition).forEach(([k, v]) => { out[k] = Math.round(v * factor * 10) / 10; });
-  return out;
-};
+// Pindah ke data/nutrition.js (murni, bisa diuji node polos); diekspor ulang di sini supaya
+// semua pemanggil lama `from '../data/foodDatabase'` tetap jalan tanpa diubah.
+export { nutritionForAmount } from './nutrition';
 
 const GENERIC_IMAGES = [
   'https://images.unsplash.com/photo-1490818387583-1b5ba4597b6d?w=400&q=80',

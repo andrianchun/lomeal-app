@@ -28,6 +28,21 @@ const UNIT_OPTIONS = ['g', 'sdt', 'sdm', 'centong', 'gelas', 'cangkir', 'mangkok
 // tanpa ini, edit gramasi dihitung sebagai rasio ke NILAI SEBELUMNYA (bukan ke baseline
 // tetap): kalau user sempat ketik 0, rasio jadi 0/0 dan macet permanen di 0 kkal walau
 // gramasi diisi ulang. Edit gramasi berikutnya selalu dihitung ulang dari baseline ini.
+// Hasil OCR label datang sebagai nilai per 100 g/ml PLUS takaran saji terpisah. Keduanya
+// dulu dipasangkan mentah-mentah (gizi per-100 ditempel ke porsi saji), jadi snack takaran
+// 35 g dicatat sebesar angka per 100 g — meleset hampir 3x. Skala dulu ke takarannya.
+const labelToItem = (res) => {
+  const grams = Number(res.servingGrams) > 0 ? Number(res.servingGrams) : 100;
+  const per100 = { ...EMPTY_NUTRITION, ...res.per100 };
+  return {
+    name: res.name || 'Produk Kemasan',
+    grams,
+    unit: 'g',
+    nutrition: nutritionForAmount({ nutrition: per100 }, grams),
+    lowConfidence: res.lowConfidence,
+  };
+};
+
 const withBase = (foods) => (foods || []).map(f => ({
   ...f,
   baseGrams: f.grams > 0 ? f.grams : 1,
@@ -520,7 +535,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       
       let items = [];
       if (res.type === 'label') {
-         items = [{ name: res.name || 'Produk Kemasan', grams: res.servingGrams || 100, unit: 'g', nutrition: { ...EMPTY_NUTRITION, ...res.per100 } }];
+         items = [labelToItem(res)];
       } else {
          items = res.foods || [];
       }
@@ -588,12 +603,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       
       let items = [];
       if (res.type === 'label') {
-         items = [{
-            name: res.name || 'Produk Kemasan',
-            grams: res.servingGrams || 100,
-            unit: 'g',
-            nutrition: { ...EMPTY_NUTRITION, ...res.per100 },
-         }];
+         items = [labelToItem(res)];
       } else {
          items = res.foods || [];
       }
@@ -672,7 +682,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         known.add(key);
         const factor = f.grams > 0 ? (100 / f.grams) : 1;
         const per100 = {};
-        Object.keys(f.nutrition || {}).forEach(k => { per100[k] = Math.round((f.nutrition[k] || 0) * factor * 10) / 10; });
+        Object.keys(f.nutrition || {}).forEach(k => { per100[k] = Math.round((f.nutrition[k] || 0) * factor * 1000) / 1000; });
 
         const isDrink = entryUnit(f.unit, f.isDrink) === 'ml';
         updatedCustomFoods.push({
@@ -710,8 +720,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   // ---------- Meal Grid: sesi aktif + dinamis ----------
   const activeSessions = useMemo(() => {
     const userDefaults = profile?.settings?.activeSessions || DEFAULT_ACTIVE_SESSIONS;
-    const hidden = day.hiddenSessions || [];
-    
+    // "Hapus sesi" cuma menyembunyikan slot KOSONG (isinya memang ikut dihapus). Begitu ada
+    // makanan masuk lagi ke sesi itu, dia harus nongol sendiri — dulu tetap kesembunyi sampai
+    // user nambah sesinya manual, dan makanannya jadi seolah hilang.
+    const hidden = (day.hiddenSessions || []).filter((id) => !(day.meals?.[id] || []).length);
+
     let activeIds = new Set();
     userDefaults.forEach(id => { if (!hidden.includes(id)) activeIds.add(id); });
     Object.keys(day.meals || {}).forEach(id => { if (!hidden.includes(id)) activeIds.add(id); });
@@ -1094,7 +1107,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                         ...r,
                         foods: r.foods.map((x, j) => j === i ? {
                           ...x, grams,
-                          nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 10) / 10])),
+                          nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])),
                         } : x),
                       }));
                     };
@@ -1269,7 +1282,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                                   grams,
                                   baseGrams, // Preserve the fallback baseGrams
                                   baseNutrition, // Preserve the fallback baseNutrition
-                                  nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 10) / 10]))
+                                  nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
                                 };
                               });
                               persistDay({ ...day, meals });

@@ -116,7 +116,7 @@ const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods 
                   ingredients: r.ingredients.map((x, j) => {
                     if (j !== i) return x;
                     const factor = x.grams > 0 ? grams / x.grams : 0;
-                    return { ...x, grams, nutrition: Object.fromEntries(Object.entries(x.nutrition).map(([k, v]) => [k, Math.round(v * factor * 10) / 10])) };
+                    return { ...x, grams, nutrition: Object.fromEntries(Object.entries(x.nutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])) };
                   }),
                 }));
               }}

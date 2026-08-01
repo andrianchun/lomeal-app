@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, setDoc, increment } from 'firebase/firestore';
 import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star, Trash2, AlertTriangle, Heart, Filter, ChevronDown, Home } from 'lucide-react';
-import { searchFoods, FOOD_CATEGORIES, getDefaultImageForFood } from '../data/foodDatabase';
+import { searchFoods, FOOD_CATEGORIES, getDefaultImageForFood, nutritionForAmount } from '../data/foodDatabase';
 import { AI_DAILY_LIMIT } from '../data/constants';
 import { NUTRIENTS } from '../data/nutrition';
 import { compressImageForAI, analyzeSmartPhoto } from '../utils/aiFood';
@@ -98,7 +98,7 @@ const UnifiedFoodCard = ({ f, t, favoriteFoods, toggleFavorite, setDetail, openE
   );
 };
 
-const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, showConfirm, soundEnabled, user, todayYmd, domusItems = [], theme, profile, saveProfilePatch }) => {
+const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, showConfirm, showToast, soundEnabled, user, todayYmd, domusItems = [], theme, profile, saveProfilePatch }) => {
   const favoriteFoods = profile?.favoriteFoods || [];
   const toggleFavorite = (foodId) => {
     const next = favoriteFoods.includes(foodId) ? favoriteFoods.filter((id) => id !== foodId) : [...favoriteFoods, foodId];
@@ -283,11 +283,16 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
 
       let parsed = {};
       if (res.type === 'label') {
+        // Isi form itu gizi UNTUK takaran yang diketik (saveForm menormalkannya lagi ke
+        // per-100 pakai factor 100/grams). Dulu nilai per-100 dimasukkan apa adanya bareng
+        // takaran saji, jadi kena kali dua kali dan entri custom tersimpan berlipat permanen.
+        const grams = Number(res.servingGrams) > 0 ? Number(res.servingGrams) : 100;
+        const perServing = nutritionForAmount({ nutrition: res.per100 || {} }, grams);
         parsed = {
           name: res.name || '',
-          grams: res.servingGrams || 100,
-          kcal: res.per100?.kcal ?? '',
-          ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, res.per100?.[k] ?? ''])),
+          grams,
+          kcal: perServing.kcal ?? '',
+          ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, perServing[k] ?? ''])),
         };
       } else {
         const first = res.foods?.[0];
@@ -350,17 +355,22 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
       if (grams <= 0) grams = 100;
       const factor = 100 / grams;
       const per100 = {};
-      Object.entries(nutrition).forEach(([k, v]) => { per100[k] = Math.round(v * factor * 10) / 10; });
+      // 3 desimal, bukan 1: nutrien berskala mcg (B12, vit D) hilang jadi 0 kalau dibulatkan
+      // ke 0,1. Tampilan tetap membulatkan sendiri, jadi tidak ada bedanya di layar.
+      Object.entries(nutrition).forEach(([k, v]) => { per100[k] = Math.round(v * factor * 1000) / 1000; });
 
     const isNew = editing === 'new';
+    // Satuan minuman WAJIB ikut entri aslinya. Dulu dipaku 'g'/'100g', jadi menyunting satu
+    // minuman diam-diam mengubahnya jadi gram dan membatalkan penandaan isDrink.
+    const isDrink = isNew ? false : !!editing.isDrink;
     const item = {
       id: isNew ? `custom_${Date.now()}` : editing.id,
       name: form.name || 'Bahan Custom',
       image: form.image || null,
       category: isNew ? 'packaged' : editing.category,
-      unit: 'g',
-      isDrink: isNew ? false : editing.isDrink,
-      portion: { label: '100g', grams: 100 },
+      unit: isDrink ? 'ml' : 'g',
+      isDrink,
+      portion: { label: isDrink ? '100ml' : '100g', grams: 100 },
       nutrition: per100,
       source: 'Custom',
       isCustom: true,
@@ -539,7 +549,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         <button
           onClick={() => { setShowFilters(!showFilters); playSoundEffect('click', soundEnabled); }}
           className={`p-3 rounded-xl transition-all border ${t.border} ${
-            showFilters || macroFilter !== '' || category !== null
+            showFilters || macroFilter.length > 0
               ? `${t.bgAccent} border-transparent text-white shadow-sm`
               : `${t.inputBg} ${t.textMuted}`
           }`}

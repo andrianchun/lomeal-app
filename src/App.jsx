@@ -291,7 +291,10 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     // pushNutritionBioToLogym → bioData.nutritionCalories (grafik bio Logym sinkron sama Lomeal)
     if (logymUser) {
       const mealsCount = Object.values(dayData?.meals || {}).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
-      const dayTotals = computeDayTotals(dayData);
+      // Tanggal depan = rencana, belum dimakan — sama seperti yang ditampilkan tab Catat.
+      // Tanpa argumen kedua ini, makanan yang dijadwalkan besok langsung dikirim ke Logym
+      // seolah sudah masuk perut.
+      const dayTotals = computeDayTotals(dayData, ymd <= todayYmd);
       if (ymd === todayYmd) {
         pushDailyTotalsToLogym(logymUser.uid, ymd, dayTotals, mealsCount).catch(() => {});
       }
@@ -304,15 +307,15 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   // serial-await satu-satu bikin UI freeze menunggu network round-trip berkali-kali.
   const syncAllNutritionToLogym = useCallback(async () => {
     if (!logymUser) return;
-    const entries = Object.entries(daysMap).filter(([, d]) => computeDayTotals(d).kcal > 0);
+    const entries = Object.entries(daysMap).filter(([ymd, d]) => computeDayTotals(d, ymd <= todayYmd).kcal > 0);
     let synced = 0;
     for (let i = 0; i < entries.length; i += 10) {
       const chunk = entries.slice(i, i + 10);
-      await Promise.all(chunk.map(([ymd, dayData]) => pushNutritionBioToLogym(logymUser.uid, ymd, computeDayTotals(dayData).kcal)));
+      await Promise.all(chunk.map(([ymd, dayData]) => pushNutritionBioToLogym(logymUser.uid, ymd, computeDayTotals(dayData, ymd <= todayYmd).kcal)));
       synced += chunk.length;
     }
     return synced;
-  }, [logymUser, daysMap]);
+  }, [logymUser, daysMap, todayYmd]);
 
   // --- Resep & custom foods ---
   const [recipes, setRecipes] = useState([]);

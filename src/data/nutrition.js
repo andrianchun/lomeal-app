@@ -67,6 +67,18 @@ export const reconcileKcal = (n) => {
   return { nutrition, suspect: Math.abs(kcal - fromMacros) / fromMacros > KCAL_TOLERANCE };
 };
 
+// Gizi untuk sejumlah gram/ml, dari nilai per 100. Tinggal di sini (bukan di foodDatabase.js)
+// karena ini murni matematika gizi — dan foodDatabase.js menarik tkpi.js sehingga tidak bisa
+// diuji dengan node polos. foodDatabase.js mengekspor ulang fungsi ini biar pemanggil lama utuh.
+// Dibulatkan ke 3 desimal, bukan 1: nutrien berskala mcg (B12 target 2,4 mcg, vit D 15 mcg)
+// dalam porsi kecil jatuh di bawah 0,05 dan dulu hilang jadi 0.
+export const nutritionForAmount = (food, grams) => {
+  const factor = (Number(grams) || 0) / 100;
+  const out = {};
+  Object.entries(food?.nutrition || {}).forEach(([k, v]) => { out[k] = Math.round((Number(v) || 0) * factor * 1000) / 1000; });
+  return out;
+};
+
 export const scaleNutrition = (n, factor) => {
   const out = {};
   NUTRIENTS.forEach(({ key }) => { out[key] = (Number(n?.[key]) || 0) * factor; });
@@ -282,10 +294,13 @@ export const getSmartWarnings = (totals, targets, dietProfile, profile, lyfitTod
 export const computeDayTotals = (day, defaultEaten = true) => {
   let totals = { ...EMPTY_NUTRITION };
   if (!day?.meals) return totals;
+  // hiddenSessions cuma menyembunyikan slot sesi yang KOSONG. Kalau sesi yang pernah dihapus
+  // diisi makanan lagi, kalorinya wajib ikut kehitung — dulu dilewati diam-diam, jadi angka
+  // hariannya kurang tanpa ada tanda apa pun.
   const hidden = day?.hiddenSessions || [];
   Object.entries(day.meals).forEach(([sessionId, entries]) => {
-    if (hidden.includes(sessionId)) return;
-    (entries || []).forEach((e) => { 
+    if (hidden.includes(sessionId) && !(entries || []).length) return;
+    (entries || []).forEach((e) => {
       const isMealPrep = e.isMealPrep || e.source === 'recipe';
       const eaten = e.isEaten !== undefined ? e.isEaten : (isMealPrep ? false : defaultEaten);
       if (eaten) {
