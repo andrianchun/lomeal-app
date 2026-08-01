@@ -41,6 +41,7 @@ export const EMPTY_NUTRITION = { kcal: 0, protein: 0, carbs: 0, fat: 0, sodium: 
 
 export const addNutrition = (a, b, factor = 1) => {
   const out = { ...a };
+  out.kcal = (out.kcal || 0) + (Number(b?.kcal) || 0) * factor;
   NUTRIENTS.forEach(({ key }) => { out[key] = (out[key] || 0) + (Number(b?.[key]) || 0) * factor; });
   return out;
 };
@@ -69,6 +70,7 @@ export const reconcileKcal = (n) => {
 
 export const scaleNutrition = (n, factor) => {
   const out = {};
+  out.kcal = (Number(n?.kcal) || 0) * factor;
   NUTRIENTS.forEach(({ key }) => { out[key] = (Number(n?.[key]) || 0) * factor; });
   return out;
 };
