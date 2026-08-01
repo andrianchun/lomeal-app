@@ -71,17 +71,12 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
     const checkOta = async () => {
       try {
-        // Versi yang JALAN ditanyakan ke plugin, bukan ke localStorage: kalau Capgo rollback
-        // ke bundle builtin (notifyAppReady timeout / crash), localStorage bakal bohong dan
-        // app nyangkut di kode lama sambil merasa sudah update.
-        // Di web, versi yang jalan = versi yang ter-bundle di JS yang sedang dieksekusi.
-        let installedVer = __APP_VERSION__;
-        if (isNative) {
-          try {
-            const { bundle } = await CapacitorUpdater.current();
-            if (bundle?.version && bundle.version !== 'builtin') installedVer = bundle.version;
-          } catch { /* pakai versi bawaan build */ }
-        }
+        // __APP_VERSION__ di-inject vite saat build, jadi nilainya ikut di dalam setiap bundle
+        // dan SELALU menggambarkan kode yang benar-benar dieksekusi — termasuk kalau Capgo
+        // rollback ke bundle bawaan. Sengaja TIDAK pakai CapacitorUpdater.current(): itu cuma
+        // melaporkan label yang diberi saat download, yang bisa beda dari isi bundle-nya
+        // (mis. jembatan update_0118.zip yang isinya build terbaru) dan bikin unduh ulang sia-sia.
+        const installedVer = __APP_VERSION__;
         setCurrentVer(installedVer);
 
         const res = await fetch(`${otaUrl}?t=${Date.now()}`, { cache: 'no-store' });

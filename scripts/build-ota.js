@@ -14,6 +14,13 @@ const otaPath = path.resolve(__dirname, '../dist/ota');
 const archivePath = path.resolve(__dirname, '../.ota-archive');
 const KEEP = 3;
 
+// Jembatan untuk bundle BAWAAN APK (yang aktif lagi tiap user hapus data / install ulang).
+// Bundle itu kode lama: dia cuma baca Firestore lomeal_settings/ota_update, dan dokumen itu
+// menunjuk ke update_0118.zip secara permanen. Jadi nama file ini harus selalu ada dan selalu
+// berisi build TERBARU — kalau hilang, Capgo dapat HTML (kena rewrite SPA) lalu gagal dengan
+// pesan "periksa koneksi internet". Hapus baris ini hanya setelah APK di-build ulang.
+const LEGACY_BRIDGE = 'update_0118.zip';
+
 // Versi selalu diambil dari package.json — JANGAN oper versi lewat argumen.
 // Bump versi dilakukan otomatis oleh scripts/release.js.
 const version = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')).version;
@@ -48,6 +55,9 @@ output.on('close', function() {
     .sort((a, b) => fs.statSync(path.join(archivePath, b)).mtimeMs - fs.statSync(path.join(archivePath, a)).mtimeMs);
   kept.slice(KEEP).forEach(f => fs.rmSync(path.join(archivePath, f)));
   kept.slice(0, KEEP).forEach(f => fs.copyFileSync(path.join(archivePath, f), path.join(otaPath, f)));
+
+  // Regenerasi tiap rilis, jadi tidak pernah kena pruning dan isinya selalu build terbaru.
+  fs.copyFileSync(outputPath, path.join(otaPath, LEGACY_BRIDGE));
 
   // version.json ditulis SETELAH zip selesai, supaya manifest tidak pernah menunjuk zip yang gagal dibuat.
   // OTA_FORCE/OTA_NOTES di-set oleh scripts/release.js (`npm run release force "catatan"`).
