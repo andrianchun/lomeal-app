@@ -1,13 +1,19 @@
+import fs from 'fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// package.json adalah SATU-SATUNYA sumber versi. Jangan hardcode versi di file lain.
+const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf8'))
+
 // https://vitejs.dev/config/
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   plugins: [
     react(),
     VitePWA({
-      // Ubah dari autoUpdate jadi prompt supaya bisa munculin notif update di dalam app
+      // 'prompt' supaya user lihat kartu "Pembaruan Tersedia" (src/components/PwaUpdater.jsx)
+      // dan tidak ke-reload paksa di tengah ngetik — simetris dengan UpdaterAlert di APK.
       registerType: 'prompt',
       injectRegister: 'auto',
       manifest: {

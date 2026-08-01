@@ -1,6 +1,8 @@
 module.exports = {
   root: true,
   env: { browser: true, es2020: true },
+  // di-inject vite dari package.json (lihat vite.config.js)
+  globals: { __APP_VERSION__: 'readonly' },
   extends: [
     'eslint:recommended',
     'plugin:react/recommended',

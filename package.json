@@ -1,14 +1,14 @@
 {
   "name": "lomeal",
   "private": true,
-  "version": "0.1.12",
+  "version": "0.1.19",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "build:ota": "vite build && node scripts/build-ota.js",
-    "deploy": "git push && firebase deploy",
-    "deploy:full": "git add . && git commit -m \"auto-deploy\" && git push && firebase deploy",
+    "release": "node scripts/release.js",
+    "sync:android": "vite build && npx cap sync android",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

@@ -9,9 +9,10 @@ const __dirname = path.dirname(__filename);
 const distPath = path.resolve(__dirname, '../dist');
 const otaPath = path.resolve(__dirname, '../dist/ota');
 
-const args = process.argv.slice(2);
-const version = args[0] || 'update'; // if version passed (e.g. 0.1.7), it becomes update_0.1.7.zip
-const zipName = version === 'update' ? 'update.zip' : `update_${version.replace(/\./g, '')}.zip`;
+// Versi selalu diambil dari package.json — JANGAN oper versi lewat argumen.
+// Bump versi dilakukan otomatis oleh scripts/release.js.
+const version = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')).version;
+const zipName = `update_${version.replace(/\./g, '')}.zip`;
 const outputPath = path.join(otaPath, zipName);
 
 console.log(`Building OTA ZIP: ${zipName}`);
@@ -32,7 +33,14 @@ const archive = new ZipArchive({
 
 output.on('close', function() {
   console.log(archive.pointer() + ' total bytes');
-  console.log('OTA zip has been finalized and the output file descriptor has closed.');
+  // version.json ditulis SETELAH zip selesai, supaya manifest tidak pernah menunjuk zip yang gagal dibuat.
+  fs.writeFileSync(path.join(otaPath, 'version.json'), JSON.stringify({
+    ota_version: version,
+    ota_url: `https://lomeal.web.app/ota/${zipName}`,
+    is_forced: false,
+    release_notes: `Pembaruan v${version}`
+  }, null, 2));
+  console.log(`OTA ${zipName} + version.json siap (v${version}).`);
 });
 
 archive.on('warning', function(err) {
@@ -49,11 +57,14 @@ archive.on('error', function(err) {
 
 archive.pipe(output);
 
-// Append files from the dist directory, putting its contents at the root of archive
-// We MUST ignore the 'ota' directory to avoid recursive zipping!
-archive.glob('**/*', { 
+// Append files from the dist directory, putting its contents at the root of archive.
+// - 'ota/**' wajib di-ignore supaya zip tidak me-zip dirinya sendiri.
+// - service worker & manifest PWA dibuang: tidak berguna di WebView native, dan kalau
+//   sampai ter-register di dalam WebView, SW itu akan menyajikan index.html lamanya
+//   sendiri dan menutupi bundle yang baru dipasang Capgo.
+archive.glob('**/*', {
   cwd: distPath,
-  ignore: ['ota/**']
+  ignore: ['ota/**', 'sw.js', 'workbox-*.js', 'registerSW.js', 'manifest.webmanifest']
 });
 
 archive.finalize();

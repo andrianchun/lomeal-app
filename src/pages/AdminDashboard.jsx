@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-import { Check, X, Edit, AlertTriangle, ArrowLeft, DownloadCloud } from 'lucide-react';
+import { Check, X, Edit, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, getDocs, deleteDoc, doc, setDoc } from 'firebase/firestore';
 
@@ -99,52 +99,6 @@ export default function AdminDashboard({ user, t, embedded }) {
       )}
 
       <div className={embedded ? '' : 'p-4' + ' space-y-8'}>
-        <section>
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <DownloadCloud className="text-blue-500" /> OTA Update Control
-          </h2>
-          <div className={`${t.bgCardSoft} border ${t.border} p-4 rounded-2xl space-y-4`}>
-            <div>
-              <label className="block text-xs font-bold mb-1 opacity-70">Version</label>
-              <input 
-                type="text" 
-                id="otaVersion"
-                placeholder="e.g. 0.1.7" 
-                className={`w-full p-2 rounded-xl bg-transparent border ${t.border}`}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold mb-1 opacity-70">URL</label>
-              <input 
-                type="text" 
-                id="otaUrl"
-                placeholder="https://lomeal.web.app/ota/update_017.zip" 
-                className={`w-full p-2 rounded-xl bg-transparent border ${t.border}`}
-              />
-            </div>
-            <button 
-              onClick={async () => {
-                const v = document.getElementById('otaVersion').value;
-                const u = document.getElementById('otaUrl').value;
-                if(!v || !u) return alert('Isi version dan URL!');
-                try {
-                  await setDoc(doc(db, 'lomeal_settings', 'ota_update'), {
-                    ota_version: v,
-                    ota_url: u,
-                    is_forced: false,
-                    release_notes: 'Update via Admin Panel'
-                  }, { merge: true });
-                  alert('OTA Updated in Firestore!');
-                } catch(e) {
-                  alert(e.message);
-                }
-              }}
-              className="w-full py-2 bg-blue-500 text-white rounded-xl font-bold active:scale-95"
-            >
-              Deploy OTA Settings
-            </button>
-          </div>
-        </section>
 
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">

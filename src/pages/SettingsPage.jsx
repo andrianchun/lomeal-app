@@ -391,59 +391,6 @@ const SettingsPage = ({
               )}
             </Section>
 
-            {/* PEMBARUAN APLIKASI */}
-            <Section title="Pembaruan Aplikasi" icon={DownloadCloud} t={t}>
-              <div className="flex items-center justify-between">
-                <div className="flex flex-col">
-                  <span className={`font-bold text-sm ${t.textMain}`}>
-                    Lomeal v{currentVer}
-                  </span>
-                  {otaAvailable && (
-                    <span className="text-[10px] font-bold text-rose-500">
-                      Versi {otaState.version} Tersedia!
-                    </span>
-                  )}
-                </div>
-                {otaAvailable && downloadProgress === null ? (
-                  <button
-                    onClick={onUpdateApp}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.bgAccent} text-white shadow-sm active:scale-95`}
-                  >
-                    Update
-                  </button>
-                ) : downloadProgress !== null && downloadProgress !== undefined ? (
-                  <button
-                    disabled
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.btnBg} ${t.textMuted}`}
-                  >
-                    Mengunduh {downloadProgress}%
-                  </button>
-                ) : (
-                  <button
-                    disabled
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.btnBg} ${t.textMuted} opacity-70`}
-                  >
-                    Terbaru
-                  </button>
-                )}
-              </div>
-              
-              {downloadProgress !== null && downloadProgress !== undefined && (
-                <div className="w-full bg-black/10 dark:bg-white/10 rounded-full h-1.5 mt-3 overflow-hidden">
-                  <div 
-                    className={`${t.bgAccent} h-1.5 rounded-full transition-all duration-200 ease-out`} 
-                    style={{ width: `${downloadProgress}%` }}
-                  />
-                </div>
-              )}
-
-              <p className={`text-[10px] ${t.textMuted} leading-tight mt-2`}>
-                {otaAvailable 
-                  ? "Ada pembaruan baru yang bisa langsung kamu unduh." 
-                  : "Kamu sudah menggunakan versi terbaru Lomeal."}
-              </p>
-            </Section>
-
             {/* BACKUP & RESTORE */}
             <Section title={lang.backupSection} icon={Download} t={t}>
               <div className="flex space-x-3">
@@ -474,15 +421,70 @@ const SettingsPage = ({
                 {lang.deleteAccount}
               </button>
             </div>
-
-            <button onClick={onLogout} className={`w-full py-3 rounded-2xl bg-rose-500 text-white font-bold`}>
-              {lang.logout}
-            </button>
           </div>
         )}
 
+        {/* PEMBARUAN APLIKASI (GLOBAL) */}
+        <div className="animate-in fade-in duration-300">
+          <Section title="Pembaruan Aplikasi" icon={DownloadCloud} t={t}>
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col">
+                <span className={`font-bold text-sm ${t.textMain}`}>
+                  Lomeal v{currentVer}
+                </span>
+                {otaAvailable && (
+                  <span className="text-[10px] font-bold text-rose-500">
+                    Versi {otaState.version} Tersedia!
+                  </span>
+                )}
+              </div>
+              {otaAvailable && downloadProgress === null ? (
+                <button
+                  onClick={onUpdateApp}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.bgAccent} text-white shadow-sm active:scale-95`}
+                >
+                  Update
+                </button>
+              ) : downloadProgress !== null && downloadProgress !== undefined ? (
+                <button
+                  disabled
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.btnBg} ${t.textMuted}`}
+                >
+                  Mengunduh {downloadProgress}%
+                </button>
+              ) : (
+                <button
+                  disabled
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${t.btnBg} ${t.textMuted} opacity-70`}
+                >
+                  Terbaru
+                </button>
+              )}
+            </div>
+            
+            {downloadProgress !== null && downloadProgress !== undefined && (
+              <div className="w-full bg-black/10 dark:bg-white/10 rounded-full h-1.5 mt-3 overflow-hidden">
+                <div 
+                  className={`${t.bgAccent} h-1.5 rounded-full transition-all duration-200 ease-out`} 
+                  style={{ width: `${downloadProgress}%` }}
+                />
+              </div>
+            )}
+
+            <p className={`text-[10px] ${t.textMuted} leading-tight mt-2`}>
+              {otaAvailable 
+                ? "Ada pembaruan baru yang bisa langsung kamu unduh." 
+                : "Kamu sudah menggunakan versi terbaru Lomeal."}
+            </p>
+          </Section>
+        </div>
+
+        <button onClick={onLogout} className={`w-full py-3 rounded-2xl bg-rose-500 text-white font-bold mt-4`}>
+          {lang.logout}
+        </button>
+
         <div className="py-6 text-center">
-          <p className={`text-[10px] font-bold ${t.textMuted} uppercase tracking-widest`}>LOMEAL App v0.1.0</p>
+          <p className={`text-[10px] font-bold ${t.textMuted} uppercase tracking-widest`}>LOMEAL App v{currentVer}</p>
         </div>
       </div>
     </div>

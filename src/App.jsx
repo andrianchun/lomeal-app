@@ -22,8 +22,6 @@ import { computeDayTotals, calcTargets } from './data/nutrition';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db } from './firebase';
 import useDialog from './hooks/useDialog';
 import useToast from './hooks/useToast';
 
@@ -59,21 +57,33 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [otaState, setOtaState] = useState({ open: false, force: false, url: '', version: '', notes: '' });
+  // __APP_VERSION__ di-inject dari package.json oleh vite (lihat vite.config.js).
+  const [currentVer, setCurrentVer] = useState(__APP_VERSION__);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    
+
     CapacitorUpdater.notifyAppReady();
 
-    const unsubOta = onSnapshot(doc(db, 'lomeal_settings', 'ota_update'), async (snap) => {
+    // Check OTA update via version.json on Hosting to make it fully automatic (no Firestore push needed)
+    const checkOta = async () => {
       try {
-        if (snap.exists()) {
-          const data = snap.data();
-          // Pakai localStorage sebagai sumber kebenaran versi yang sudah ter-apply,
-          // karena CapacitorUpdater.current() return-nya nested dan tidak reliable.
-          const appliedVer = localStorage.getItem('lomeal_applied_ota') || '0.0.0';
-          
-          if (data.ota_version && data.ota_version !== appliedVer) {
+        // Versi yang JALAN ditanyakan ke plugin, bukan ke localStorage: kalau Capgo rollback
+        // ke bundle builtin (notifyAppReady timeout / crash), localStorage bakal bohong dan
+        // app nyangkut di kode lama sambil merasa sudah update.
+        let installedVer = __APP_VERSION__;
+        try {
+          const { bundle } = await CapacitorUpdater.current();
+          if (bundle?.version && bundle.version !== 'builtin') installedVer = bundle.version;
+        } catch { /* pakai versi bawaan build */ }
+        setCurrentVer(installedVer);
+
+        const res = await fetch('https://lomeal.web.app/ota/version.json?t=' + Date.now());
+        if (res.ok) {
+          const data = await res.json();
+
+          // Sengaja !== bukan >: mem-publish versi lama = rollback, dan itu harus ikut terkirim.
+          if (data.ota_version && data.ota_version !== installedVer) {
             const dismissed = localStorage.getItem('lomeal_dismissed_ota');
             if (!data.is_forced && dismissed === data.ota_version) {
               setOtaState(prev => ({
@@ -94,16 +104,25 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
               });
             }
           } else {
-            // Versi sama — pastikan popup tertutup
             setOtaState(prev => ({ ...prev, open: false }));
           }
         }
       } catch (err) {
         console.error('Failed to check OTA', err);
       }
-    });
+    };
 
-    return () => unsubOta();
+    checkOta();
+    
+    // Check every time app resumes from background
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkOta();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const [downloadProgress, setDownloadProgress] = useState(null);
@@ -131,15 +150,13 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
         url: otaState.url,
         version: otaState.version,
       });
-      // Simpan versi SEBELUM set() karena set() akan destroy JS context
-      localStorage.setItem('lomeal_applied_ota', otaState.version);
+      // Bersihkan SEBELUM set() karena set() akan destroy JS context.
+      // Versi terpasang tidak perlu dicatat manual — dibaca dari CapacitorUpdater.current().
       localStorage.removeItem('lomeal_dismissed_ota');
       await CapacitorUpdater.set(bundle);
       setDownloadProgress(null);
     } catch (err) {
       console.error('OTA Update failed:', err);
-      // Rollback localStorage jika gagal
-      localStorage.removeItem('lomeal_applied_ota');
       setDownloadProgress(null);
       if (otaState.force) {
         alert('Gagal mengunduh pembaruan. Silakan periksa koneksi internet Anda.');
@@ -680,9 +697,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
           showAlert={showAlert}
           showToast={showToast}
           showConfirm={showConfirm}
-          otaAvailable={otaState.version && otaState.version !== (localStorage.getItem('lomeal_applied_ota') || '0.0.0')}
+          otaAvailable={!!otaState.version && otaState.version !== currentVer}
           otaState={otaState}
-          currentVer={localStorage.getItem('lomeal_applied_ota') || '0.0.0'}
+          currentVer={currentVer}
           onUpdateApp={handleUpdate}
           downloadProgress={downloadProgress}
           exportData={exportData}
