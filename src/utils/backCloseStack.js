@@ -6,7 +6,11 @@
 // gak ada modal yang kebuka, back jatuh balik ke behavior normal (navigasi
 // react-router / keluar app) — gak disentuh sama sekali karena stack kosong.
 //
-// Dipakai lewat hooks/useBackClose.js, bukan langsung.
+// Dipakai lewat hooks/useBackClose.js, bukan langsung — KECUALI closeTopModal(), yang
+// dipanggil langsung dari listener native @capacitor/app 'backButton' di App.jsx. Tombol
+// back hardware Android di-intercept native SEBELUM sampai ke DOM sama sekali (gak ada
+// popstate yang kepicu), jadi APK gak bisa nebeng mekanisme pushState/popstate di bawah
+// ini — perlu jalur langsung yang gak mainan history sama sekali.
 // ============================================================
 
 const stack = [];
@@ -53,6 +57,17 @@ export const popModal = (id) => {
     suppressCount++;
     window.history.back();
   }
+};
+
+// Tutup modal paling atas secara LANGSUNG, tanpa mainan history/suppressCount sama
+// sekali — dipanggil dari listener native 'backButton' (App.jsx), bukan dari popstate.
+// Balikin true kalau ada yang ditutup (caller berhenti di situ, gak usah lanjut ke logika
+// back lain kayak lompat ke dashboard), false kalau stack kosong.
+export const closeTopModal = () => {
+  const top = stack.pop();
+  if (!top) return false;
+  top.onClose();
+  return true;
 };
 
 // Dipanggil App.jsx tiap kali RUTE (tab bawah) ganti. Kalau ada modal yang masih

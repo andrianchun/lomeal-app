@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
-import { ShieldAlert, ShieldCheck, Lock, ChevronRight, ChevronLeft, Check, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronRight, ChevronLeft, Check, Sparkles } from 'lucide-react';
 import { fetchLyfitProfile } from '../utils/lyfitSync';
 import { computeAge } from '../data/constants';
 import { DIET_PROFILES, PACES, calcTargets } from '../data/nutrition';
+import { MEDICAL_CONDITIONS } from '../data/medicalConditions';
 import ScrollPicker from '../components/ScrollPicker';
+import OptionCard from '../components/OptionCard';
+import useSwipeStep from '../hooks/useSwipeStep';
+import ConsentScreen from '../components/ConsentScreen';
 
 /**
  * ALUR ONBOARDING BERJENJANG — "Digital Anamnesis" (Fase 3 & 6 blueprint)
@@ -12,6 +16,11 @@ import ScrollPicker from '../components/ScrollPicker';
  * swipe gesture + tombol navigasi bulat mengambang.
  * Step "Sambungkan ke Logym" (opsional) menarik gender/dob/tinggi/berat
  * otomatis kalau user sudah punya akun Logym — lihat utils/lyfitSync.js.
+ *
+ * Step 'consent' SENGAJA tidak ikut carousel kartu-tumpuk (lihat render di bawah) —
+ * itu satu-satunya step yang isinya teks hukum, jadi dirender sebagai halaman penuh
+ * yang scroll natural, bukan kartu bertinggi tetap dengan scrollbar disembunyikan
+ * (yang lama bikin poin ke-3 gampang gak kelihatan di layar kecil).
  */
 const STEPS = [
   { key: 'consent', title: 'Persetujuan Pengguna' },
@@ -23,13 +32,16 @@ const STEPS = [
   { key: 'pace', title: 'Komitmen Waktu' },
 ];
 
-const MEDICAL_CONDITIONS = ['Hipertensi', 'Diabetes/Prediabetes', 'Asam Urat', 'Stroke', 'CKD (Gagal Ginjal)', 'PCOS', 'Penyakit Jantung', 'Kolesterol Tinggi', 'Kanker'];
+// Naikkan tanggal ini tiap teks consent (ConsentScreen.jsx) direvisi — dicatat bareng
+// timestamp persetujuan user, jadi ada jejak versi teks mana yang disetujui siapa.
+const CONSENT_VERSION = '2026-08-02';
 
 const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
   const [step, setStep] = useState(0);
   const isDark = theme === 'dark';
 
-  const [consents, setConsents] = useState({ medical: false, allergy: false, privacy: false });
+  // research: opsional, TIDAK menggerbang canProceed() — beda dari 3 lainnya yang wajib.
+  const [consents, setConsents] = useState({ medical: false, allergy: false, privacy: false, research: false });
   const [physical, setPhysical] = useState({ dob: '', height: 165, weight: 60, gender: 'male' });
   const [dietProfile, setDietProfile] = useState(null);
   const [pace, setPace] = useState('normal');
@@ -76,7 +88,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
     const targets = calcTargets(profileForTargets);
     onComplete({
       onboardingCompleted: true,
-      consents: { ...consents, agreedAt: new Date().toISOString() },
+      consents: { ...consents, version: CONSENT_VERSION, agreedAt: new Date().toISOString() },
       physical: { dob: physical.dob, height: Number(physical.height), weight: Number(physical.weight), gender: physical.gender, fromLogym },
       dietProfile, pace, targets, medicalHistory, allergies: allergies.trim(),
       createdAt: new Date().toISOString(),
@@ -89,49 +101,12 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
   };
   const handleBack = () => setStep((s) => Math.max(0, s - 1));
 
-  // --- Swipe ---
-  const [touchStart, setTouchStart] = useState(null);
-  const [touchEnd, setTouchEnd] = useState(null);
-  const handleTouchStart = (e) => { setTouchEnd(null); setTouchStart(e.targetTouches[0].clientX); };
-  const handleTouchMove = (e) => { e.stopPropagation(); setTouchEnd(e.targetTouches[0].clientX); };
-  const handleTouchEnd = () => {
-    if (!touchStart || !touchEnd) return;
-    const distance = touchStart - touchEnd;
-    if (distance < -50 && step > 0) handleBack();
-    else if (distance > 50 && step < STEPS.length && canProceed()) handleNext();
-  };
-
-  const Consent = ({ id, icon: Icon, title, body }) => (
-    <button
-      onClick={() => setConsents((c) => ({ ...c, [id]: !c[id] }))}
-      className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${consents[id] ? `${t.borderAccent} ${t.bgAccentSoft}` : `${isDark ? 'border-transparent bg-white/5' : 'border-white/50 bg-white/60'}`}`}
-    >
-      <div className="flex items-start gap-3">
-        <span className={`mt-0.5 p-2 rounded-xl ${consents[id] ? t.bgAccent : t.bgSunken}`}>
-          <Icon size={16} className={consents[id] ? 'text-white' : t.textMuted} />
-        </span>
-        <div className="flex-1">
-          <p className={`body-md ${t.textMain}`}>{title}</p>
-          <p className={`caption mt-1 font-medium leading-relaxed ${t.textMuted}`}>{body}</p>
-        </div>
-        <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${consents[id] ? `${t.bgAccent} border-transparent` : t.border}`}>
-          {consents[id] && <Check size={13} className="text-white" strokeWidth={3} />}
-        </span>
-      </div>
-    </button>
-  );
-
-  const OptionCard = ({ selected, onClick, children }) => (
-    <button
-      onClick={onClick}
-      className={`w-full text-left p-3.5 rounded-2xl border-2 backdrop-blur-md transition-all duration-200 active:scale-[0.98] flex items-center justify-between ${
-        selected ? `${t.borderAccent} ${t.bgAccent} text-white shadow-lg` : `${isDark ? 'border-transparent bg-white/5' : 'border-white/50 bg-white/60'}`
-      }`}
-    >
-      {children}
-      <ChevronRight size={16} className={selected ? 'text-white' : t.textMuted} />
-    </button>
-  );
+  // Dulu versi sendiri yang cuma cek delta horizontal (gampang kesalah-baca kalau user
+  // sebenernya lagi scroll vertikal) — sekarang pakai hook yang sama kayak
+  // DietQuestionnaireModal.jsx, yang membedakan gestur horizontal dari scroll vertikal.
+  const { handleTouchStart, handleTouchMove, handleTouchEnd } = useSwipeStep({
+    step, maxStep: STEPS.length, canProceed, onNext: handleNext, onBack: handleBack,
+  });
 
   const bmi = physical.height && physical.weight ? (Number(physical.weight) / ((Number(physical.height) / 100) ** 2)).toFixed(1) : null;
 
@@ -143,6 +118,9 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
         </p>
       </div>
 
+      {step === 0 ? (
+        <ConsentScreen t={t} isDark={isDark} consents={consents} setConsents={setConsents} onNext={handleNext} />
+      ) : (
       <div
         className="flex-1 flex flex-col justify-end pb-8 sm:pb-12 overflow-y-auto p-6 pt-0 hide-scrollbar relative"
         onTouchStart={handleTouchStart}
@@ -181,17 +159,6 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
                 <div className="flex flex-col items-center text-center mb-5 shrink-0">
                   <h2 className={`text-xl sm:text-2xl font-black leading-tight ${t.textMain}`}>{s.title}</h2>
                 </div>
-
-                {s.key === 'consent' && (
-                  <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto hide-scrollbar">
-                    <Consent id="medical" icon={ShieldAlert} title="Medical Disclaimer"
-                      body="Lomeal adalah alat pencatat nutrisi mandiri, BUKAN alat diagnosis, rujukan, atau pengganti nasihat medis klinis." />
-                    <Consent id="allergy" icon={ShieldCheck} title="Allergy Liability"
-                      body="Estimasi kandungan makanan bisa meleset. Saya membebaskan pengembang dari tuntutan hukum terkait komplikasi metabolik, reaksi alergi, maupun kontaminasi bahan makanan." />
-                    <Consent id="privacy" icon={Lock} title="Privasi Data Sensitif"
-                      body="Data biometrik & log makanan saya dienkripsi dan disimpan untuk fungsi aplikasi ini saja, tanpa dibagikan ke pihak ketiga." />
-                  </div>
-                )}
 
                 {s.key === 'connect' && (
                   <div className="flex-1 flex flex-col gap-3 overflow-y-auto hide-scrollbar">
@@ -288,7 +255,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
                 {s.key === 'pace' && (
                   <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto hide-scrollbar">
                     {PACES.map((p) => (
-                      <OptionCard key={p.id} selected={pace === p.id} onClick={() => setPace(p.id)}>
+                      <OptionCard key={p.id} t={t} isDark={isDark} selected={pace === p.id} onClick={() => setPace(p.id)}>
                         <div>
                           <p className="font-black text-sm">{p.label}</p>
                           <p className={`caption font-medium mt-0.5 ${pace === p.id ? 'text-white/80' : t.textMuted}`}>{p.desc}</p>
@@ -306,6 +273,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
           })}
         </div>
       </div>
+      )}
     </div>
   );
 };

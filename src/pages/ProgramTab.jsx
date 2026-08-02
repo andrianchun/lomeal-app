@@ -508,8 +508,8 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
       </div>
 
       {showQuestionnaire && (
-        <DietQuestionnaireModal 
-          t={t} theme={theme} profile={profile} 
+        <DietQuestionnaireModal
+          t={t} theme={theme} profile={profile} showAlert={showAlert}
           onClose={() => setShowQuestionnaire(false)}
           onSave={async (newProfileData, showAlertMsg = true) => {
               await saveProfilePatch(newProfileData);

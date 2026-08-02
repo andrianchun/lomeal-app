@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Target, Activity, Calendar, Dumbbell, Clock, ChevronRight, ChevronLeft, Sparkles, X, CheckCircle2, User, Ruler, Smartphone, Heart, Check, Apple, Refrigerator, Info } from 'lucide-react';
+import React, { useState } from 'react';
+import { Target, Activity, Clock, ChevronRight, ChevronLeft, Sparkles, X, User, Ruler, Heart, Check, Refrigerator } from 'lucide-react';
 import { computeAge } from '../data/constants';
 import { searchFoods } from '../data/foodDatabase';
-import { DIET_PROFILES, PACES, DIET_GOALS, calcTargets } from '../data/nutrition';
+import { DIET_PROFILES, DIET_GOALS, calcTargets } from '../data/nutrition';
+import { MEDICAL_CONDITIONS } from '../data/medicalConditions';
 import ScrollPicker from './ScrollPicker';
 import SwipeInput from './SwipeInput';
+import OptionCard from './OptionCard';
 import useBackClose from '../hooks/useBackClose';
-
-const MEDICAL_CONDITIONS = ['Hipertensi', 'Diabetes/Prediabetes', 'Asam Urat', 'Stroke', 'CKD (Gagal Ginjal)', 'PCOS', 'Penyakit Jantung', 'Kolesterol Tinggi', 'Kanker'];
+import useSwipeStep from '../hooks/useSwipeStep';
 
 const KULKAS_ITEMS = [
   { id: 'ayam', label: 'Dada Ayam', icon: '🍗' },
@@ -18,40 +19,30 @@ const KULKAS_ITEMS = [
   { id: 'brokoli', label: 'Brokoli', icon: '🥦' },
 ];
 
-const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOfflineRecipes, generateTrueAIRecipes }) => {
+const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert, generateOfflineRecipes, generateTrueAIRecipes }) => {
   const [step, setStep] = useState(0);
   const isDark = theme === 'dark';
   const [useAI, setUseAI] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Auto-read Logym shared cookie on mount — no button needed since it's the same account
-  const [answers, setAnswers] = useState(() => {
-    let synced = null;
-    try {
-      const match = document.cookie.match(/(^| )shared_profile=([^;]+)/);
-      if (match) synced = JSON.parse(decodeURIComponent(match[2]));
-    } catch(e) {}
-
-    return {
-      name: synced?.name || profile?.name || '',
-      dob: synced?.dob || profile?.dob || '',
-      height: synced?.height || profile?.height || 165,
-      weight: synced?.weight || profile?.weight || 60,
-      targetWeight: synced?.targetWeight || profile?.targetWeight || 55,
-      activityLevel: synced?.activityLevel || profile?.activityLevel || null,
-      gender: synced?.gender || profile?.gender || 'male',
-      // Lomeal-specific fields: use Lomeal profile, not Logym
-      dietProfile: profile?.dietProfile || 'balanced',
-      dietGoal: profile?.dietGoal || null,
-      customDeltaKcal: profile?.customDeltaKcal || '',
-      customProteinPerKg: profile?.customProteinPerKg || '',
-      pace: profile?.pace || 'normal',
-      medicalHistory: profile?.medicalHistory || [],
-      allergies: profile?.allergies || '',
-      kulkas: profile?.kulkas || [],
-      kulkasSearch: '',
-    };
-  });
+  const [answers, setAnswers] = useState(() => ({
+    name: profile?.name || '',
+    dob: profile?.dob || '',
+    height: profile?.height || 165,
+    weight: profile?.weight || 60,
+    targetWeight: profile?.targetWeight || 55,
+    activityLevel: profile?.activityLevel || null,
+    gender: profile?.gender || 'male',
+    dietProfile: profile?.dietProfile || 'balanced',
+    dietGoal: profile?.dietGoal || null,
+    customDeltaKcal: profile?.customDeltaKcal || '',
+    customProteinPerKg: profile?.customProteinPerKg || '',
+    pace: profile?.pace || 'normal',
+    medicalHistory: profile?.medicalHistory || [],
+    allergies: profile?.allergies || '',
+    kulkas: profile?.kulkas || [],
+    kulkasSearch: '',
+  }));
 
   const isValidAge = (dob) => {
     if (!dob) return false;
@@ -59,11 +50,6 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
   };
 
   const steps = [
-    {
-      title: "Sinkronisasi Data Kesehatan",
-      key: 'settings',
-      icon: <Sparkles className={`${t.textAccent} mb-4`} size={40} />
-    },
     {
       title: "Identitas Diri",
       key: 'identity',
@@ -102,14 +88,13 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
   ];
 
   const canProceed = () => {
-    if (step === 0) return true;
-    if (step === 1) return isValidAge(answers.dob) && answers.gender && answers.name?.trim().length > 0;
-    if (step === 2) return answers.height > 90 && answers.weight > 20;
-    if (step === 3) return !!answers.activityLevel; // Tingkat Aktivitas
-    if (step === 4) return true; // Medis & Alergi (Opsional)
-    if (step === 5) return !!answers.dietProfile;
-    if (step === 6) return !!answers.dietGoal;
-    if (step === 7) return true; // Kulkas (Opsional)
+    if (step === 0) return isValidAge(answers.dob) && answers.gender && answers.name?.trim().length > 0;
+    if (step === 1) return answers.height > 90 && answers.weight > 20;
+    if (step === 2) return !!answers.activityLevel; // Tingkat Aktivitas
+    if (step === 3) return true; // Medis & Alergi (Opsional)
+    if (step === 4) return !!answers.dietProfile;
+    if (step === 5) return !!answers.dietGoal;
+    if (step === 6) return true; // Kulkas + mode generate (Opsional)
     return true;
   };
 
@@ -154,16 +139,19 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
       kulkas: answers.kulkas,
     };
     
-    await onSave(finalProfile, false); // false = don't show alert yet
-
-    if (useAI) {
+    try {
+      await onSave(finalProfile, false); // false = don't show alert yet
+      if (useAI) {
         await generateTrueAIRecipes(finalProfile);
-    } else {
+      } else {
         await generateOfflineRecipes(finalProfile);
+      }
+      onClose();
+    } catch (err) {
+      showAlert?.(`Gagal membuat program: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
     }
-    
-    setIsGenerating(false);
-    onClose();
   };
 
   const toggleMedical = (cond) => {
@@ -174,69 +162,9 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
       });
   };
   
-  const toggleKulkas = (id) => {
-      setAnswers(prev => {
-          const arr = prev.kulkas;
-          if (arr.includes(id)) return { ...prev, kulkas: arr.filter(c => c !== id) };
-          return { ...prev, kulkas: [...arr, id] };
-      });
-  };
-
-  const handleHealthSync = (provider) => {
-      // Mock Native Sync for PWA by reading Logym's cookie
-      const match = document.cookie.match(new RegExp('(^| )shared_profile=([^;]+)'));
-      let syncedData = null;
-      if (match) {
-        try {
-            syncedData = JSON.parse(decodeURIComponent(match[2]));
-        } catch(e) {}
-      }
-
-      alert(`Berhasil sinkronisasi dengan ${provider}! (Data simulasi)${syncedData ? ' Menarik profil terbarumu dari LOGYM.' : ''}`);
-      
-      setAnswers(prev => ({
-          ...prev,
-          name: syncedData?.name || 'Chunsky',
-          height: syncedData?.height || 172,
-          weight: syncedData?.weight || 71,
-          targetWeight: syncedData?.targetWeight || 30,
-          activityLevel: syncedData?.activityLevel || 'moderate',
-          dob: syncedData?.dob || '1995-03-24',
-          gender: syncedData?.gender || 'male',
-          medicalHistory: ['Hipertensi'],
-          allergies: 'Kacang'
-      }));
-      
-      if (step < steps.length - 1) setStep(s => s + 1);
-  };
-
-  const [touchStart, setTouchStart] = useState(null);
-  const [touchEnd, setTouchEnd] = useState(null);
-  const [touchStartY, setTouchStartY] = useState(null);
-  const [touchEndY, setTouchEndY] = useState(null);
-  const handleTouchStart = (e) => { setTouchEnd(null); setTouchEndY(null); setTouchStart(e.targetTouches[0].clientX); setTouchStartY(e.targetTouches[0].clientY); };
-  const handleTouchMove = (e) => { e.stopPropagation(); setTouchEnd(e.targetTouches[0].clientX); setTouchEndY(e.targetTouches[0].clientY); };
-  const handleTouchEnd = () => {
-    if (!touchStart || !touchEnd) return;
-    const deltaX = touchStart - touchEnd;
-    const deltaY = touchStartY - touchEndY;
-    // Only process as swipe if gesture is primarily horizontal
-    if (Math.abs(deltaX) < Math.abs(deltaY)) return;
-    if (deltaX < -50 && step > 0) handleBack();
-    else if (deltaX > 50 && step < steps.length && canProceed()) handleNext();
-  };
-
-  const OptionCard = ({ selected, onClick, children }) => (
-    <button
-      onClick={onClick}
-      className={`w-full text-left p-3.5 rounded-2xl border-2 backdrop-blur-md transition-all duration-200 active:scale-[0.98] flex items-center justify-between ${
-        selected ? `${t.borderAccent} ${t.bgAccent} text-white shadow-lg` : `${isDark ? 'border-transparent bg-white/5' : 'border-white/50 bg-white/60'}`
-      }`}
-    >
-      {children}
-      <ChevronRight size={16} className={selected ? 'text-white' : t.textMuted} />
-    </button>
-  );
+  const { handleTouchStart, handleTouchMove, handleTouchEnd } = useSwipeStep({
+    step, maxStep: steps.length, canProceed, onNext: handleNext, onBack: handleBack,
+  });
 
   return (
     <div className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in`} role="dialog" onClick={onClose}>
@@ -330,47 +258,6 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
                             )}
 
                             {/* STEPS CONTENT */}
-                            {s.key === 'settings' && (
-                                <div className="w-full flex flex-col gap-6">
-                                    <label className={`flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all ${useAI ? (isDark ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-emerald-500 bg-emerald-50') : (isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-white')}`}>
-                                        <div>
-                                            <div className={`font-black text-base ${!isDark ? 'text-black' : t.textMain} flex items-center gap-2`}>
-                                                Gunakan AI <Sparkles size={16} className={useAI ? "text-emerald-500" : "text-neutral-500"} />
-                                            </div>
-                                            <p className={`text-xs mt-1 ${!isDark ? 'text-black/60' : 'text-white/60'} leading-tight`}>Rencanakan resep dengan AI yang disesuaikan kondisi medis</p>
-                                        </div>
-                                        <div className={`w-12 h-7 shrink-0 rounded-full flex items-center px-1 transition-colors ${useAI ? 'bg-emerald-500' : 'bg-neutral-500/30'}`}>
-                                            <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${useAI ? 'translate-x-5' : 'translate-x-0'}`}></div>
-                                        </div>
-                                        <input type="checkbox" className="hidden" checked={useAI} onChange={() => setUseAI(!useAI)} />
-                                    </label>
-
-                                    <div className="pt-2 border-t border-neutral-500/20">
-                                        <p className={`text-xs font-bold mb-3 ${t.textMuted} text-center`}>Sinkronisasi data kesehatan (Opsional):</p>
-                                        <div className="grid grid-cols-2 gap-3 mt-2">
-                                            <button
-                                              onClick={() => handleHealthSync('Health Connect')}
-                                              className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
-                                                  isDark ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-black/5 bg-white hover:bg-black/5 shadow-sm'
-                                              }`}
-                                            >
-                                              <img src="/health-connect.webp" alt="Health Connect" className="w-8 h-8 shrink-0 rounded-[22%] object-cover" />
-                                              <span className={`font-black text-xs ${!isDark ? 'text-black' : t.textMain}`}>Health Connect</span>
-                                            </button>
-
-                                            <button
-                                              onClick={() => handleHealthSync('Apple Health')}
-                                              className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
-                                                  isDark ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-black/5 bg-white hover:bg-black/5 shadow-sm'
-                                              }`}
-                                            >
-                                              <img src="/apple-health.webp" alt="Apple Health" className="w-8 h-8 shrink-0" />
-                                              <span className={`font-black text-xs ${!isDark ? 'text-black' : t.textMain}`}>Apple Health</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
                             {s.key === 'identity' && (
                                 <div className="flex flex-col pb-2 space-y-4 w-full">
                                   <div>
@@ -491,7 +378,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
                                       { id: 'moderate', label: 'Cukup Aktif', desc: 'Sering angkat barang, kurir, olahraga ringan.' },
                                       { id: 'active', label: 'Sangat Aktif', desc: 'Pekerja lapangan fisik, kuli bangunan, atlet.' }
                                     ].map((opt) => (
-                                        <OptionCard key={opt.id} selected={answers.activityLevel === opt.id} onClick={() => { setAnswers(prev => ({ ...prev, activityLevel: opt.id })); handleNext(); }}>
+                                        <OptionCard key={opt.id} t={t} isDark={isDark} selected={answers.activityLevel === opt.id} onClick={() => { setAnswers(prev => ({ ...prev, activityLevel: opt.id })); handleNext(); }}>
                                             <div>
                                                 <p className="body-md font-bold">{opt.label}</p>
                                                 <p className={`caption mt-0.5 ${answers.activityLevel === opt.id ? 'text-white/80' : t.textMuted}`}>{opt.desc}</p>
@@ -577,7 +464,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
                                 return (
                                     <div className="w-full flex flex-col gap-3">
                                         {smartGoals.map((g) => (
-                                            <OptionCard key={g.id} selected={answers.dietGoal === g.id} onClick={() => setAnswers(prev => ({ ...prev, dietGoal: g.id, customDeltaKcal: '' }))}>
+                                            <OptionCard key={g.id} t={t} isDark={isDark} selected={answers.dietGoal === g.id} onClick={() => setAnswers(prev => ({ ...prev, dietGoal: g.id, customDeltaKcal: '' }))}>
                                                 <div>
                                                     <p className="body-md font-bold">{g.emoji} {g.label}</p>
                                                     <p className={`caption mt-0.5 ${answers.dietGoal === g.id ? 'text-white/80' : t.textMuted}`}>{g.desc}</p>
@@ -612,6 +499,20 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
                                     : [];
                                 return (
                                     <div className="w-full flex flex-col gap-3">
+                                        {/* Mode generate — dipindah dari step "Sinkronisasi Data Kesehatan" yang dihapus
+                                            (isinya cuma tombol sinkron palsu, baca cookie yang gak pernah ke-set). */}
+                                        <label className={`flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all ${useAI ? (isDark ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-emerald-500 bg-emerald-50') : (isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-white')}`}>
+                                            <div>
+                                                <div className={`font-black text-base ${!isDark ? 'text-black' : t.textMain} flex items-center gap-2`}>
+                                                    Gunakan AI <Sparkles size={16} className={useAI ? "text-emerald-500" : "text-neutral-500"} />
+                                                </div>
+                                                <p className={`text-xs mt-1 ${!isDark ? 'text-black/60' : 'text-white/60'} leading-tight`}>Rencanakan resep dengan AI yang disesuaikan kondisi medis</p>
+                                            </div>
+                                            <div className={`w-12 h-7 shrink-0 rounded-full flex items-center px-1 transition-colors ${useAI ? 'bg-emerald-500' : 'bg-neutral-500/30'}`}>
+                                                <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${useAI ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                                            </div>
+                                            <input type="checkbox" className="hidden" checked={useAI} onChange={() => setUseAI(!useAI)} />
+                                        </label>
                                         {/* Sync button */}
                                         <button
                                             onClick={() => {

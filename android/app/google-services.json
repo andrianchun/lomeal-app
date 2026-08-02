@@ -59,6 +59,14 @@
           }
         },
         {
+          "client_id": "545194651453-pur4k16ubk523fakclj6mm55vdrqmst7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.andrianchun.lomeal",
+            "certificate_hash": "8987634b3efcaa786149a7e3d30b49fe0ae4ef68"
+          }
+        },
+        {
           "client_id": "545194651453-vv955lcb4ej2741l930fcqi0bf7ftdei.apps.googleusercontent.com",
           "client_type": 3
         }

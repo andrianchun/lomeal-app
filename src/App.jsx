@@ -20,11 +20,12 @@ import {
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration } from './utils/healthConnect';
 import { computeDayTotals, calcTargets } from './data/nutrition';
 import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import useDialog from './hooks/useDialog';
 import useToast from './hooks/useToast';
-import { clearAll as clearAllBackCloseables } from './utils/backCloseStack';
+import { clearAll as clearAllBackCloseables, closeTopModal } from './utils/backCloseStack';
 
 const MEAL_REMINDER_ID = 1001;
 const TAB_ORDER = ['dashboard', 'log', 'history', 'program', 'fooddb'];
@@ -54,6 +55,26 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   // kebuka juga — kalau enggak, entri history dummy punya modal itu ketinggalan di
   // belakang navigasi tab, dan tombol back berikutnya bisa nyasar balik ke tab ini.
   useEffect(() => { clearAllBackCloseables(); }, [location.pathname]);
+
+  // Tombol back hardware Android di-intercept native SEBELUM sampai ke DOM — gak ada
+  // popstate yang kepicu sama sekali, jadi mekanisme pushState/popstate di backCloseStack.js
+  // (yang udah beres buat PWA) gak pernah kesentuh di APK tanpa listener ini. Tanpa listener
+  // terdaftar, default Capacitor begitu WebView-nya gak punya history buat di-goBack() adalah
+  // langsung nutup Activity-nya — itu sebabnya APK selama ini kerasa "back = keluar app",
+  // beda dari PWA yang emang jalan lewat browser back beneran.
+  // Urutan standar Android: tutup modal yang lagi kebuka dulu → kalau gak ada, lompat ke
+  // Dashboard (tab utama) dulu kalau lagi di tab lain → baru kalau udah di Dashboard dan gak
+  // ada apa-apa lagi yang bisa ditutup, baru keluar app.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let listenerHandle;
+    CapacitorApp.addListener('backButton', () => {
+      if (closeTopModal()) return;
+      if (location.pathname !== '/dashboard') { navigate('/dashboard'); return; }
+      CapacitorApp.exitApp();
+    }).then((handle) => { listenerHandle = handle; });
+    return () => listenerHandle?.remove();
+  }, [location.pathname, navigate]);
   const { dialog, showAlert, showConfirm } = useDialog(theme === 'dark');
   const { toastPortal, showToast } = useToast(theme === 'dark');
 
@@ -759,6 +780,25 @@ function App() {
       if (!user) setProfile(undefined);
     });
     return unsub;
+  }, []);
+
+  // Nama/foto profil (displayName/photoURL) dibaca dari Firebase Auth, sama persis
+  // dengan Logym (satu akun, satu identitas). Tapi Auth SDK di sesi yang SEDANG
+  // TERBUKA gak otomatis tahu kalau field itu diubah dari sesi/device lain (mis. ganti
+  // nama di Logym di HP) — perubahannya baru kelihatan kalau reload() dipanggil ulang.
+  // Refresh tiap app balik ke foreground, sama pola dengan cek OTA di AppContent.
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState !== 'visible' || !auth.currentUser) return;
+      try {
+        await auth.currentUser.reload();
+        // Reference objek BARU — reload() memutasi objek yang sama, dan React gak akan
+        // re-render kalau state-nya masih nunjuk ke reference lama yang sama persis.
+        setAuthState((prev) => ({ ...prev, user: auth.currentUser }));
+      } catch (e) { /* offline/gagal — biarkan, coba lagi next foreground */ }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   useEffect(() => {
