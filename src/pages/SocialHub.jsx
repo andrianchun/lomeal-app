@@ -5,6 +5,7 @@ import React, { useState, useRef } from 'react';
 import { X, Newspaper, Sparkles, UserCircle2 } from 'lucide-react';
 import SocialFeed from '../components/SocialFeed';
 import ProfilePage from '../components/ProfilePage';
+import useBackClose from '../hooks/useBackClose';
 
 const TABS = [
   { id: 'feed', label: 'Feed', icon: Newspaper },
@@ -13,6 +14,7 @@ const TABS = [
 ];
 
 const SocialHub = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, onClose, onLogout, showAlert, showToast, showConfirm }) => {
+  useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [tab, setTab] = useState(logymUser ? 'feed' : 'profil');
 
   // Swipe kiri/kanan pindah tab Feed/Studio/Profil — pola sama kayak swipe lokal

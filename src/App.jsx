@@ -24,6 +24,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import useDialog from './hooks/useDialog';
 import useToast from './hooks/useToast';
+import { clearAll as clearAllBackCloseables } from './utils/backCloseStack';
 
 const MEAL_REMINDER_ID = 1001;
 const TAB_ORDER = ['dashboard', 'log', 'history', 'program', 'fooddb'];
@@ -49,6 +50,10 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const t = buildTheme(theme);
   const location = useLocation();
   const navigate = useNavigate();
+  // Pindah tab lewat bottom-nav (bukan tombol back) HARUS nutup modal/sheet yang lagi
+  // kebuka juga — kalau enggak, entri history dummy punya modal itu ketinggalan di
+  // belakang navigasi tab, dan tombol back berikutnya bisa nyasar balik ke tab ini.
+  useEffect(() => { clearAllBackCloseables(); }, [location.pathname]);
   const { dialog, showAlert, showConfirm } = useDialog(theme === 'dark');
   const { toastPortal, showToast } = useToast(theme === 'dark');
 
@@ -61,7 +66,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
   useEffect(() => {
     const isNative = Capacitor.isNativePlatform();
-    if (isNative) CapacitorUpdater.notifyAppReady();
+    // notifyAppReady() sudah dipanggil di main.jsx (paling awal, sebelum nunggu
+    // login/profil) — lihat komentar di sana kenapa itu gak boleh nunggu sampai sini.
 
     // SATU jalur cek untuk PWA dan APK: sama-sama baca /ota/version.json.
     // Di web dulu deteksinya nebeng service worker, jadi tidak pernah tahu nomor versi
@@ -115,17 +121,21 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
     checkOta();
 
-    // Tiga pemicu supaya update muncul sendiri tanpa user refresh/hapus cache:
-    // saat dibuka, saat kembali ke foreground, dan tiap 15 menit selama app terbuka
-    // (yang terakhir bikin update darurat nyusul user yang lagi pakai app berjam-jam).
+    // Empat pemicu supaya update muncul sendiri tanpa user refresh/hapus cache: saat
+    // dibuka, saat kembali ke foreground, saat koneksi baru nyambung lagi (kalau tadi
+    // cek gagal karena offline), dan tiap 5 menit selama app terbuka (turun dari 15 —
+    // 5 menit tetap ringan buat sekadar fetch JSON kecil, dan update darurat nyusul user
+    // yang lagi pakai app berjam-jam jauh lebih cepat).
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') checkOta();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    const poll = setInterval(checkOta, 15 * 60 * 1000);
+    window.addEventListener('online', checkOta);
+    const poll = setInterval(checkOta, 5 * 60 * 1000);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', checkOta);
       clearInterval(poll);
     };
   }, []);

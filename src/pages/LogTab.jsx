@@ -19,6 +19,7 @@ import SpeedDialScanner from '../components/SpeedDialScanner';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
 import { URT_DICTIONARY, normalizeUnit, entryUnit } from '../utils/urtMapping';
+import useBackClose from '../hooks/useBackClose';
 
 // Satuan yang bisa dipilih user di sheet hasil AI — dikonversi otomatis ke gram
 // lewat URT_DICTIONARY (tabel ukuran rumah tangga generik, lihat urtMapping.js).
@@ -87,6 +88,19 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const [listening, setListening] = useState(false);
   const [rackExpanded, setRackExpanded] = useState(false);
   const [saveToDb, setSaveToDb] = useState(false); // Default jangan simpan ke custom DB agar tidak menumpuk
+
+  // Tombol back (hardware Android/gesture/browser) nutup sheet yang lagi kebuka dulu,
+  // bukan lompat ke tab lain. `detailSession` bisa nyalain `deleteConfirm` di atasnya
+  // (dan copySourceSession/pickerOpen menggantikannya) — urutan push otomatis LIFO yang
+  // bener karena yang belakangan dibuka memang belakangan di-push.
+  useBackClose(!!aiResult, () => setAiResult(null));
+  useBackClose(!!detailSession, () => setDetailSession(null));
+  useBackClose(!!copySourceSession, () => { setCopySourceSession(null); setCopyTargetSessions([]); });
+  useBackClose(showDayStatsModal, () => setShowDayStatsModal(false));
+  useBackClose(showAddSessionModal, () => setShowAddSessionModal(false));
+  useBackClose(!!deleteConfirm, () => setDeleteConfirm(null));
+  // pickerOpen (FoodPickerModal) sudah dihandle di dalam komponennya sendiri lewat prop `open`.
+
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
   const detailPhotoRef = useRef(null);

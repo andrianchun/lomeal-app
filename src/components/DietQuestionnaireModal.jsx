@@ -5,6 +5,7 @@ import { searchFoods } from '../data/foodDatabase';
 import { DIET_PROFILES, PACES, DIET_GOALS, calcTargets } from '../data/nutrition';
 import ScrollPicker from './ScrollPicker';
 import SwipeInput from './SwipeInput';
+import useBackClose from '../hooks/useBackClose';
 
 const MEDICAL_CONDITIONS = ['Hipertensi', 'Diabetes/Prediabetes', 'Asam Urat', 'Stroke', 'CKD (Gagal Ginjal)', 'PCOS', 'Penyakit Jantung', 'Kolesterol Tinggi', 'Kanker'];
 
@@ -123,6 +124,10 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, generateOf
   const handleBack = () => {
     if (step > 0) setStep(s => s - 1);
   };
+
+  // Wizard 8 langkah — back mundurin satu langkah dulu (kayak tombol panah balik di
+  // pojok), modalnya baru ketutup beneran kalau ditekan lagi pas udah di langkah 0.
+  useBackClose(true, () => (step > 0 ? handleBack() : onClose()));
 
   const generateProgram = async () => {
     if (isGenerating) return;

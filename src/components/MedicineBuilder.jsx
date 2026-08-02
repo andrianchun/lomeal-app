@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Check, Beaker, Pill, ShieldPlus, Syringe, Tablets } from 'lucide-react';
+import useBackClose from '../hooks/useBackClose';
 
 const ICONS = { Pill, Tablets, Beaker, Syringe, ShieldPlus };
 const COLORS = [
@@ -16,6 +17,7 @@ const COLORS = [
 ];
 
 const MedicineBuilder = ({ t, editing, setEditing, onSave }) => {
+  useBackClose(true, () => setEditing(null)); // cuma di-render selagi kebuka — mount = buka, unmount = tutup
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
 
   const CurrentIcon = ICONS[editing.icon] || Pill;

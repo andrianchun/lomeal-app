@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { X, Search, Check, Beaker, Coffee, CupSoda, GlassWater, Pill } from 'lucide-react';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { EMPTY_NUTRITION, addNutrition } from '../data/nutrition';
+import useBackClose from '../hooks/useBackClose';
 
 const ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill };
 const COLORS = [
@@ -18,6 +19,7 @@ const COLORS = [
 ];
 
 const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods }) => {
+  useBackClose(true, () => setEditing(null)); // cuma di-render selagi kebuka — mount = buka, unmount = tutup
   const [ingSearch, setIngSearch] = useState('');
 
   const ingResults = useMemo(() => ingSearch ? searchFoods(ingSearch, customFoods).slice(0, 8) : [], [ingSearch, customFoods]);

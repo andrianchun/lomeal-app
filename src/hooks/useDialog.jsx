@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
+import useBackClose from './useBackClose';
 
 /**
  * useDialog — self-contained in-app alert & confirm dialogs.
@@ -40,6 +41,10 @@ export default function useDialog() {
       setState({ mode: 'confirm', message, title, confirmText, cancelText, danger });
     });
   }, []);
+
+  // Back = sama kayak tombol Batal (bukan Ya) — konvensi standar Android: tombol back
+  // di dialog itu batalin, gak pernah nyetujuin aksi (apalagi yang danger:true).
+  useBackClose(!!state, () => close(state?.mode === 'confirm' ? false : undefined));
 
   const dialog = state ? (
     <div

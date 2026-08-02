@@ -13,6 +13,7 @@ import { isNativeApp, captureToFile } from '../utils/nativeCamera';
 import { sortFoodsByUsage } from '../utils/foodUsage';
 import ImageCropperModal from '../components/ImageCropperModal';
 import SpeedDialScanner from '../components/SpeedDialScanner';
+import useBackClose from '../hooks/useBackClose';
 
 const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key, `${n.label} (${n.unit})`]);
 const EXTRA_NUTRIENT_FIELDS = NUTRIENTS.filter(n => !n.macro).map(n => [n.key, `${n.label} (${n.unit})`]);
@@ -165,6 +166,14 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     setCropSrc(url);
     return () => URL.revokeObjectURL(url);
   }, [cropFile]);
+
+  // Tombol back nutup layar edit/detail (balik ke daftar) dan popover urutan, bukan
+  // lompat keluar tab. `editing`/`detail` gantiin seluruh isi halaman (bukan overlay),
+  // tapi transisinya sama aja — back tetap harus "mundur satu langkah".
+  useBackClose(!!editing, () => setEditing(null));
+  useBackClose(!!detail, () => setDetail(null));
+  useBackClose(showSortMenu, () => setShowSortMenu(false));
+  // cropFile (ImageCropperModal) sudah dihandle di dalam komponennya sendiri lewat prop `open`.
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
 

@@ -7,8 +7,10 @@ import { uploadImageToFirebase } from '../utils/storageLogym';
 import { createCommunityPost } from '../utils/communityApi';
 import { containsBadWords } from '../utils/moderationApi';
 import useDialog from '../hooks/useDialog';
+import useBackClose from '../hooks/useBackClose';
 
 export default function CreatePostModal({ user, onClose, theme, t, initialFiles = [], postDataOverrides = {} }) {
+  useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [text, setText] = useState('');
   const [images, setImages] = useState(initialFiles);
   const [isUploading, setIsUploading] = useState(false);

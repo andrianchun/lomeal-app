@@ -12,6 +12,7 @@ import { auth, db } from '../firebase';
 import { uploadImageToFirebase, deleteImageFromFirebase } from '../utils/storageLogym';
 import { registerToCommunity, updateUserProfileInFeed, getUserPosts } from '../utils/communityApi';
 import { getFollowerCount, getFollowingCount } from '../utils/followApi';
+import useBackClose from '../hooks/useBackClose';
 import { ACHIEVEMENTS, checkAchievements } from '../data/achievements';
 import { DIET_PROFILES } from '../data/nutrition';
 import FollowListModal from './FollowListModal';
@@ -103,6 +104,9 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
     if (cropSourceUrl) URL.revokeObjectURL(cropSourceUrl);
     setCropSourceUrl(null);
   };
+  // followListType (FollowListModal) SENGAJA gak didaftar di sini — udah dihandle sendiri
+  // di dalam komponennya.
+  useBackClose(!!cropSourceUrl, closeCropper);
 
   const confirmPhotoUpload = async () => {
     if (!cropSourceUrl || !croppedAreaPixels || !logymUser) return;

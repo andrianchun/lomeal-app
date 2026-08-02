@@ -10,6 +10,7 @@ import { STATUS, statusFor, MACRO_COLORS } from '../theme';
 import { MEAL_SESSIONS, getLocalYMD, getMonthKey } from '../data/constants';
 import { pushActivityOverrideToLogym } from '../utils/biometricSync';
 import SwipeInput from '../components/SwipeInput';
+import useBackClose from '../hooks/useBackClose';
 
 /**
  * TAB 1: DASHBOARD — Pusat Pantau Imersif (Fase 5 blueprint).
@@ -50,6 +51,13 @@ const DashboardTab = ({
   const [selectedNutrientForBreakdown, setSelectedNutrientForBreakdown] = useState(null);
   const [showTargetSettings, setShowTargetSettings] = useState(false);
   const [showBiometricModal, setShowBiometricModal] = useState(false);
+
+  // showTargetSettings/showBiometricModal SENGAJA gak didaftar di sini — udah dihandle
+  // sendiri di dalam TargetSettingsModal/BiometricSettingsModal. Dua panggilan di bawah ini
+  // dua lapis NYATA: buka rincian nutrien dulu (di ATAS modal peringatan yang masih kebuka),
+  // back pertama mundur ke daftar peringatan, back kedua baru nutup modalnya.
+  useBackClose(showWarnings, () => setShowWarnings(false));
+  useBackClose(!!selectedNutrientForBreakdown, () => setSelectedNutrientForBreakdown(null));
 
   // Chip profil makanan di header
   const dietMeta = DIET_PROFILES.find(d => d.id === dietProfile) || null;

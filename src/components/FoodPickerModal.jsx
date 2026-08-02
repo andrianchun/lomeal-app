@@ -4,6 +4,7 @@ import { searchFoods, nutritionForAmount, FOOD_CATEGORIES } from '../data/foodDa
 import { scaleNutrition, NUTRIENTS, EMPTY_NUTRITION } from '../data/nutrition';
 import { makeEntry } from '../utils/foodLog';
 import { recordFoodUsage, sortFoodsByUsage } from '../utils/foodUsage';
+import useBackClose from '../hooks/useBackClose';
 
 const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key, `${n.label} (${n.unit})`]);
 
@@ -24,6 +25,8 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, customFoods = [], rec
     if (category) list = list.filter(f => f.category === category);
     return sortFoodsByUsage(list, favoriteFoods).slice(0, 60);
   }, [term, category, customFoods, favoriteFoods]);
+
+  useBackClose(open, onClose);
 
   if (!open) return null;
 

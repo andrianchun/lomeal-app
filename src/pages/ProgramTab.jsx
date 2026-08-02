@@ -11,6 +11,7 @@ import { deductStock } from '../utils/stockConverter';
 import SupplementBuilder from '../components/SupplementBuilder';
 import MedicineBuilder from '../components/MedicineBuilder';
 import DietQuestionnaireModal from '../components/DietQuestionnaireModal';
+import useBackClose from '../hooks/useBackClose';
 
 const ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus };
 const COLORS = [
@@ -44,6 +45,14 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
   const [ingSearch, setIngSearch] = useState('');
   const [shareBusy, setShareBusy] = useState(null);
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+
+  // Tombol back nutup/mundurin layar builder & sheet, bukan lompat keluar tab.
+  // editingSupplement/editingMedicine/showQuestionnaire SENGAJA gak didaftar di sini —
+  // udah dihandle sendiri-sendiri di dalam SupplementBuilder/MedicineBuilder/
+  // DietQuestionnaireModal (daftar dobel bikin dua entri history buat satu modal).
+  useBackClose(!!editing, () => setEditing(null));
+  useBackClose(!!assigning, () => setAssigning(null));
+  useBackClose(!!cookingRecipe, () => setCookingRecipe(null));
 
   const isDark = theme === 'dark';
 

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { getLang } from '../i18n';
 import AdminDashboard from './AdminDashboard';
+import useBackClose from '../hooks/useBackClose';
 
 const FAQ_ITEMS_ID = [
   { q: 'Bagaimana cara sinkronisasi data antar HP dan laptop?', a: 'Cukup login pakai akun Google yang sama di semua perangkat. Data otomatis tersinkron lewat cloud dalam hitungan detik.' },
@@ -86,6 +87,7 @@ const SettingsPage = ({
   onDeleteAccount, syncAllNutritionToLogym, lomealUser, 
   otaAvailable, otaState, currentVer, onUpdateApp, downloadProgress,
 }) => {
+  useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [activeTab, setActiveTab] = useState('preferensi');
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);

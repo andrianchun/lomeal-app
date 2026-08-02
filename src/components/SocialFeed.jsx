@@ -11,6 +11,7 @@ import { getFollowingIds, getFollowerList } from '../utils/followApi';
 import { cloudinaryThumb } from '../utils/cloudinary';
 import { containsBadWords, reportPost, getLocalHiddenPosts } from '../utils/moderationApi';
 import CreatePostModal from './CreatePostModal';
+import useBackClose from '../hooks/useBackClose';
 
 const FILTERS = ['Semua', 'Diikuti', 'Teman'];
 
@@ -41,6 +42,9 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
   const [isCreating, setIsCreating] = useState(false);
   const [menuOpen, setMenuOpen] = useState(null);
   const [expandedComments, setExpandedComments] = useState({});
+  // isCreating (CreatePostModal) SENGAJA gak didaftar di sini — udah dihandle sendiri
+  // di dalam komponennya.
+  useBackClose(!!menuOpen, () => setMenuOpen(null));
   const [comments, setComments] = useState({});
   const [commentInput, setCommentInput] = useState({});
 

@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { X, ExternalLink } from 'lucide-react';
 import SwipeInput from './SwipeInput';
+import useBackClose from '../hooks/useBackClose';
 
 const BiometricSettingsModal = ({ t, theme, profile, saveProfilePatch, logymUser, onClose }) => {
+  useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [weight, setWeight] = useState(profile?.physical?.weight || 60);
   const [height, setHeight] = useState(profile?.physical?.height || 165);
   const [gender, setGender] = useState(profile?.physical?.gender || 'male');

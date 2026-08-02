@@ -1,5 +1,6 @@
 import React from 'react';
 import { DownloadCloud, X } from 'lucide-react';
+import useBackClose from '../hooks/useBackClose';
 
 // Bar progres unduhan. Bundle OTA puluhan MB, jadi tanpa indikator user ngira
 // tombolnya macet dan menekan berulang kali.
@@ -27,10 +28,14 @@ export default function UpdaterAlert({
   open, force, onUpdate, onClose, releaseNotes, theme,
   currentVersion, newVersion, progress,
 }) {
+  const downloading = progress !== null && progress !== undefined;
+  // Sama kayak tombol X-nya: kartu update wajib (force) gak bisa ditutup sama sekali,
+  // dan pas lagi unduh jangan sampai back malah nutup kartunya (progress ilang dari layar).
+  useBackClose(!!(open && !force && !downloading), onClose);
+
   if (!open) return null;
 
   const t = theme;
-  const downloading = progress !== null && progress !== undefined;
   const versionLine = currentVersion && newVersion
     ? `v${currentVersion} → v${newVersion}`
     : newVersion ? `v${newVersion}` : null;

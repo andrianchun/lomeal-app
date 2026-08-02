@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactCrop, { centerCrop, makeAspectCrop, convertToPixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { X, Check, RotateCw, Loader2 } from 'lucide-react';
+import useBackClose from '../hooks/useBackClose';
 
 function centerAspectCrop(mediaWidth, mediaHeight, aspect) {
   return centerCrop(
@@ -38,6 +39,8 @@ export default function ImageCropperModal({
   // Komponen ini gak pernah di-unmount (cuma return null), jadi state crop foto sebelumnya
   // bakal nempel di foto berikutnya kalau gak direset tiap ganti gambar.
   useEffect(() => { setCrop(undefined); setCompletedCrop(null); setRotate(0); setLoadError(false); }, [imageSrc]);
+
+  useBackClose(!!(open && imageSrc), onClose);
 
   if (!open || !imageSrc) return null;
 

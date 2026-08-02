@@ -3,6 +3,7 @@ import { X, ChevronDown, ChevronUp, Calculator } from 'lucide-react';
 import { DIET_PROFILES, DIET_GOALS, PACES, calcTargets } from '../data/nutrition';
 import { computeAge } from '../data/constants';
 import SwipeInput from './SwipeInput';
+import useBackClose from '../hooks/useBackClose';
 
 /**
  * Quick-access target settings — dibuka dari ikon gear di hero dashboard.
@@ -12,6 +13,7 @@ import SwipeInput from './SwipeInput';
  * pace dulu cuma bisa diisi sekali pas onboarding, gak ada UI ubah lagi — ini nutupnya.
  */
 const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) => {
+  useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [dietGoal, setDietGoal] = useState(profile?.dietGoal || 'maintenance');
   const [pace, setPace] = useState(profile?.pace || 'normal');
   const [customDeltaKcal, setCustomDeltaKcal] = useState(profile?.customDeltaKcal ?? '');

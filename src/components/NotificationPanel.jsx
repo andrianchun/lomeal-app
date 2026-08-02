@@ -4,8 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, X, Heart, MessageCircle, UserPlus, RefreshCw } from 'lucide-react';
 import { getNotifications, markNotificationsRead } from '../utils/communityApi';
+import useBackClose from '../hooks/useBackClose';
 
 export default function NotificationPanel({ user, isDark, t, onClose, onNotifClick }) {
+  useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const accent = t?.textAccent || 'text-green-500';
   const accentBg = t?.bgAccentSoft || 'bg-green-500/10';
 

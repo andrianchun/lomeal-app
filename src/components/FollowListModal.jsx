@@ -12,8 +12,10 @@ import {
 } from '../utils/followApi';
 import { collection, query, where, getDocs, documentId } from 'firebase/firestore';
 import { db } from '../firebase';
+import useBackClose from '../hooks/useBackClose';
 
 export default function FollowListModal({ currentUser, type, isDark, t, onClose }) {
+  useBackClose(true, onClose); // komponen ini cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [list, setList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [followingSet, setFollowingSet] = useState(new Set());
