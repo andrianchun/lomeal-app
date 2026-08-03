@@ -18,7 +18,7 @@ import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitP
 import {
   pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym, pushNutritionBioToLogym,
 } from './utils/biometricSync';
-import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration } from './utils/healthConnect';
+import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories } from './utils/healthConnect';
 import { computeDayTotals, calcTargets, DIET_PROFILES } from './data/nutrition';
 import { generateDietRecipe, buildAiRecipe } from './utils/aiFood';
 import { Capacitor } from '@capacitor/core';
@@ -571,11 +571,34 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     hcReadBurnedCalories(todayYmd).then(setHcBurnedKcal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.healthConnectEnabled, todayYmd]);
+  // Backfill kalori-terbakar historis — Lomeal sebelumnya gak punya slot per-hari buat ini
+  // (cuma live utk hari ini via hcBurnedKcal di atas). `dayData` per-hari itu objek bebas
+  // (lihat saveDay/saveDayFs), jadi field baru `burnedKcal` di situ gak butuh migrasi skema.
+  const handleHcBackfill = async (days = 30) => {
+    if (!settings.healthConnectEnabled) return;
+    // ponytail: nunggu tetap (bukan Promise per-subscribe) — cukup buat kasus umum, kalau
+    // koneksi lambat & bulan lama belum sempat ke-load, tinggal pencet tombol sekali lagi.
+    const months = new Set();
+    for (let i = 0; i <= days; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      months.add(getMonthKey(getLocalYMD(d)));
+    }
+    months.forEach((m) => ensureMonth(m));
+    await new Promise((r) => setTimeout(r, 1500));
+    await hcBackfillBurnedCalories(
+      days,
+      (ymd) => !!daysMap[ymd]?.burnedKcal || !!lyfitYearData?.[ymd]?.bioData,
+      (ymd, kcal) => saveDay(ymd, { ...(daysMap[ymd] || {}), burnedKcal: kcal }),
+    );
+  };
+
   const handleToggleHealthConnect = async () => {
     if (settings.healthConnectEnabled) { updateSetting('healthConnectEnabled', false); return; }
     try {
       await hcRequestPermissions();
       updateSetting('healthConnectEnabled', true);
+      handleHcBackfill(30);
     } catch (e) {
       await showAlert('Gagal menyambungkan Health Connect: ' + e.message);
     }
@@ -796,6 +819,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
           onToggleHealthConnect={handleToggleHealthConnect}
           healthConnected={!!settings.healthConnectEnabled}
           healthAvailable={healthAvailable}
+          onHcBackfill={handleHcBackfill}
           onDeleteAccount={handleDeleteAccount}
           syncAllNutritionToLogym={syncAllNutritionToLogym}
           lomealUser={user}

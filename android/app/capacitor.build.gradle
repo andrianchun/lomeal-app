@@ -13,8 +13,8 @@ dependencies {
     implementation project(':capacitor-app')
     implementation project(':capacitor-camera')
     implementation project(':capacitor-local-notifications')
+    implementation project(':capgo-capacitor-health')
     implementation project(':capgo-capacitor-updater')
-    implementation project(':capacitor-health-connect')
 
 }
 

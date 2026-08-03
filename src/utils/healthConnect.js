@@ -1,76 +1,81 @@
 // ============================================================
-// ORCHESTRATOR HEALTH CONNECT (Fase 10) — dua arah (read/write)
+// ORCHESTRATOR HEALTH CONNECT via @capgo/capacitor-health (dua arah + backfill histori)
 // Baca : kalori terbakar & langkah (smartwatch dsb.)
-// Tulis: total kalori & makro yang dimakan + hidrasi
+// Tulis: kalori yang dimakan (dietaryEnergyConsumed) + hidrasi (dietaryWater)
 // Hanya aktif di platform native Android (Capacitor).
+//
+// GANTI PLUGIN (dari capacitor-health-connect ke @capgo/capacitor-health) — plugin lama
+// TIDAK mendukung tipe 'Nutrition'/'Hydration'/'TotalCaloriesBurned' sama sekali (native-nya
+// literally throw "Unexpected RecordType" kalau dipanggil pakai tipe itu), padahal kode lama
+// di sini nembak persis tipe-tipe itu. Jadi fitur tulis-ke-Health-Connect selama ini SELALU
+// gagal, bukan cuma soal bug izin di bawah.
 // ============================================================
 import { Capacitor } from '@capacitor/core';
 
 const isNative = () => Capacitor.isNativePlatform();
 
 const getPlugin = async () => {
-  const { HealthConnect } = await import('capacitor-health-connect');
-  return HealthConnect;
+  const { Health } = await import('@capgo/capacitor-health');
+  return Health;
 };
 
 export const hcAvailable = async () => {
   if (!isNative()) return false;
   try {
-    const HC = await getPlugin();
-    const res = await HC.checkAvailability();
-    return res?.availability === 'Available';
+    const H = await getPlugin();
+    const res = await H.isAvailable();
+    return !!res?.available;
   } catch { return false; }
 };
 
-const READ_TYPES = ['ActiveCaloriesBurned', 'TotalCaloriesBurned', 'Steps', 'Weight'];
-const WRITE_TYPES = ['Nutrition', 'Hydration'];
+const READ_TYPES = ['calories', 'steps', 'weight'];
+const WRITE_TYPES = ['dietaryEnergyConsumed', 'dietaryWater'];
 
+// Android gak nge-throw kalau user pencet "Tolak" di dialog izin — tetap resolve normal
+// dengan readAuthorized/writeAuthorized kosong. Lempar di sini kalau BENERAN nihil, biar semua
+// caller (App.jsx, OnboardingFlow.jsx, DietQuestionnaireModal.jsx) yang udah punya try/catch
+// otomatis kebenerin tanpa perlu diubah manual satu-satu.
+// requestHistoryAccess:true — tanpa ini Health Connect cuma kasih akses baca 30 hari terakhir,
+// backfill histori yang lebih lama gak akan dapat apa-apa (lihat AndroidManifest.xml).
 export const hcRequestPermissions = async () => {
-  const HC = await getPlugin();
-  return HC.requestHealthPermissions({ read: READ_TYPES, write: WRITE_TYPES });
+  const H = await getPlugin();
+  const result = await H.requestAuthorization({ read: READ_TYPES, write: WRITE_TYPES, requestHistoryAccess: true });
+  if (!result?.readAuthorized?.length && !result?.writeAuthorized?.length) {
+    throw new Error('Izin ditolak — buka Pengaturan Android > Aplikasi > Health Connect > Aplikasi terhubung untuk memberi akses manual.');
+  }
+  return result;
 };
 
 // Baca kalori aktif terbakar untuk satu tanggal (YYYY-MM-DD)
 export const hcReadBurnedCalories = async (ymd) => {
   if (!isNative()) return null;
   try {
-    const HC = await getPlugin();
-    const start = new Date(`${ymd}T00:00:00`);
-    const end = new Date(`${ymd}T23:59:59`);
-    const res = await HC.readRecords({
-      type: 'ActiveCaloriesBurned',
-      timeRangeFilter: { type: 'between', startTime: start.toISOString(), endTime: end.toISOString() },
+    const H = await getPlugin();
+    const res = await H.queryAggregated({
+      dataType: 'calories',
+      startDate: new Date(`${ymd}T00:00:00`).toISOString(),
+      endDate: new Date(`${ymd}T23:59:59`).toISOString(),
+      bucket: 'day',
+      aggregation: 'sum',
     });
-    const records = res?.records || [];
-    const totalKcal = records.reduce((sum, r) => sum + (r.energy?.value || r.energy || 0), 0);
-    // Plugin memakai satuan kilokalori pada energy.unit 'kilocalories' umumnya
-    return Math.round(totalKcal);
+    const total = res?.samples?.[0]?.value;
+    return total != null ? Math.round(total) : null;
   } catch (e) {
     console.warn('hcReadBurnedCalories gagal:', e);
     return null;
   }
 };
 
-// Tulis ringkasan nutrisi harian yang dimakan user ke Health Connect
+// Tulis kalori yang dimakan hari ini (ringkasan, bukan per-item — plugin ini gak dukung
+// Nutrition record lengkap dengan makro) ke Health Connect.
 export const hcWriteNutrition = async (ymd, totals) => {
   if (!isNative()) return false;
   try {
-    const HC = await getPlugin();
-    const start = new Date(`${ymd}T12:00:00`);
-    const end = new Date(`${ymd}T12:01:00`);
-    await HC.insertRecords({
-      records: [{
-        type: 'Nutrition',
-        startTime: start.toISOString(),
-        endTime: end.toISOString(),
-        energy: { unit: 'kilocalories', value: Math.round(totals.kcal || 0) },
-        protein: { unit: 'grams', value: Math.round(totals.protein || 0) },
-        totalCarbohydrate: { unit: 'grams', value: Math.round(totals.carbs || 0) },
-        totalFat: { unit: 'grams', value: Math.round(totals.fat || 0) },
-        sodium: { unit: 'milligrams', value: Math.round(totals.sodium || 0) },
-        sugar: { unit: 'grams', value: Math.round(totals.sugar || 0) },
-        mealType: 4, // unknown/total harian
-      }],
+    const H = await getPlugin();
+    await H.saveSample({
+      dataType: 'dietaryEnergyConsumed',
+      value: Math.round(totals.kcal || 0),
+      startDate: new Date(`${ymd}T12:00:00`).toISOString(),
     });
     return true;
   } catch (e) {
@@ -82,20 +87,45 @@ export const hcWriteNutrition = async (ymd, totals) => {
 export const hcWriteHydration = async (ymd, ml) => {
   if (!isNative() || !ml) return false;
   try {
-    const HC = await getPlugin();
-    const start = new Date(`${ymd}T12:00:00`);
-    const end = new Date(`${ymd}T12:01:00`);
-    await HC.insertRecords({
-      records: [{
-        type: 'Hydration',
-        startTime: start.toISOString(),
-        endTime: end.toISOString(),
-        volume: { unit: 'milliliters', value: Math.round(ml) },
-      }],
+    const H = await getPlugin();
+    await H.saveSample({
+      dataType: 'dietaryWater',
+      value: ml / 1000, // plugin pakai liter, Lomeal nyimpen mL
+      startDate: new Date(`${ymd}T12:00:00`).toISOString(),
     });
     return true;
   } catch (e) {
     console.warn('hcWriteHydration gagal:', e);
     return false;
+  }
+};
+
+// Backfill: tarik kalori-terbakar N hari ke belakang sekaligus (satu query teragregasi,
+// bukan loop per-hari) — dipanggil sekali abis konek pertama kali, atau lewat tombol
+// "Sinkron ulang" manual. `hasOtherSource(ymd)` mengembalikan true kalau hari itu SUDAH
+// punya sumber data lain (mis. Logym) — backfill gak boleh nimpa itu, cuma isi yang kosong.
+// `onDayResult(ymd, kcal)` dipanggil per hari yang berhasil diisi, biar caller yang nulis ke
+// Firestore (lewat saveDay yang sudah ada) — file ini sengaja gak nulis Firestore sendiri.
+export const hcBackfillBurnedCalories = async (days, hasOtherSource, onDayResult) => {
+  if (!isNative()) return;
+  try {
+    const H = await getPlugin();
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - days);
+    const res = await H.queryAggregated({
+      dataType: 'calories',
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+      bucket: 'day',
+      aggregation: 'sum',
+    });
+    for (const sample of res?.samples || []) {
+      const ymd = sample.startDate.slice(0, 10);
+      if (hasOtherSource(ymd)) continue;
+      if (sample.value > 0) onDayResult(ymd, Math.round(sample.value));
+    }
+  } catch (e) {
+    console.warn('hcBackfillBurnedCalories gagal:', e);
   }
 };

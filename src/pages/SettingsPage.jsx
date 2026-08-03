@@ -83,12 +83,13 @@ const SettingsPage = ({
   t, theme, settings = {}, updateSetting, logymUser, logymApiKeys = [],
   onClose, onLogout, showAlert, showConfirm,
   exportData, handleImportFile,
-  onToggleHealthConnect, healthConnected, healthAvailable,
-  onDeleteAccount, syncAllNutritionToLogym, lomealUser, 
+  onToggleHealthConnect, healthConnected, healthAvailable, onHcBackfill,
+  onDeleteAccount, syncAllNutritionToLogym, lomealUser,
   otaAvailable, otaState, currentVer, onUpdateApp, downloadProgress,
 }) => {
   useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [activeTab, setActiveTab] = useState('preferensi');
+  const [hcBackfilling, setHcBackfilling] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -390,6 +391,18 @@ const SettingsPage = ({
               </div>
               {!healthAvailable && (
                 <p className={`text-[10px] ${t.textMuted} leading-tight`}>Aktif di aplikasi Android (Capacitor) — belum tersedia di browser web.</p>
+              )}
+              {healthConnected && (
+                <button
+                  disabled={hcBackfilling}
+                  onClick={async () => {
+                    setHcBackfilling(true);
+                    try { await onHcBackfill(30); } finally { setHcBackfilling(false); }
+                  }}
+                  className={`w-full mt-2 py-2.5 rounded-xl border border-dashed ${t.borderDashed} ${t.btnBg} ${t.textMain} font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50`}
+                >
+                  {hcBackfilling ? 'Menyinkronkan histori 30 hari...' : 'Sinkron Ulang Histori 30 Hari'}
+                </button>
               )}
             </Section>
 

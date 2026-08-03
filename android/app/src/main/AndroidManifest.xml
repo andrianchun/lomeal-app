@@ -57,4 +57,9 @@
     
     <uses-permission android:name="android.permission.health.WRITE_NUTRITION" />
     <uses-permission android:name="android.permission.health.WRITE_HYDRATION" />
+    <!-- Tanpa ini, Health Connect cuma kasih akses baca 30 hari terakhir — backfill histori
+         yang lebih lama gak akan dapat apa-apa. Plugin @capgo/capacitor-health minta ini lewat
+         requestHistoryAccess:true (lihat utils/healthConnect.js), tapi izinnya sendiri WAJIB
+         dideklarasikan di sini oleh app yang makai, gak ikut ter-auto-merge dari plugin. -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
 </manifest>

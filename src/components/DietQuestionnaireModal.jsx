@@ -81,7 +81,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert,
       await hcRequestPermissions();
       alert('Berhasil terhubung ke Health Connect!');
     } catch (e) {
-      alert('Gagal menghubungkan ke Health Connect.');
+      alert('Gagal menghubungkan ke Health Connect: ' + e.message);
       console.error(e);
     }
   };
