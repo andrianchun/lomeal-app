@@ -9,7 +9,7 @@
 // ============================================================
 import { functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
-import { reconcileKcal } from '../data/nutrition';
+import { reconcileKcal, EMPTY_NUTRITION, addNutrition, scaleNutrition } from '../data/nutrition';
 
 const MODELS = ['gemini-1.5-flash-8b', 'gemini-1.5-flash', 'gemini-1.5-pro'];
 
@@ -181,6 +181,29 @@ Format balasan (JSON murni):
 {"name":"nama resep","portions":2,"ingredients":[{"name":"nama bahan","grams":number,"nutrition":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number}}],"note":"catatan singkat (1 kalimat) mengapa ini cocok"}
 Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang diberikan. Harus presisi.` }]);
   return { ...res, ingredients: (res.ingredients || []).map(i => ({ ...i, nutrition: clampNutrition(i.nutrition) })) };
+};
+
+// Bentuk hasil generateDietRecipe jadi objek resep siap-simpan (id, total gizi, per porsi).
+// Dipakai baik dari "Ubah Program" (ProgramTab) maupun auto-generate sesudah onboarding.
+export const buildAiRecipe = (generated, dietName) => {
+  const aiRecipe = {
+    id: `r_ai_${Date.now()}`,
+    name: generated.name || `Resep AI ${dietName}`,
+    portions: generated.portions || 2,
+    ingredients: generated.ingredients || [],
+    note: generated.note || 'Resep otomatis hasil generate AI.',
+    createdAt: new Date().toISOString(),
+  };
+  let tGrams = 0;
+  let tNut = { ...EMPTY_NUTRITION };
+  aiRecipe.ingredients.forEach((ing) => {
+    tGrams += Number(ing.grams || 0);
+    tNut = addNutrition(tNut, ing.nutrition || {});
+  });
+  aiRecipe.totalGrams = tGrams;
+  aiRecipe.total = tNut;
+  aiRecipe.perPortion = scaleNutrition(tNut, 1 / aiRecipe.portions);
+  return aiRecipe;
 };
 
 // --- Kompresi foto on-device ke ≤100KB (blueprint Fase 5) ---

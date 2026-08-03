@@ -103,6 +103,14 @@ export const PACES = [
   { id: 'agresif', label: 'Agresif', desc: '±22% penyesuaian kalori — hasil cepat, disiplin tinggi', factor: 0.22 },
 ];
 
+export const ACTIVITY_LEVELS = [
+  { id: 'sedentary', label: 'Sangat Jarang', emoji: '🛋️', desc: 'Hampir tidak ada aktivitas fisik', factor: 1.2 },
+  { id: 'light', label: 'Jarang', emoji: '🚶', desc: 'Aktivitas ringan 1-3 hari/minggu', factor: 1.375 },
+  { id: 'moderate', label: 'Sedang', emoji: '🏃', desc: 'Aktivitas sedang 3-5 hari/minggu', factor: 1.55 },
+  { id: 'active', label: 'Sering', emoji: '🚴', desc: 'Aktivitas berat 6-7 hari/minggu', factor: 1.725 },
+  { id: 'very_active', label: 'Sangat Sering', emoji: '🏋️', desc: 'Aktivitas fisik sangat berat atau pekerjaan fisik', factor: 1.9 },
+];
+
 // Fase kalori — arah defisit/surplus, TERPISAH dari DIET_PROFILES (gaya makan/makro).
 // Ini yang dulu jadi preset "Cutting/Maintenance/Clean Bulk" di Logym; sekarang milik Lomeal
 // (murni urusan makan, gak ngaruh ke pemilihan/intensitas latihan) — dan disimpan per-hari
@@ -131,9 +139,13 @@ export const calcBMR = ({ weight, height, age, gender }) => {
 export const MIN_SAFE_KCAL = { female: 1200, male: 1500 };
 
 export const calcTargets = (profile) => {
-  const { weight = 70, dietGoal = 'maintenance', dietProfile = 'weight_loss', pace = 'normal', customDeltaKcal = null, customProteinPerKg = null } = profile || {};
+  const { weight = 70, dietGoal = 'maintenance', dietProfile = 'weight_loss', pace = 'normal', activityLevel = 'light', customDeltaKcal = null, customProteinPerKg = null } = profile || {};
   const bmr = calcBMR(profile) || 1600;
-  const tdee = Math.round(bmr * 1.375);
+  
+  // Ambil faktor aktivitas dari profil (fallback ke 'light' jika tidak valid)
+  const actFactor = (ACTIVITY_LEVELS.find(a => a.id === activityLevel) || ACTIVITY_LEVELS[1]).factor;
+  const tdee = Math.round(bmr * actFactor);
+  
   const paceFactor = (PACES.find(p => p.id === pace) || PACES[1]).factor;
 
   // Arah kalori dari dietGoal (fase cutting/maintenance/bulk) — TERPISAH dari dietProfile

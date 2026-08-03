@@ -72,9 +72,12 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
   }, [waterCalcOpen, waterWeather, waterActivity, waterCondition, profile?.physical, medicalHistory]);
 
   const handleSave = () => {
+    // Recompute kkal/makro sekarang ditangani terpusat di saveProfilePatch (App.jsx) —
+    // di sini cukup kirim field mentah yang diubah + waterGoal (satu-satunya nilai yang
+    // gak bisa diturunkan ulang dari calcTargets, murni pilihan user).
     saveProfilePatch({
       dietGoal, pace, dietProfile, customDeltaKcal: customDeltaNum, customProteinPerKg: customProteinNum, allergies: allergies.trim(), medicalHistory,
-      targets: { ...(profile?.targets || {}), waterGoal: Number(waterGoal) || 2000 },
+      targets: { waterGoal: Number(waterGoal) || 2000 },
     });
     onClose();
   };

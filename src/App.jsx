@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Download } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth';
 import { auth } from './firebase';
@@ -18,7 +19,8 @@ import {
   pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym, pushNutritionBioToLogym,
 } from './utils/biometricSync';
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration } from './utils/healthConnect';
-import { computeDayTotals, calcTargets } from './data/nutrition';
+import { computeDayTotals, calcTargets, DIET_PROFILES } from './data/nutrition';
+import { generateDietRecipe, buildAiRecipe } from './utils/aiFood';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
@@ -247,7 +249,37 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     document.body.className = `${t.bgApp} ${t.textMain}`;
   }, [theme, t]);
 
-  const saveProfilePatch = useCallback((patch) => saveLomealProfile(user.uid, patch), [user]);
+  // Sentral recompute target (kkal/makro) tiap ada patch profil — sebelumnya tiap
+  // modal/halaman yang nulis field penentu target (weight/dob/dietGoal/pace/dietProfile/dst)
+  // harus INGET manggil calcTargets sendiri-sendiri, dan yang lupa ninggalin dashboard
+  // nunjukin angka basi (kejadian nyata di TargetSettingsModal, BiometricSettingsModal,
+  // ProfilePage — 3 tempat beda, bug yang sama). Taro di sini sekali biar semua caller,
+  // yang sekarang maupun yang nanti ditambah, otomatis kena tanpa perlu inget-inget lagi.
+  // (Sinkron identitas fisik ke/dari Logym itu sendiri sudah ditangani effect terpisah di
+  // bawah — subscribeLyfitProfile/pushBiometricsToLogym, lihat utils/lyfitSync.js &
+  // utils/biometricSync.js — saveProfilePatch di sini gak perlu tahu soal Logym sama sekali.)
+  const saveProfilePatch = useCallback((patch) => {
+    const merged = {
+      ...profile,
+      ...patch,
+      physical: { ...(profile?.physical || {}), ...(patch.physical || {}) },
+      targets: { ...(profile?.targets || {}), ...(patch.targets || {}) },
+    };
+    const physical = merged.physical;
+    const targets = calcTargets({
+      ...physical,
+      age: computeAge(physical.dob),
+      activityLevel: merged.activityLevel,
+      dietGoal: merged.dietGoal,
+      dietProfile: merged.dietProfile,
+      pace: merged.pace,
+      customDeltaKcal: merged.customDeltaKcal,
+      customProteinPerKg: merged.customProteinPerKg,
+      medicalHistory: merged.medicalHistory,
+      waterGoal: merged.targets.waterGoal,
+    });
+    return saveLomealProfile(user.uid, { ...patch, targets });
+  }, [user, profile]);
   const updateSetting = useCallback((key, value) => saveProfilePatch({ settings: { [key]: value } }), [saveProfilePatch]);
 
   // --- Log harian: subscribe per-bulan, digabung jadi satu daysMap ---
@@ -645,8 +677,17 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     try {
       await deleteAllUserData(user.uid);
       await deleteUser(auth.currentUser);
+      localStorage.clear();
+      window.location.reload();
     } catch (err) {
-      await showAlert('Gagal menghapus akun: ' + err.message + ' — coba logout & login ulang lalu ulangi (Firebase butuh sesi login baru untuk aksi sensitif).');
+      if (err.code === 'auth/requires-recent-login') {
+        // Data Firestore di atas sudah kehapus duluan (gak butuh recent-login), tapi akun
+        // Auth-nya masih hidup karena langkah ini gagal — jadi login ulang pakai akun yang
+        // "sama" bakal masuk ke akun lama yang datanya sudah kosong, BUKAN akun baru.
+        await showAlert('Demi keamanan, Firebase mewajibkan sesi login yang baru untuk menghapus akun. Data profil sudah terhapus — silakan logout, login ulang, lalu tekan Hapus Akun sekali lagi untuk menyelesaikan penghapusan akun.');
+      } else {
+        await showAlert('Gagal menghapus akun: ' + err.message);
+      }
     }
   };
 
@@ -782,6 +823,34 @@ function App() {
     return unsub;
   }, []);
 
+  // --- PWA INSTALL PROMPT ---
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      const hasDismissed = localStorage.getItem('__LOMEAL_PWA_PROMPT_DISMISSED');
+      if (!hasDismissed) {
+        setShowInstallPrompt(true);
+      }
+    };
+
+    const handleAppInstalled = () => {
+      setShowInstallPrompt(false);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
   // Nama/foto profil (displayName/photoURL) dibaca dari Firebase Auth, sama persis
   // dengan Logym (satu akun, satu identitas). Tapi Auth SDK di sesi yang SEDANG
   // TERBUKA gak otomatis tahu kalau field itu diubah dari sesi/device lain (mis. ganti
@@ -818,6 +887,25 @@ function App() {
 
   const handleOnboardingComplete = async (profileData) => {
     await saveLomealProfile(authState.user.uid, profileData);
+
+    // Kasih menu pertama otomatis pakai jawaban kuesioner yang baru diisi — sebelumnya
+    // user kelar onboarding tapi tab Program kosong sampai mereka nemu & isi ULANG
+    // kuesioner terpisah "Ubah Program". Best-effort & senyap: kalau gagal (limit AI
+    // harian, dsb), user masih bisa generate manual dari Program tab kayak biasa.
+    // aiKey null = pakai fallback server (lomealAiChat) — user baru belum sempat
+    // set API key pribadi di Settings pas titik ini, jadi effectiveAiKeys bakal null juga.
+    try {
+      const dietProfile = DIET_PROFILES.find((d) => d.id === profileData.dietProfile) || DIET_PROFILES[0];
+      const generated = await generateDietRecipe(null, {
+        dietProfile: dietProfile.id,
+        dietName: dietProfile.label,
+        medicalHistory: profileData.medicalHistory || [],
+        allergies: (profileData.allergies || '').trim(),
+      });
+      await saveRecipes(authState.user.uid, [buildAiRecipe(generated, dietProfile.label)]);
+    } catch (e) {
+      console.error('Gagal bikin menu pertama otomatis:', e);
+    }
   };
 
   const isCheckingProfile = !!authState.user && profile === undefined;
@@ -846,28 +934,59 @@ function App() {
 
   const darkTheme = buildTheme('dark');
 
-  if (!authState.user) {
-    return <AuthPage t={darkTheme} theme="dark" soundEnabled={false} onLogin={() => {}} />;
-  }
-
-  if (!profile?.onboardingCompleted) {
-    return (
-      <OnboardingFlow
-        t={darkTheme}
-        theme="dark"
-        logymUser={authState.user}
-        onComplete={handleOnboardingComplete}
-      />
-    );
-  }
-
-  const handleLogout = () => {
-    signOut(auth);
-  };
-
   return (
     <BrowserRouter>
-      <AppContent user={authState.user} profile={profile} logymUser={authState.user} onLogout={handleLogout} />
+      <>
+        {authState.user === null ? (
+          <AuthPage t={darkTheme} theme="dark" soundEnabled={false} onLogin={() => {}} />
+        ) : !profile?.onboardingCompleted ? (
+          <OnboardingFlow
+            t={darkTheme}
+            theme="dark"
+            logymUser={authState.user}
+            onComplete={handleOnboardingComplete}
+          />
+        ) : (
+          <AppContent user={authState.user} profile={profile} logymUser={authState.user} onLogout={() => signOut(auth)} />
+        )}
+
+        {/* CUSTOM PWA INSTALL PROMPT (Rendered at top-level) */}
+        {showInstallPrompt && (
+          <div className="fixed inset-0 z-[200] flex items-end justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center animate-in slide-in-from-bottom-8 duration-300 ${darkTheme.bgCard} ${darkTheme.border} border`}>
+              <img src="/icon-192.png" className="w-20 h-20 rounded-2xl mb-4 shadow-xl border border-white/10" alt="Lomeal Logo" />
+              <h3 className={`text-xl font-black ${darkTheme.textMain} mb-2`}>Install Lomeal App</h3>
+              <p className={`text-sm ${darkTheme.textMuted} mb-6`}>Install aplikasi Lomeal di perangkatmu untuk akses lebih cepat, fitur asisten harian, dan pengalaman yang lebih mulus.</p>
+              <div className="flex flex-col w-full gap-3">
+                <button 
+                  className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 text-white ${darkTheme.bgAccent} shadow-md`}
+                  onClick={async () => {
+                    if (deferredPrompt) {
+                      deferredPrompt.prompt();
+                      const { outcome } = await deferredPrompt.userChoice;
+                      if (outcome === 'accepted') {
+                        setDeferredPrompt(null);
+                        setShowInstallPrompt(false);
+                      }
+                    }
+                  }}
+                >
+                  <Download size={18} /> Instal Sekarang
+                </button>
+                <button 
+                  className={`w-full py-3.5 rounded-xl font-bold ${darkTheme.textMuted} hover:${darkTheme.textMain} bg-transparent border border-transparent transition-colors`}
+                  onClick={() => {
+                    localStorage.setItem('__LOMEAL_PWA_PROMPT_DISMISSED', 'true');
+                    setShowInstallPrompt(false);
+                  }}
+                >
+                  Nanti Saja
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
     </BrowserRouter>
   );
 }

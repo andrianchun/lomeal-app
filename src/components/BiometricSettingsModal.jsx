@@ -12,9 +12,11 @@ const BiometricSettingsModal = ({ t, theme, profile, saveProfilePatch, logymUser
   const [manualBurnKcal, setManualBurnKcal] = useState(profile?.settings?.manualBurnKcal || '');
 
   const handleSave = () => {
+    // Recompute kkal/makro (weight/height/dob/gender ikut nentuin BMR/TDEE) ditangani
+    // terpusat di saveProfilePatch (App.jsx) — di sini cukup kirim field mentah yang diubah.
     saveProfilePatch({
       physical: { ...(profile?.physical || {}), weight, height, gender, dob },
-      settings: { ...(profile?.settings || {}), manualBurnKcal: manualBurnKcal !== '' ? Number(manualBurnKcal) : null }
+      settings: { ...(profile?.settings || {}), manualBurnKcal: manualBurnKcal !== '' ? Number(manualBurnKcal) : null },
     });
     onClose();
   };

@@ -1,5 +1,13 @@
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc, updateDoc, serverTimestamp, deleteDoc, setDoc, addDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, updateDoc, serverTimestamp, deleteDoc, setDoc, addDoc, getDocs } from 'firebase/firestore';
+
+export async function fetchDomusItems(uid) {
+  const q = query(collection(db, 'domus_items'), where('uid', '==', uid));
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((i) => i.isFood && !i.consumedAt);
+}
 
 export function subscribeDomusItems(uid, cb) {
   const q = query(collection(db, 'domus_items'), where('uid', '==', uid));

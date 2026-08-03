@@ -1,96 +1,132 @@
-import { useState } from 'react';
-import { ChevronRight, ChevronLeft, Check, Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ChevronRight, ChevronLeft, Check } from 'lucide-react';
 import { fetchLyfitProfile } from '../utils/lyfitSync';
 import { computeAge } from '../data/constants';
-import { DIET_PROFILES, PACES, calcTargets } from '../data/nutrition';
-import { MEDICAL_CONDITIONS } from '../data/medicalConditions';
-import ScrollPicker from '../components/ScrollPicker';
-import OptionCard from '../components/OptionCard';
+import { calcTargets } from '../data/nutrition';
 import useSwipeStep from '../hooks/useSwipeStep';
-import ConsentScreen from '../components/ConsentScreen';
+import { getSharedDietSteps, SharedDietStepRenderer, isValidAge } from '../components/SharedDietSteps';
+import { hcAvailable, hcRequestPermissions } from '../utils/healthConnect';
+import { fetchDomusItems } from '../utils/domusSync';
+import { auth } from '../firebase';
 
-/**
- * ALUR ONBOARDING BERJENJANG — "Digital Anamnesis" (Fase 3 & 6 blueprint)
- * Bentuk carousel kartu bertumpuk di-port persis dari kuesioner Logym
- * (lyfit.app/src/modals/ProgramQuestionnaireModal.jsx): transform stack +
- * swipe gesture + tombol navigasi bulat mengambang.
- * Step "Sambungkan ke Logym" (opsional) menarik gender/dob/tinggi/berat
- * otomatis kalau user sudah punya akun Logym — lihat utils/lyfitSync.js.
- *
- * Step 'consent' SENGAJA tidak ikut carousel kartu-tumpuk (lihat render di bawah) —
- * itu satu-satunya step yang isinya teks hukum, jadi dirender sebagai halaman penuh
- * yang scroll natural, bukan kartu bertinggi tetap dengan scrollbar disembunyikan
- * (yang lama bikin poin ke-3 gampang gak kelihatan di layar kecil).
- */
-const STEPS = [
-  { key: 'consent', title: 'Persetujuan Pengguna' },
-  { key: 'connect', title: 'Sambungkan ke Logym?' },
-  { key: 'identity', title: 'Identitas & Gender' },
-  { key: 'physical', title: 'Data Fisik' },
-  { key: 'medical', title: 'Riwayat Medis & Alergi' },
-  { key: 'diet', title: 'Target Diet Medis' },
-  { key: 'pace', title: 'Komitmen Waktu' },
-];
-
-// Naikkan tanggal ini tiap teks consent (ConsentScreen.jsx) direvisi — dicatat bareng
-// timestamp persetujuan user, jadi ada jejak versi teks mana yang disetujui siapa.
-const CONSENT_VERSION = '2026-08-02';
+// Naikkan tanggal ini tiap teks consent (step 'consent' di SharedDietSteps.jsx) direvisi.
+const CONSENT_VERSION = '2026-08-03';
 
 const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
   const [step, setStep] = useState(0);
   const isDark = theme === 'dark';
 
-  // research: opsional, TIDAK menggerbang canProceed() — beda dari 3 lainnya yang wajib.
-  const [consents, setConsents] = useState({ medical: false, allergy: false, privacy: false, research: false });
-  const [physical, setPhysical] = useState({ dob: '', height: 165, weight: 60, gender: 'male' });
-  const [dietProfile, setDietProfile] = useState(null);
-  const [pace, setPace] = useState('normal');
-  const [medicalHistory, setMedicalHistory] = useState([]);
-  const [allergies, setAllergies] = useState('');
   const [fromLogym, setFromLogym] = useState(false);
+
+  // We use `answers` to match `SharedDietSteps` state exactly
+  const [answers, setAnswers] = useState({
+    name: '',
+    dob: '',
+    height: 165,
+    weight: 60,
+    targetWeight: 55,
+    activityLevel: null,
+    gender: 'male',
+    dietProfile: null,
+    dietGoal: null,
+    pace: 'normal',
+    customDeltaKcal: '',
+    customProteinPerKg: '',
+    medicalHistory: [],
+    allergies: '',
+    kulkas: [],
+    kulkasSearch: '',
+    consents: { tos: false, data: false, ai: false, research: false }
+  });
+
+  // 'pace' (Santai/Normal/Agresif) cuma ngaruh ke kalori kalau dietGoal cutting/bulk —
+  // calcTargets nggak pernah pakai paceFactor buat maintenance, jadi nanya "seberapa
+  // agresif" pas user pilih maintenance itu pertanyaan basi, gak ada efeknya sama sekali.
+  const STEPS = getSharedDietSteps(t).filter((s) => s.key !== 'pace' || answers.dietGoal !== 'maintenance');
 
   // --- Sambungkan ke Logym (opsional, skippable) ---
   const applyLogymPrefill = async (uid) => {
     const p = await fetchLyfitProfile(uid);
-    if (p) {
-      setPhysical((prev) => ({
+    if (p && (p.weight || p.height || p.gender || p.dob)) {
+      setAnswers((prev) => ({
+        ...prev,
+        name: p.name || prev.name,
         dob: p.dob || prev.dob,
         height: p.height || prev.height,
         weight: p.weight || prev.weight,
         gender: p.gender || prev.gender,
+        targetWeight: p.targetWeight || prev.targetWeight,
+        activityLevel: p.activityLevel || prev.activityLevel,
+        dietProfile: p.dietProfile || prev.dietProfile,
+        dietGoal: p.dietGoal || prev.dietGoal,
+        customDeltaKcal: p.customDeltaKcal || prev.customDeltaKcal,
+        customProteinPerKg: p.customProteinPerKg || prev.customProteinPerKg,
+        medicalHistory: p.medicalHistory || prev.medicalHistory,
+        allergies: p.allergies || prev.allergies,
       }));
       setFromLogym(true);
     }
   };
 
-  // Kalau sudah connect sebelumnya (mis. balik dari step lain), tarik ulang tiap masuk step ini.
-  if (logymUser && !fromLogym && step === 1) {
-    applyLogymPrefill(logymUser.uid);
-  }
-
-  const allConsented = consents.medical && consents.allergy && consents.privacy;
-  const physicalValid = physical.dob && computeAge(physical.dob) > 9 && Number(physical.height) > 90 && Number(physical.weight) > 20;
+  useEffect(() => {
+    if (logymUser && !fromLogym && step === 1) {
+      applyLogymPrefill(logymUser.uid);
+    }
+  }, [logymUser, fromLogym, step]);
 
   const canProceed = () => {
-    if (step === 0) return allConsented;
-    if (step === 1) return true; // opsional, selalu bisa lanjut/skip
-    if (step === 2) return !!physical.gender && !!physical.dob && computeAge(physical.dob) > 9;
-    if (step === 3) return physicalValid;
-    if (step === 4) return true; // riwayat medis opsional
-    if (step === 5) return !!dietProfile;
-    if (step === 6) return true;
-    return false;
+    const s = STEPS[step];
+    if (!s) return false;
+
+    if (s.key === 'consent') {
+      // research OPSIONAL — sengaja gak dicek di sini, gak boleh nge-gate tombol Lanjut.
+      const c = answers.consents || { tos: false, data: false, ai: false, research: false };
+      return c.tos && c.data && c.ai;
+    }
+    if (s.key === 'connect') return true;
+
+    // dob DIKETIK di step 'identity' (lihat SharedDietSteps.jsx), tapi step 'biometrics'
+    // gak punya input dob sama sekali — kalau validasi dob cuma dicek di 'biometrics'
+    // (kayak sebelumnya), user yang ngelewatin tanpa isi dob macet permanen di situ,
+    // gak ada UI buat balikin ngisi lagi. Makanya wajib dicek di sini juga.
+    if (s.key === 'identity') return answers.name?.trim().length > 0 && answers.gender && isValidAge(answers.dob);
+    if (s.key === 'biometrics') return isValidAge(answers.dob) && answers.height > 0 && answers.weight > 0;
+    if (s.key === 'activityLevel') return !!answers.activityLevel;
+    if (s.key === 'diet') return !!answers.dietProfile;
+    if (s.key === 'dietGoal') return !!answers.dietGoal;
+    if (s.key === 'pace') return true; // preset default 'normal' udah kepilih, gak wajib diubah
+    if (s.key === 'medical') return true;
+    if (s.key === 'kulkas') return true;
+
+    return true;
   };
 
   const finish = () => {
-    const age = computeAge(physical.dob);
-    const profileForTargets = { ...physical, age, height: Number(physical.height), weight: Number(physical.weight), dietProfile, pace };
+    const age = computeAge(answers.dob);
+    // Profile map for calcTargets matches logic in SharedDietSteps
+    const profileForTargets = {
+      ...answers,
+      age,
+      height: Number(answers.height),
+      weight: Number(answers.weight),
+      // pace ikut dari answers.pace (step 'pace' beneran, bukan dipaksa 'normal') —
+      // calcTargets pakai ini buat paceFactor.
+    };
     const targets = calcTargets(profileForTargets);
+    
+    // Convert answers to the profile shape onComplete expects
     onComplete({
       onboardingCompleted: true,
-      consents: { ...consents, version: CONSENT_VERSION, agreedAt: new Date().toISOString() },
-      physical: { dob: physical.dob, height: Number(physical.height), weight: Number(physical.weight), gender: physical.gender, fromLogym },
-      dietProfile, pace, targets, medicalHistory, allergies: allergies.trim(),
+      consents: { ...(answers.consents || {}), version: CONSENT_VERSION, agreedAt: new Date().toISOString() },
+      physical: { 
+        dob: answers.dob, 
+        height: Number(answers.height), 
+        weight: Number(answers.weight), 
+        gender: answers.gender, 
+        fromLogym 
+      },
+      ...answers,
+      targets,
       createdAt: new Date().toISOString(),
     });
   };
@@ -101,26 +137,39 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
   };
   const handleBack = () => setStep((s) => Math.max(0, s - 1));
 
-  // Dulu versi sendiri yang cuma cek delta horizontal (gampang kesalah-baca kalau user
-  // sebenernya lagi scroll vertikal) — sekarang pakai hook yang sama kayak
-  // DietQuestionnaireModal.jsx, yang membedakan gestur horizontal dari scroll vertikal.
   const { handleTouchStart, handleTouchMove, handleTouchEnd } = useSwipeStep({
     step, maxStep: STEPS.length, canProceed, onNext: handleNext, onBack: handleBack,
   });
 
-  const bmi = physical.height && physical.weight ? (Number(physical.weight) / ((Number(physical.height) / 100) ** 2)).toFixed(1) : null;
+  const handleHealthConnect = async () => {
+    try {
+      const isAvail = await hcAvailable();
+      if (!isAvail) {
+        alert('Health Connect belum tersedia atau belum di-install di perangkat ini.');
+        return;
+      }
+      await hcRequestPermissions();
+      alert('Berhasil terhubung ke Health Connect!');
+    } catch (e) {
+      alert('Gagal menghubungkan ke Health Connect.');
+      console.error(e);
+    }
+  };
+
+  const handleAppleHealth = () => {
+    alert('Apple Health segera hadir di versi iOS!');
+  };
 
   return (
-    <div className={`fixed inset-0 z-[100] flex flex-col ${t.bgApp}`}>
-      <div className="flex justify-center items-center p-5 pb-2 shrink-0">
-        <p className={`text-sm font-medium text-center max-w-[280px] ${t.textMain}`}>
-          Halo! <span className="font-black">Lomeal</span> siap bantu kamu mencatat & mengendalikan pola makan sehat.
+    <div className={`fixed inset-0 z-[100] flex flex-col bg-[url('/bg-program.webp')] bg-cover bg-center`}>
+      <div className={`absolute inset-0 ${isDark ? 'bg-gradient-to-t from-black via-black/40 to-transparent' : 'bg-gradient-to-t from-black/80 via-black/20 to-transparent'}`}></div>
+      <div className="relative z-10 flex flex-col h-full">
+      <div className="flex justify-center items-center p-5 pb-2 shrink-0 pt-[max(env(safe-area-inset-top),2rem)]">
+        <p className={`text-sm font-medium text-center max-w-[280px] text-white drop-shadow-md`}>
+          Halo! <span className="font-black">Coach Lomy</span> siap bantu mencatat dan mengatur pola makan sehatmu.
         </p>
       </div>
 
-      {step === 0 ? (
-        <ConsentScreen t={t} isDark={isDark} consents={consents} setConsents={setConsents} onNext={handleNext} />
-      ) : (
       <div
         className="flex-1 flex flex-col justify-end pb-8 sm:pb-12 overflow-y-auto p-6 pt-0 hide-scrollbar relative"
         onTouchStart={handleTouchStart}
@@ -147,7 +196,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
             return (
               <div
                 key={s.key}
-                className={`absolute inset-x-0 top-0 flex flex-col justify-center transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] p-6 sm:p-8 min-h-full rounded-[2.5rem] border ${isDark ? 'border-white/10 bg-white/[0.045]' : 'border-black/5 bg-white/80'} backdrop-blur-2xl shadow-2xl overflow-y-auto hide-scrollbar`}
+                className={`absolute inset-0 flex flex-col justify-center transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] p-6 sm:p-8 rounded-[2.5rem] border ${isDark ? 'border-white/10 bg-white/[0.045]' : 'border-black/5 bg-white/80'} backdrop-blur-2xl shadow-2xl overflow-hidden`}
                 style={{
                   zIndex: 50 - idx,
                   transform: isPast ? 'translateX(-100%) scale(0.9) rotate(-5deg)' : `translateX(${offset * 24}px) translateY(${offset * 4}px) scale(${1 - offset * 0.05})`,
@@ -160,111 +209,29 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
                   <h2 className={`text-xl sm:text-2xl font-black leading-tight ${t.textMain}`}>{s.title}</h2>
                 </div>
 
-                {s.key === 'connect' && (
-                  <div className="flex-1 flex flex-col gap-3 overflow-y-auto hide-scrollbar">
-                    <div className={`p-4 rounded-2xl border-2 ${t.borderAccent} ${t.bgAccentSoft} text-center`}>
-                      <Sparkles size={22} className={`mx-auto mb-2 ${t.textAccent}`} />
-                      <p className={`body-md ${t.textMain}`}>Tersambung ke Logym!</p>
-                      <p className={`caption font-medium mt-1 ${t.textMuted}`}>Gender/DOB/tinggi/berat sudah ditarik otomatis — cek di langkah berikutnya.</p>
-                    </div>
+                <div className="flex-1 flex flex-col overflow-y-auto hide-scrollbar content-start">
+                  <SharedDietStepRenderer
+                    stepKey={s.key}
+                    answers={answers}
+                    setAnswers={setAnswers}
+                    t={t}
+                    isDark={isDark}
+                    handleNext={handleNext}
+                    onHealthConnect={handleHealthConnect}
+                    onAppleHealth={handleAppleHealth}
+                    fromLogym={fromLogym}
+                      onSyncDomus={async () => {
+                        if (!auth.currentUser) return [];
+                        try {
+                          const items = await fetchDomusItems(auth.currentUser.uid);
+                          return items.map(item => ({ id: item.id, name: item.name }));
+                        } catch (e) {
+                          console.error("Gagal sinkronisasi domus:", e);
+                          return [];
+                        }
+                      }}
+                    />
                   </div>
-                )}
-
-                {s.key === 'identity' && (
-                  <div className="flex-1 flex flex-col gap-4">
-                    <div>
-                      <p className={`caption font-medium mb-2 ${t.textMuted}`}>Gender</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[['male', 'Pria'], ['female', 'Wanita']].map(([id, label]) => (
-                          <button key={id} onClick={() => setPhysical((p) => ({ ...p, gender: id }))}
-                            className={`py-3 rounded-xl border-2 font-bold text-sm transition-all ${physical.gender === id ? `${t.bgAccent} border-transparent text-white` : `${isDark ? 'border-white/10 bg-white/5' : 'border-white/50 bg-white/60'} ${t.textMuted}`}`}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <p className={`caption font-medium mb-2 ${t.textMuted}`}>Tanggal Lahir</p>
-                      <input type="date" value={physical.dob} max={new Date().toISOString().slice(0, 10)}
-                        onChange={(e) => setPhysical((p) => ({ ...p, dob: e.target.value }))}
-                        className={`w-full px-3 py-3 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} outline-none`} />
-                    </div>
-                  </div>
-                )}
-
-                {s.key === 'physical' && (
-                  <div className="flex-1 flex flex-col items-center gap-4">
-                    <div className="flex gap-4">
-                      <div className="text-center">
-                        <p className={`caption font-medium mb-1 ${t.textMuted}`}>Tinggi (cm)</p>
-                        <ScrollPicker value={physical.height} onChange={(v) => setPhysical((p) => ({ ...p, height: v }))} min={90} max={230} step={1} theme={theme} t={t} />
-                      </div>
-                      <div className="text-center">
-                        <p className={`caption font-medium mb-1 ${t.textMuted}`}>Berat (kg)</p>
-                        <ScrollPicker value={physical.weight} onChange={(v) => setPhysical((p) => ({ ...p, weight: v }))} min={20} max={200} step={1} theme={theme} t={t} />
-                      </div>
-                    </div>
-                    {bmi && (
-                      <div className={`px-4 py-2 rounded-xl ${t.bgSunken} text-center`}>
-                        <span className={`caption font-medium ${t.textMuted}`}>BMI: </span>
-                        <span className={`body-md font-bold ${t.textMain}`}>{bmi}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {s.key === 'medical' && (
-                  <div className="flex-1 flex flex-col gap-4 overflow-y-auto hide-scrollbar">
-                    <p className={`caption font-medium ${t.textMuted}`}>Pilih jika ada (bisa lebih dari satu, opsional):</p>
-                    <div className="flex flex-wrap gap-2">
-                      {MEDICAL_CONDITIONS.map(cond => {
-                        const isSelected = medicalHistory.includes(cond);
-                        return (
-                          <button key={cond}
-                            onClick={() => {
-                              if (isSelected) setMedicalHistory(prev => prev.filter(c => c !== cond));
-                              else setMedicalHistory(prev => [...prev, cond]);
-                            }}
-                            className={`px-3 py-1.5 rounded-full border text-sm transition-all ${isSelected ? `${t.bgAccent} ${t.borderAccent} text-white` : `${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'} ${t.textMuted}`}`}>
-                            {cond}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-2">
-                      <p className={`caption font-medium mb-1 ${t.textMuted}`}>Alergi Makanan (opsional)</p>
-                      <input type="text" placeholder="Misal: Kacang, udang, kerang..." value={allergies}
-                        onChange={e => setAllergies(e.target.value)}
-                        className={`w-full px-3 py-2 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} outline-none text-sm`} />
-                    </div>
-                  </div>
-                )}
-
-                {s.key === 'diet' && (
-                  <div className="flex-1 grid grid-cols-2 gap-2 overflow-y-auto hide-scrollbar content-start">
-                    {DIET_PROFILES.map((dp) => (
-                      <button key={dp.id} onClick={() => setDietProfile(dp.id)}
-                        className={`p-3 rounded-2xl border-2 text-left transition-all ${dietProfile === dp.id ? `${t.borderAccent} ${t.bgAccentSoft} scale-[1.02]` : `${isDark ? 'border-transparent bg-white/5' : 'border-white/50 bg-white/60'}`}`}>
-                        <span className="text-xl">{dp.emoji}</span>
-                        <p className={`caption font-bold mt-1 ${t.textMain}`}>{dp.label}</p>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {s.key === 'pace' && (
-                  <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto hide-scrollbar">
-                    {PACES.map((p) => (
-                      <OptionCard key={p.id} t={t} isDark={isDark} selected={pace === p.id} onClick={() => setPace(p.id)}>
-                        <div>
-                          <p className="font-black text-sm">{p.label}</p>
-                          <p className={`caption font-medium mt-0.5 ${pace === p.id ? 'text-white/80' : t.textMuted}`}>{p.desc}</p>
-                        </div>
-                      </OptionCard>
-                    ))}
-                  </div>
-                )}
-
                 <div className="mt-auto pt-4 flex justify-center shrink-0">
                   <p className={`text-xs font-bold ${t.textMuted}`}>Langkah {idx + 1} dari {STEPS.length}</p>
                 </div>
@@ -273,7 +240,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
           })}
         </div>
       </div>
-      )}
+      </div>
     </div>
   );
 };

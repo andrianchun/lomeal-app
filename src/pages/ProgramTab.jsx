@@ -5,7 +5,7 @@ import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { EMPTY_NUTRITION, addNutrition, scaleNutrition, DIET_PROFILES } from '../data/nutrition';
 import { MEAL_SESSIONS, getLocalYMD, DAY_NAMES_ID } from '../data/constants';
 import { makeEntry } from '../utils/foodLog';
-import { generateDietRecipe } from '../utils/aiFood';
+import { generateDietRecipe, buildAiRecipe } from '../utils/aiFood';
 import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, markDomusItemConsumed } from '../utils/domusSync';
 import { deductStock } from '../utils/stockConverter';
 import SupplementBuilder from '../components/SupplementBuilder';
@@ -390,32 +390,8 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
   
   const currentDiet = DIET_PROFILES.find(d => d.id === profile?.dietProfile) || DIET_PROFILES[0];
   
-  const generateOfflineRecipes = async () => {
-    const dietName = currentDiet.label;
-    if (!(await showConfirm(`Generate resep (Offline) untuk program diet "${dietName}"?`))) return;
-    
-    const aiRecipe = {
-      id: `r_ai_${Date.now()}`,
-      name: `Menu Offline: ${dietName} Praktis`,
-      portions: 2,
-      ingredients: [
-          { foodId: 'dada_ayam_mentah', name: 'Dada Ayam Mentah', grams: 200, nutrition: { kcal: 240, protein: 46, carbs: 0, fat: 5, sodium: 90, sugar: 0, cholesterol: 146 } },
-          { foodId: 'minyak_zaitun', name: 'Minyak Zaitun', grams: 15, nutrition: { kcal: 133, protein: 0, carbs: 0, fat: 15, sodium: 0, sugar: 0, cholesterol: 0 } }
-      ],
-      note: 'Resep hasil racikan offline berdasarkan profil.',
-      createdAt: new Date().toISOString(),
-      totalGrams: 215,
-      total: { kcal: 373, protein: 46, carbs: 0, fat: 20, sodium: 90, sugar: 0, cholesterol: 146 },
-      perPortion: { kcal: 186.5, protein: 23, carbs: 0, fat: 10, sodium: 45, sugar: 0, cholesterol: 73 }
-    };
-    saveRecipesFn([aiRecipe, ...recipes]);
-    showToast(`1 Resep Offline berhasil ditambahkan ke Buku Resep! 🍲`);
-  };
-
   const generateTrueAIRecipes = async () => {
     const dietName = currentDiet.label;
-    if (!(await showConfirm(`Panggil AI sesungguhnya untuk meracik resep khusus diet "${dietName}"? Pastikan koneksi internet stabil.`))) return;
-    
     showToast(`Memanggil AI untuk memformulasikan resep ${dietName}... 🤖`, { type: 'info', duration: 4000 });
     try {
         const generated = await generateDietRecipe(aiKey, {
@@ -424,32 +400,12 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
             medicalHistory: profile?.medicalHistory || [],
             allergies: profile?.allergies || ''
         });
-        
-        const aiRecipe = {
-          id: `r_ai_${Date.now()}`,
-          name: generated.name || `Resep AI ${dietName}`,
-          portions: generated.portions || 2,
-          ingredients: generated.ingredients || [],
-          note: generated.note || 'Resep otomatis hasil generate AI.',
-          createdAt: new Date().toISOString(),
-        };
-
-        // Recalculate totals to be safe
-        let tGrams = 0;
-        let tNut = { ...EMPTY_NUTRITION };
-        aiRecipe.ingredients.forEach(ing => {
-            tGrams += Number(ing.grams || 0);
-            tNut = addNutrition(tNut, ing.nutrition || {});
-        });
-        aiRecipe.totalGrams = tGrams;
-        aiRecipe.total = tNut;
-        aiRecipe.perPortion = scaleNutrition(tNut, 1 / aiRecipe.portions);
-
+        const aiRecipe = buildAiRecipe(generated, dietName);
         saveRecipesFn([aiRecipe, ...recipes]);
         showToast(`Resep AI "${aiRecipe.name}" berhasil dibuat! 🍲`);
     } catch (err) {
         if (err.message === 'RATE_LIMIT_EXCEEDED') {
-            showAlert('Limit AI harian habis! Gunakan Generate Offline atau masukkan API Key pribadimu di Pengaturan.');
+            showAlert('Limit AI harian habis! Masukkan API Key pribadimu di Pengaturan untuk lanjut generate resep.');
         } else {
             showAlert(`Gagal generate AI: ${err.message}`);
         }
@@ -517,7 +473,6 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
                   showToast('Profil Medis & Target Diet berhasil diperbarui! ✅');
               }
           }}
-          generateOfflineRecipes={generateOfflineRecipes}
           generateTrueAIRecipes={generateTrueAIRecipes}
         />
       )}

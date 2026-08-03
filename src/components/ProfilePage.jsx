@@ -244,8 +244,10 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
           <select 
             value={dietProfileInput}
             onChange={(e) => {
-              setDietProfileInput(e.target.value);
-              saveProfilePatch({ dietProfile: e.target.value });
+              const dietProfile = e.target.value;
+              setDietProfileInput(dietProfile);
+              // Recompute makro ditangani terpusat di saveProfilePatch (App.jsx).
+              saveProfilePatch({ dietProfile });
             }}
             className={`w-full px-3 py-2.5 rounded-xl border-2 font-bold text-sm border-transparent outline-none ${t.inputBg} ${t.textMain}`}
           >
