@@ -132,12 +132,15 @@ const writeDelta = async (kind, dataType, ymd, value, toUnit = (v) => v) => {
   const already = Number(localStorage.getItem(key)) || 0;
   const delta = value - already;
   if (delta <= 0) return false;
+  // endDate WAJIB lebih besar dari startDate — Health Connect nolak record berdurasi nol
+  // dengan "startTime must be before endTime."
+  const start = new Date(`${ymd}T12:00:00`);
   try {
     await Health.saveSample({
       dataType,
       value: toUnit(delta),
-      startDate: new Date(`${ymd}T12:00:00`).toISOString(),
-      endDate: new Date(`${ymd}T12:00:00`).toISOString(),
+      startDate: start.toISOString(),
+      endDate: new Date(start.getTime() + 60000).toISOString(),
     });
     localStorage.setItem(key, String(value));
     return true;
