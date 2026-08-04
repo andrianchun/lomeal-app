@@ -602,6 +602,24 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       (ymd) => !!daysMap[ymd]?.burnedKcal || !!Number(lyfitYearData?.[ymd]?.bioData?.activityCalories),
       (ymd, kcal) => { filled++; saveDay(ymd, { ...(daysMap[ymd] || {}), burnedKcal: kcal }); },
     );
+
+    // Arah sebaliknya: dorong histori Lomeal (kalori makanan + air) ke Health Connect.
+    // Health Connect menerima record bertanggal lampau — yang dibatasi cuma MEMBACA data
+    // lama (butuh READ_HEALTH_DATA_HISTORY), menulis ke belakang tidak dibatasi.
+    // Aman diulang: hcWriteNutrition/hcWriteHydration cuma nulis SELISIH dari yang sudah
+    // pernah dikirim per tanggal, jadi tekan tombol ini berkali-kali tidak bikin dobel.
+    let pushed = 0;
+    for (let i = 0; i <= days; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const ymd = getLocalYMD(d);
+      const dayData = daysMap[ymd];
+      if (!dayData) continue;
+      const totals = computeDayTotals(dayData, true);
+      if (totals.kcal > 0 && (await hcWriteNutrition(ymd, totals))) pushed++;
+      if (dayData.water) await hcWriteHydration(ymd, dayData.water);
+    }
+
     if (status) {
       const denied = [...(status.readDenied || []), ...(status.writeDenied || [])];
       // Sengaja gak di-await — tombol yang manggil ini harus langsung balik normal begitu
@@ -611,7 +629,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
         (denied.length ? ` Ditolak: ${denied.join(', ')}.` : '') +
         // Tanpa pembagi: rentangnya inklusif dua ujung (hari ini + N hari ke belakang = N+1)
         // dan beda zona waktu bisa nambah satu lagi, jadi "32/30" bikin bingung.
-        ` Histori terisi: ${filled} hari.`
+        ` Histori masuk: ${filled} hari. Histori terkirim ke Health Connect: ${pushed} hari.`
       );
     }
   };
