@@ -90,6 +90,7 @@ const SettingsPage = ({
   useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [activeTab, setActiveTab] = useState('preferensi');
   const [hcBackfilling, setHcBackfilling] = useState(false);
+  const [hcConnecting, setHcConnecting] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -383,10 +384,14 @@ const SettingsPage = ({
               <div className="flex items-center justify-between">
                 <span className={`font-bold text-sm ${t.textMain}`}>{lang.healthConnect}</span>
                 <button
-                  onClick={onToggleHealthConnect}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${healthConnected ? `${t.bgAccent} text-white shadow-sm` : `${t.btnBg} ${t.textMuted}`}`}
+                  disabled={hcConnecting}
+                  onClick={async () => {
+                    setHcConnecting(true);
+                    try { await onToggleHealthConnect(); } finally { setHcConnecting(false); }
+                  }}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all disabled:opacity-50 ${healthConnected ? `${t.bgAccent} text-white shadow-sm` : `${t.btnBg} ${t.textMuted}`}`}
                 >
-                  {healthConnected ? lang.connected : lang.connect}
+                  {hcConnecting ? 'Menghubungkan...' : (healthConnected ? lang.connected : lang.connect)}
                 </button>
               </div>
               {!healthAvailable && (

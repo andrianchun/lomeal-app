@@ -39,7 +39,13 @@ const WRITE_TYPES = ['dietaryEnergyConsumed', 'dietaryWater'];
 // backfill histori yang lebih lama gak akan dapat apa-apa (lihat AndroidManifest.xml).
 export const hcRequestPermissions = async () => {
   const H = await getPlugin();
-  const result = await H.requestAuthorization({ read: READ_TYPES, write: WRITE_TYPES, requestHistoryAccess: true });
+  // Race pakai timeout — tanpa ini, kalau dialog izin native gagal muncul/nyangkut, tombol
+  // "Hubungkan" nge-freeze diam-diam selamanya (gak ada error, gak ada dialog) dan user gak
+  // tau apa yang salah.
+  const result = await Promise.race([
+    H.requestAuthorization({ read: READ_TYPES, write: WRITE_TYPES, requestHistoryAccess: true }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Waktu habis menunggu dialog izin Health Connect (30 detik) — dialognya kemungkinan gagal muncul. Coba lagi, atau buka app Health Connect langsung lalu cek/aktifkan izin untuk app ini secara manual.')), 30000)),
+  ]);
   if (!result?.readAuthorized?.length && !result?.writeAuthorized?.length) {
     throw new Error('Izin ditolak — buka Pengaturan Android > Aplikasi > Health Connect > Aplikasi terhubung untuk memberi akses manual.');
   }
