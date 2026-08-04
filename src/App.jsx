@@ -595,7 +595,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     );
     if (status) {
       const denied = [...(status.readDenied || []), ...(status.writeDenied || [])];
-      await showAlert(
+      // Sengaja gak di-await — tombol yang manggil ini harus langsung balik normal begitu
+      // proses selesai, gak boleh nunggu user tekan OK di popup buat lepas loading state-nya.
+      showAlert(
         `Izin Health Connect — baca: ${status.readAuthorized?.length || 0} tipe, tulis: ${status.writeAuthorized?.length || 0} tipe.` +
         (denied.length ? ` Ditolak: ${denied.join(', ')}.` : '') +
         ` Histori terisi: ${filled}/${days} hari.`
@@ -610,7 +612,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       updateSetting('healthConnectEnabled', true);
       handleHcBackfill(30);
     } catch (e) {
-      await showAlert('Gagal menyambungkan Health Connect: ' + e.message);
+      showAlert('Gagal menyambungkan Health Connect: ' + e.message);
     }
   };
   // Dashboard: pakai data Logym kalau ada; kalau tidak, jatuh ke Health Connect sebagai cadangan.
