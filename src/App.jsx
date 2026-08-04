@@ -609,7 +609,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       showAlert(
         `Izin Health Connect — baca: ${status.readAuthorized?.length || 0} tipe, tulis: ${status.writeAuthorized?.length || 0} tipe.` +
         (denied.length ? ` Ditolak: ${denied.join(', ')}.` : '') +
-        ` Histori terisi: ${filled}/${days} hari.`
+        // Tanpa pembagi: rentangnya inklusif dua ujung (hari ini + N hari ke belakang = N+1)
+        // dan beda zona waktu bisa nambah satu lagi, jadi "32/30" bikin bingung.
+        ` Histori terisi: ${filled} hari.`
       );
     }
   };
