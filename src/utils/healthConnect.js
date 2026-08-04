@@ -117,39 +117,44 @@ export const hcReadBurnedCalories = async (ymd) => {
   return byDay[ymd] ?? null;
 };
 
-// Tulis kalori yang dimakan hari ini (ringkasan, bukan per-item — plugin ini gak dukung
-// Nutrition record lengkap dengan makro) ke Health Connect.
-export const hcWriteNutrition = async (ymd, totals) => {
+// Health Connect MENJUMLAHKAN semua record di satu hari, dan plugin ini cuma punya
+// saveSample — gak ada delete/update. Jadi menulis "total hari ini" tiap kali user nambah
+// makanan bikin record numpuk (200 + 450 + 700 = 1350 kcal padahal aslinya 700).
+// Solusinya: catat berapa yang SUDAH pernah ditulis per hari, lalu tulis SELISIHNYA saja.
+// ponytail: kalau user MENGHAPUS makanan, selisihnya negatif dan sengaja di-skip (Health
+// Connect gak bisa dikurangi) — jadi angkanya bisa kelebihan sampai user nambah lagi.
+// Naikkan ke pencatatan per-item + delete kalau plugin-nya nanti dukung hapus record.
+const writtenKey = (kind, ymd) => `hc_written_${kind}_${ymd}`;
+
+const writeDelta = async (kind, dataType, ymd, value, toUnit = (v) => v) => {
   if (!isNative()) return false;
+  const key = writtenKey(kind, ymd);
+  const already = Number(localStorage.getItem(key)) || 0;
+  const delta = value - already;
+  if (delta <= 0) return false;
   try {
-    const H = Health;
-    await H.saveSample({
-      dataType: 'dietaryEnergyConsumed',
-      value: Math.round(totals.kcal || 0),
+    await Health.saveSample({
+      dataType,
+      value: toUnit(delta),
       startDate: new Date(`${ymd}T12:00:00`).toISOString(),
+      endDate: new Date(`${ymd}T12:00:00`).toISOString(),
     });
+    localStorage.setItem(key, String(value));
     return true;
   } catch (e) {
-    console.warn('hcWriteNutrition gagal:', e);
+    console.warn(`hcWrite ${kind} gagal:`, e);
     return false;
   }
 };
 
-export const hcWriteHydration = async (ymd, ml) => {
-  if (!isNative() || !ml) return false;
-  try {
-    const H = Health;
-    await H.saveSample({
-      dataType: 'dietaryWater',
-      value: ml / 1000, // plugin pakai liter, Lomeal nyimpen mL
-      startDate: new Date(`${ymd}T12:00:00`).toISOString(),
-    });
-    return true;
-  } catch (e) {
-    console.warn('hcWriteHydration gagal:', e);
-    return false;
-  }
-};
+// Tulis kalori yang dimakan (ringkasan, bukan per-item — plugin ini gak dukung Nutrition
+// record lengkap dengan makro) ke Health Connect.
+export const hcWriteNutrition = (ymd, totals) =>
+  writeDelta('kcal', 'dietaryEnergyConsumed', ymd, Math.round(totals.kcal || 0));
+
+// Lomeal nyimpen mL, plugin minta liter.
+export const hcWriteHydration = (ymd, ml) =>
+  writeDelta('water', 'dietaryWater', ymd, Number(ml) || 0, (v) => v / 1000);
 
 // Backfill: tarik kalori-terbakar N hari ke belakang sekaligus (satu query teragregasi,
 // bukan loop per-hari) — dipanggil sekali abis konek pertama kali, atau lewat tombol
