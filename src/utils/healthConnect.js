@@ -11,18 +11,19 @@
 // gagal, bukan cuma soal bug izin di bawah.
 // ============================================================
 import { Capacitor } from '@capacitor/core';
+// Import STATIS, jangan diganti dynamic import lewat fungsi async — plugin Capacitor itu
+// Proxy yang menganggap SEMUA akses property sebagai method native, termasuk `.then` yang
+// diakses otomatis saat promise me-resolve nilai balikan fungsi async. Hasilnya panggilan
+// native "Health.then()" yang gak ada → promise gak pernah selesai → semua pemanggil
+// nge-hang diam-diam selamanya. (Bug nyata: tombol "Hubungkan" macet di "Menghubungkan...".)
+import { Health } from '@capgo/capacitor-health';
 
 const isNative = () => Capacitor.isNativePlatform();
-
-const getPlugin = async () => {
-  const { Health } = await import('@capgo/capacitor-health');
-  return Health;
-};
 
 export const hcAvailable = async () => {
   if (!isNative()) return false;
   try {
-    const H = await getPlugin();
+    const H = Health;
     const res = await H.isAvailable();
     return !!res?.available;
   } catch { return false; }
@@ -38,7 +39,7 @@ const WRITE_TYPES = ['dietaryEnergyConsumed', 'dietaryWater'];
 // requestHistoryAccess:true — tanpa ini Health Connect cuma kasih akses baca 30 hari terakhir,
 // backfill histori yang lebih lama gak akan dapat apa-apa (lihat AndroidManifest.xml).
 export const hcRequestPermissions = async () => {
-  const H = await getPlugin();
+  const H = Health;
   // Race pakai timeout — tanpa ini, kalau dialog izin native gagal muncul/nyangkut, tombol
   // "Hubungkan" nge-freeze diam-diam selamanya (gak ada error, gak ada dialog) dan user gak
   // tau apa yang salah.
@@ -58,7 +59,7 @@ export const hcRequestPermissions = async () => {
 export const hcCheckStatus = async () => {
   if (!isNative()) return null;
   try {
-    const H = await getPlugin();
+    const H = Health;
     return await H.checkAuthorization({ read: READ_TYPES, write: WRITE_TYPES });
   } catch (e) {
     console.warn('hcCheckStatus gagal:', e);
@@ -70,7 +71,7 @@ export const hcCheckStatus = async () => {
 export const hcReadBurnedCalories = async (ymd) => {
   if (!isNative()) return null;
   try {
-    const H = await getPlugin();
+    const H = Health;
     const res = await H.queryAggregated({
       dataType: 'calories',
       startDate: new Date(`${ymd}T00:00:00`).toISOString(),
@@ -91,7 +92,7 @@ export const hcReadBurnedCalories = async (ymd) => {
 export const hcWriteNutrition = async (ymd, totals) => {
   if (!isNative()) return false;
   try {
-    const H = await getPlugin();
+    const H = Health;
     await H.saveSample({
       dataType: 'dietaryEnergyConsumed',
       value: Math.round(totals.kcal || 0),
@@ -107,7 +108,7 @@ export const hcWriteNutrition = async (ymd, totals) => {
 export const hcWriteHydration = async (ymd, ml) => {
   if (!isNative() || !ml) return false;
   try {
-    const H = await getPlugin();
+    const H = Health;
     await H.saveSample({
       dataType: 'dietaryWater',
       value: ml / 1000, // plugin pakai liter, Lomeal nyimpen mL
@@ -129,7 +130,7 @@ export const hcWriteHydration = async (ymd, ml) => {
 export const hcBackfillBurnedCalories = async (days, hasOtherSource, onDayResult) => {
   if (!isNative()) return;
   try {
-    const H = await getPlugin();
+    const H = Health;
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - days);
