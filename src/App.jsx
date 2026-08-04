@@ -18,7 +18,7 @@ import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitP
 import {
   pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym, pushNutritionBioToLogym,
 } from './utils/biometricSync';
-import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories } from './utils/healthConnect';
+import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
 import { computeDayTotals, calcTargets, DIET_PROFILES } from './data/nutrition';
 import { generateDietRecipe, buildAiRecipe } from './utils/aiFood';
 import { Capacitor } from '@capacitor/core';
@@ -586,11 +586,21 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     }
     months.forEach((m) => ensureMonth(m));
     await new Promise((r) => setTimeout(r, 1500));
+    const status = await hcCheckStatus();
+    let filled = 0;
     await hcBackfillBurnedCalories(
       days,
       (ymd) => !!daysMap[ymd]?.burnedKcal || !!lyfitYearData?.[ymd]?.bioData,
-      (ymd, kcal) => saveDay(ymd, { ...(daysMap[ymd] || {}), burnedKcal: kcal }),
+      (ymd, kcal) => { filled++; saveDay(ymd, { ...(daysMap[ymd] || {}), burnedKcal: kcal }); },
     );
+    if (status) {
+      const denied = [...(status.readDenied || []), ...(status.writeDenied || [])];
+      await showAlert(
+        `Izin Health Connect — baca: ${status.readAuthorized?.length || 0} tipe, tulis: ${status.writeAuthorized?.length || 0} tipe.` +
+        (denied.length ? ` Ditolak: ${denied.join(', ')}.` : '') +
+        ` Histori terisi: ${filled}/${days} hari.`
+      );
+    }
   };
 
   const handleToggleHealthConnect = async () => {
