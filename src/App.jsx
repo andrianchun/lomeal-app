@@ -590,7 +590,11 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     let filled = 0;
     await hcBackfillBurnedCalories(
       days,
-      (ymd) => !!daysMap[ymd]?.burnedKcal || !!lyfitYearData?.[ymd]?.bioData,
+      // Cuma skip kalau kalori-terbakarnya beneran udah ada (dari Lomeal sendiri atau dari
+      // activityCalories Logym) — bukan kalau ada bioData apa pun. bioData Logym hampir selalu
+      // ada tiap hari (berat/tidur/dll) padahal kalorinya kosong, dan itu sempat bikin SEMUA
+      // hari ke-skip (backfill selalu "0/x hari terisi" walau Health Connect penuh data).
+      (ymd) => !!daysMap[ymd]?.burnedKcal || !!Number(lyfitYearData?.[ymd]?.bioData?.activityCalories),
       (ymd, kcal) => { filled++; saveDay(ymd, { ...(daysMap[ymd] || {}), burnedKcal: kcal }); },
     );
     if (status) {
