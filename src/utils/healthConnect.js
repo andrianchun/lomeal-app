@@ -29,7 +29,10 @@ export const hcAvailable = async () => {
   } catch { return false; }
 };
 
-const READ_TYPES = ['calories', 'steps', 'weight'];
+// 'totalCalories' ikut diminta karena banyak sumber (mis. Samsung Health) cuma nulis
+// TotalCaloriesBurned dan TIDAK pernah nulis ActiveCaloriesBurned — tanpa ini, query
+// 'calories' balik kosong terus walau Health Connect penuh data (kejadian nyata).
+const READ_TYPES = ['calories', 'totalCalories', 'steps', 'weight'];
 const WRITE_TYPES = ['dietaryEnergyConsumed', 'dietaryWater'];
 
 // Android gak nge-throw kalau user pencet "Tolak" di dialog izin — tetap resolve normal
@@ -67,24 +70,51 @@ export const hcCheckStatus = async () => {
   }
 };
 
-// Baca kalori aktif terbakar untuk satu tanggal (YYYY-MM-DD)
+// Jumlahkan kalori per hari dari rentang tanggal, dengan fallback dua tipe:
+// 'calories' (ActiveCaloriesBurned, bisa di-aggregate langsung — murah) dulu; kalau kosong,
+// baru 'totalCalories' (TotalCaloriesBurned) yang HARUS dibaca mentah lalu dijumlah manual
+// karena queryAggregated plugin ini gak dukung tipe itu (lihat aggregateMetrics di
+// HealthManager.kt). Sumber macam Samsung Health cuma nulis yang kedua.
+// Hasil: { 'YYYY-MM-DD': kcal }
+const readCaloriesByDay = async (startISO, endISO) => {
+  const H = Health;
+  try {
+    const res = await H.queryAggregated({
+      dataType: 'calories', startDate: startISO, endDate: endISO, bucket: 'day', aggregation: 'sum',
+    });
+    const byDay = {};
+    for (const s of res?.samples || []) {
+      if (s.value > 0) byDay[s.startDate.slice(0, 10)] = Math.round(s.value);
+    }
+    if (Object.keys(byDay).length > 0) return byDay;
+  } catch (e) {
+    console.warn('readCaloriesByDay (calories) gagal:', e);
+  }
+  try {
+    const res = await H.readSamples({
+      dataType: 'totalCalories', startDate: startISO, endDate: endISO, limit: 5000, ascending: true,
+    });
+    const byDay = {};
+    for (const s of res?.samples || []) {
+      const ymd = s.startDate.slice(0, 10);
+      byDay[ymd] = (byDay[ymd] || 0) + (s.value || 0);
+    }
+    Object.keys(byDay).forEach((ymd) => { byDay[ymd] = Math.round(byDay[ymd]); });
+    return byDay;
+  } catch (e) {
+    console.warn('readCaloriesByDay (totalCalories) gagal:', e);
+    return {};
+  }
+};
+
+// Baca kalori terbakar untuk satu tanggal (YYYY-MM-DD)
 export const hcReadBurnedCalories = async (ymd) => {
   if (!isNative()) return null;
-  try {
-    const H = Health;
-    const res = await H.queryAggregated({
-      dataType: 'calories',
-      startDate: new Date(`${ymd}T00:00:00`).toISOString(),
-      endDate: new Date(`${ymd}T23:59:59`).toISOString(),
-      bucket: 'day',
-      aggregation: 'sum',
-    });
-    const total = res?.samples?.[0]?.value;
-    return total != null ? Math.round(total) : null;
-  } catch (e) {
-    console.warn('hcReadBurnedCalories gagal:', e);
-    return null;
-  }
+  const byDay = await readCaloriesByDay(
+    new Date(`${ymd}T00:00:00`).toISOString(),
+    new Date(`${ymd}T23:59:59`).toISOString(),
+  );
+  return byDay[ymd] ?? null;
 };
 
 // Tulis kalori yang dimakan hari ini (ringkasan, bukan per-item — plugin ini gak dukung
@@ -129,24 +159,12 @@ export const hcWriteHydration = async (ymd, ml) => {
 // Firestore (lewat saveDay yang sudah ada) — file ini sengaja gak nulis Firestore sendiri.
 export const hcBackfillBurnedCalories = async (days, hasOtherSource, onDayResult) => {
   if (!isNative()) return;
-  try {
-    const H = Health;
-    const end = new Date();
-    const start = new Date();
-    start.setDate(start.getDate() - days);
-    const res = await H.queryAggregated({
-      dataType: 'calories',
-      startDate: start.toISOString(),
-      endDate: end.toISOString(),
-      bucket: 'day',
-      aggregation: 'sum',
-    });
-    for (const sample of res?.samples || []) {
-      const ymd = sample.startDate.slice(0, 10);
-      if (hasOtherSource(ymd)) continue;
-      if (sample.value > 0) onDayResult(ymd, Math.round(sample.value));
-    }
-  } catch (e) {
-    console.warn('hcBackfillBurnedCalories gagal:', e);
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  const byDay = await readCaloriesByDay(start.toISOString(), end.toISOString());
+  for (const [ymd, kcal] of Object.entries(byDay)) {
+    if (hasOtherSource(ymd)) continue;
+    if (kcal > 0) onDayResult(ymd, kcal);
   }
 };

@@ -586,6 +586,11 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     }
     months.forEach((m) => ensureMonth(m));
     await new Promise((r) => setTimeout(r, 1500));
+    // Idempoten: kalau semua izin udah ada, plugin resolve langsung tanpa munculin dialog.
+    // Perlu di sini supaya tipe yang BARU ditambahkan (mis. totalCalories) tetap keminta
+    // walau user udah "Terhubung" dari versi sebelumnya — tanpa ini dia diam-diam gak punya
+    // izin buat tipe baru itu dan hasilnya selalu kosong.
+    try { await hcRequestPermissions(); } catch (e) { console.warn('re-request izin gagal:', e); }
     const status = await hcCheckStatus();
     let filled = 0;
     await hcBackfillBurnedCalories(
