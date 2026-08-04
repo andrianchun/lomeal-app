@@ -37,6 +37,14 @@ const version = readVersion(); // WAJIB baca ulang: nilai lama sudah basi setela
 console.log(`\nRelease v${from} -> v${version}${forced ? '  [WAJIB — user diblokir sampai update]' : ''}\n`);
 
 run('npm run build:ota', { OTA_FORCE: forced ? '1' : '0', OTA_NOTES: notes || '' });
+
+// Buang cache unggah Firebase sebelum deploy. Cache ini bikin firebase-tools melewati file
+// yang dikira sudah terunggah, dan berkali-kali bikin SELURUH /ota/** raib dari hosting:
+// version.json & zip kena rewrite SPA (balik index.html 200, bukan 404), jadi pengecekan
+// update di app gagal diam-diam ("Unexpected token '<'") dan APK nyangkut di bundle lama
+// selamanya. Kejadian 4x di Logym; hapus cache selalu memperbaikinya. Deploy jadi sedikit
+// lebih lama karena semua file diunggah ulang — murah dibanding rilis yang tidak sampai.
+fs.rmSync('.firebase', { recursive: true, force: true });
 run('firebase deploy --only hosting');
 run('git add -A');
 run(`git commit -m "release v${version}"`);
