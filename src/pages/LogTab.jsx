@@ -746,17 +746,46 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   };
 
   const baseVoiceTextRef = useRef('');
+  const voiceTimerRef = useRef(null);
 
-  // ---------- Voice (Web Speech API bila tersedia) ----------
-  const toggleVoice = async () => {
+  const stopVoice = async () => {
+    if (voiceTimerRef.current) {
+      clearTimeout(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
     if (isNativeApp()) {
       try {
         const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
-        if (listening) {
-          await SpeechRecognition.stop();
-          setListening(false);
-          return;
-        }
+        await SpeechRecognition.stop();
+        await SpeechRecognition.removeAllListeners();
+      } catch (e) {}
+    } else {
+      if (recogRef.current) {
+        try { recogRef.current.stop(); } catch (e) {}
+        recogRef.current = null;
+      }
+    }
+    setListening(false);
+  };
+
+  // ---------- Voice (Web Speech API & Capacitor Native) ----------
+  const toggleVoice = async () => {
+    if (listening) {
+      await stopVoice();
+      return;
+    }
+
+    if (voiceTimerRef.current) {
+      clearTimeout(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+
+    if (isNativeApp()) {
+      try {
+        const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
+
+        try { await SpeechRecognition.stop(); } catch (e) {}
+        try { await SpeechRecognition.removeAllListeners(); } catch (e) {}
 
         const { available } = await SpeechRecognition.available();
         if (!available) {
@@ -774,7 +803,6 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         }
 
         baseVoiceTextRef.current = chatText;
-        await SpeechRecognition.removeAllListeners();
 
         await SpeechRecognition.addListener('partialResults', (data) => {
           if (data.matches && data.matches.length > 0) {
@@ -785,11 +813,16 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
         await SpeechRecognition.addListener('listeningState', (data) => {
           if (data.status === 'stopped') {
-            setListening(false);
+            stopVoice();
           }
         });
 
         setListening(true);
+
+        voiceTimerRef.current = setTimeout(() => {
+          stopVoice();
+        }, 30000);
+
         await SpeechRecognition.start({
           language: 'id-ID',
           maxResults: 1,
@@ -799,24 +832,48 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       } catch (e) {
         console.error("Native Speech Error:", e);
         showAlert(`Gagal merekam suara: ${e.message || 'Error tidak diketahui'}`);
-        setListening(false);
+        stopVoice();
       }
       return;
     }
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showAlert('Input suara tidak didukung perangkat ini. Ketik saja ya 🙂'); return; }
-    if (listening) { recogRef.current?.stop(); return; }
+
+    baseVoiceTextRef.current = chatText;
     const r = new SR();
-    r.lang = 'id-ID'; r.interimResults = false;
+    r.lang = 'id-ID';
+    r.interimResults = true;
+    r.continuous = true;
+
     r.onerror = (e) => {
       console.error("Web Speech Error:", e.error);
       if (e.error !== 'aborted' && e.error !== 'no-speech') showAlert(`Error mic: ${e.error}`);
-      setListening(false);
+      stopVoice();
     };
-    r.onresult = (e) => setChatText(prev => (prev ? prev + ' ' : '') + e.results[0][0].transcript);
-    r.onend = () => setListening(false);
-    recogRef.current = r; setListening(true); r.start();
+
+    r.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; ++i) {
+        interim += e.results[i][0].transcript;
+      }
+      if (interim) {
+        setChatText((baseVoiceTextRef.current ? baseVoiceTextRef.current + ' ' : '') + interim);
+      }
+    };
+
+    r.onend = () => {
+      stopVoice();
+    };
+
+    recogRef.current = r;
+    setListening(true);
+
+    voiceTimerRef.current = setTimeout(() => {
+      stopVoice();
+    }, 30000);
+
+    r.start();
   };
 
   // ---------- Meal Grid: sesi aktif + dinamis ----------
