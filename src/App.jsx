@@ -242,26 +242,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     document.body.className = `${t.bgApp} ${t.textMain}`;
   }, [theme, t]);
 
-  // === DETEKSI KEYBOARD TERBUKA SECARA GLOBAL (pakai VisualViewport) ===
-  // Ini penting agar nav bar bawah bisa dihilangkan dan area ketik LogTab bisa diperluas ke bawah,
-  // meminimalisir kemungkinan jari nyentuh area luar textarea saat menggeser kursor.
-  useEffect(() => {
-    if (!window.visualViewport) return;
-    const vv = window.visualViewport;
-    const initialHeight = vv.height;
-    
-    const onResize = () => {
-      // Jika tinggi turun > 15%, asumsikan keyboard terbuka
-      if (vv.height < initialHeight * 0.85) {
-        document.body.classList.add('keyboard-open');
-      } else {
-        document.body.classList.remove('keyboard-open');
-      }
-    };
-    
-    vv.addEventListener('resize', onResize);
-    return () => vv.removeEventListener('resize', onResize);
-  }, []);
+  // (visualViewport listener dihapus karena kurang stabil saat mengetik di Android)
 
   // Sentral recompute target (kkal/makro) tiap ada patch profil — sebelumnya tiap
   // modal/halaman yang nulis field penentu target (weight/dob/dietGoal/pace/dietProfile/dst)

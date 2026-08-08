@@ -29,17 +29,18 @@ const UNIT_OPTIONS = ['g', 'sdt', 'sdm', 'centong', 'gelas', 'cangkir', 'mangkok
 // tanpa ini, edit gramasi dihitung sebagai rasio ke NILAI SEBELUMNYA (bukan ke baseline
 // tetap): kalau user sempat ketik 0, rasio jadi 0/0 dan macet permanen di 0 kkal walau
 // gramasi diisi ulang. Edit gramasi berikutnya selalu dihitung ulang dari baseline ini.
-// Hasil OCR label datang sebagai nilai per 100 g/ml PLUS takaran saji terpisah. Keduanya
-// dulu dipasangkan mentah-mentah (gizi per-100 ditempel ke porsi saji), jadi snack takaran
-// 35 g dicatat sebesar angka per 100 g — meleset hampir 3x. Skala dulu ke takarannya.
+// Hasil OCR label datang sebagai nilai per sajian (sesuai prompt).
 const labelToItem = (res) => {
   const grams = Number(res.servingGrams) > 0 ? Number(res.servingGrams) : 100;
-  const per100 = { ...EMPTY_NUTRITION, ...res.per100 };
+  const nutrition = { ...EMPTY_NUTRITION, ...res.nutrition };
+  const servingText = (res.servingSize || '').toLowerCase();
+  const isDrink = servingText.includes('ml') || servingText.includes('liter') || servingText.includes(' l');
   return {
     name: res.name || 'Produk Kemasan',
     grams,
-    unit: 'g',
-    nutrition: nutritionForAmount({ nutrition: per100 }, grams),
+    unit: isDrink ? 'mL' : 'g',
+    isDrink,
+    nutrition,
     lowConfidence: res.lowConfidence,
   };
 };
@@ -745,6 +746,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     showToast(`${foods.length} catatan makanan berhasil disimpan!`);
   };
 
+  const chatInputRef = useRef(null);
   const baseVoiceTextRef = useRef('');
   const voiceTimerRef = useRef(null);
   const voiceListenersRef = useRef([]);
@@ -1181,12 +1183,24 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
             </div>
           ) : (
             <textarea
+              ref={chatInputRef}
               value={chatText} 
-              onChange={(e) => setChatText(e.target.value)}
+              onChange={(e) => {
+                setChatText(e.target.value);
+                if (chatInputRef.current) {
+                  chatInputRef.current.style.height = 'auto';
+                  chatInputRef.current.style.height = Math.min(chatInputRef.current.scrollHeight, 120) + 'px';
+                }
+              }}
+              onFocus={() => document.body.classList.add('keyboard-open')}
+              onBlur={() => {
+                // Beri jeda sblm balikin layout biar tombol di smart bar gak lari sebelum klik diproses
+                setTimeout(() => document.body.classList.remove('keyboard-open'), 150);
+              }}
               placeholder="Ketik makananmu..."
-              rows={Math.min(3, (chatText.match(/\n/g) || []).length + 1)}
-              style={{ resize: 'none' }}
-              className={`relative z-10 flex-1 min-w-0 bg-transparent outline-none body-lg px-2 py-3.5 font-medium ${t.textMain} placeholder:${t.textMuted} placeholder:opacity-50 hide-scrollbar`} />
+              className={`relative z-10 flex-1 min-w-0 bg-transparent outline-none body-lg px-2 py-3.5 font-medium ${t.textMain} placeholder:${t.textMuted} placeholder:opacity-50 hide-scrollbar resize-none overflow-y-auto`}
+              rows={1}
+              style={{ height: 'auto' }} />
           )}
           
           <button onClick={toggleVoice} className={`relative z-10 shrink-0 p-3.5 rounded-full ${t.btnBg} ${listening ? 'text-red-400 animate-pulse' : t.textMuted} transition-transform active:scale-95`} aria-label="Input suara">
@@ -1246,39 +1260,58 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                        <input type="text" className={`w-11/12 bg-transparent border-b border-dashed ${t.border} outline-none body-md font-bold ${t.textMain}`} value={f.name} onChange={e => {
                           setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, name: e.target.value } : x) }));
                        }} placeholder="Nama Produk" />
-                       
-                       <div className="grid grid-cols-2 gap-3 mt-2">
-                         <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
-                           <label className={`caption ${t.textMuted} flex items-center gap-1`}><Utensils size={12}/> Takaran (g/ml)</label>
-                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.grams || 0} min={0} onChange={(v) => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, grams: v } : x) }));
-                           }} />
-                         </div>
-                         <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
-                           <label className={`caption ${t.textMuted} flex items-center gap-1`}><Flame size={12}/> Kalori (kkal)</label>
-                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.kcal || 0} min={0} step={5} onChange={(v) => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, kcal: v } } : x) }));
-                           }} />
-                         </div>
-                         <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
-                           <label className={`caption ${t.textMuted} flex items-center gap-1`}><Activity size={12}/> Protein (g)</label>
-                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.protein || 0} min={0} onChange={(v) => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, protein: v } } : x) }));
-                           }} />
-                         </div>
-                         <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
-                           <label className={`caption ${t.textMuted} flex items-center gap-1`}><Activity size={12}/> Karbo (g)</label>
-                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.carbs || 0} min={0} onChange={(v) => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, carbs: v } } : x) }));
-                           }} />
-                         </div>
-                         <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
-                           <label className={`caption ${t.textMuted} flex items-center gap-1`}><Activity size={12}/> Lemak (g)</label>
-                           <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition.fat || 0} min={0} onChange={(v) => {
-                             setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, fat: v } } : x) }));
-                           }} />
-                         </div>
-                       </div>
+                       {(() => {
+                         const coreKeys = ['kcal', 'protein', 'carbs', 'fat'];
+                         const detectedExtraKeys = NUTRIENTS.filter(n => !coreKeys.includes(n.key) && (f.nutrition[n.key] > 0 || ['sugar', 'sodium'].includes(n.key) && f.nutrition[n.key] === 0));
+                         const emptyExtraKeys = NUTRIENTS.filter(n => !coreKeys.includes(n.key) && !detectedExtraKeys.includes(n));
+                         return (
+                           <>
+                             <div className="grid grid-cols-2 gap-3 mt-2">
+                               <div className={`p-2 rounded-xl border ${t.border} ${t.bgSunken} col-span-2 sm:col-span-1`}>
+                                 <label className={`caption ${t.textMuted} flex items-center gap-1`}><Activity size={12}/> Takaran Saji (g/mL)</label>
+                                 <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.grams} min={1} onChange={(v) => {
+                                   setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, grams: v } : x) }));
+                                 }} />
+                               </div>
+                               
+                               {coreKeys.map(k => {
+                                 const n = NUTRIENTS.find(x => x.key === k);
+                                 return (
+                                   <div key={k} className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
+                                     <label className={`caption ${t.textMuted} flex items-center gap-1 truncate`} title={n.label}><Activity size={12}/> {n.label} ({n.unit})</label>
+                                     <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition[k] || 0} min={0} onChange={(v) => {
+                                       setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, [k]: v } } : x) }));
+                                     }} />
+                                   </div>
+                                 );
+                               })}
+
+                               {detectedExtraKeys.map(n => (
+                                 <div key={n.key} className={`p-2 rounded-xl border border-primary-500/30 bg-primary-500/5`}>
+                                   <label className={`caption text-primary-500 flex items-center gap-1 truncate`} title={n.label}>{n.label} ({n.unit})</label>
+                                   <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition[n.key] || 0} min={0} onChange={(v) => {
+                                     setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, [n.key]: v } } : x) }));
+                                   }} />
+                                 </div>
+                               ))}
+                             </div>
+                             
+                             <details className={`mt-3 rounded-xl border ${t.border} p-3 ${t.bgSunken}`}>
+                               <summary className={`caption font-bold ${t.textMain} cursor-pointer outline-none select-none`}>+ Isi Manual Nutrisi Lainnya</summary>
+                               <div className="grid grid-cols-2 gap-3 mt-3">
+                                 {emptyExtraKeys.map(n => (
+                                   <div key={n.key} className={`p-2 rounded-xl border ${t.border} ${t.bgSunken}`}>
+                                     <label className={`caption ${t.textMuted} flex items-center gap-1 truncate`} title={n.label}>{n.label} ({n.unit})</label>
+                                     <SwipeInput className={`w-full bg-transparent font-bold outline-none body-md mt-1 ${t.textMain}`} value={f.nutrition[n.key] || 0} min={0} onChange={(v) => {
+                                       setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, nutrition: { ...x.nutrition, [n.key]: v } } : x) }));
+                                     }} />
+                                   </div>
+                                 ))}
+                               </div>
+                             </details>
+                           </>
+                         );
+                       })()}
                     </div>
                   ) : (() => {
                     const unitWeight = isGram ? 1 : URT_DICTIONARY[unit];

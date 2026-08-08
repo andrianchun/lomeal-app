@@ -19,8 +19,8 @@ const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key,
 const EXTRA_NUTRIENT_FIELDS = NUTRIENTS.filter(n => !n.macro).map(n => [n.key, `${n.label} (${n.unit})`]);
 
 const emptyForm = () => {
-  const obj = { name: '', grams: 100, kcal: '', protein: '', carbs: '', fat: '' };
-  EXTRA_NUTRIENT_FIELDS.forEach(([k]) => obj[k] = '');
+  const obj = { name: '', grams: 100, kcal: '' };
+  NUTRIENT_FIELDS.forEach(([k]) => obj[k] = '');
   return obj;
 };
 
@@ -292,11 +292,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
 
       let parsed = {};
       if (res.type === 'label') {
-        // Isi form itu gizi UNTUK takaran yang diketik (saveForm menormalkannya lagi ke
-        // per-100 pakai factor 100/grams). Dulu nilai per-100 dimasukkan apa adanya bareng
-        // takaran saji, jadi kena kali dua kali dan entri custom tersimpan berlipat permanen.
         const grams = Number(res.servingGrams) > 0 ? Number(res.servingGrams) : 100;
-        const perServing = nutritionForAmount({ nutrition: res.per100 || {} }, grams);
+        const perServing = res.nutrition || {};
         parsed = {
           name: res.name || '',
           grams,
@@ -426,7 +423,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
               <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Energi (kkal)</p>
               <input type="number" inputMode="decimal" className={`${inputCls} no-spinners`} value={form.kcal} onChange={(e) => setForm(f => ({ ...f, kcal: e.target.value }))} placeholder="0" />
             </div>
-            {NUTRIENT_FIELDS.map(([k, label]) => (
+            {NUTRIENT_FIELDS.filter(([k]) => ['protein','carbs','fat','sodium','sugar','cholesterol','satFat','transFat'].includes(k)).map(([k, label]) => (
               <div key={k}>
                 <p className={`caption font-medium mb-0.5 ${t.textMuted} truncate`}>{label}</p>
                 <input type="number" inputMode="decimal" className={`${inputCls} no-spinners`} value={form[k]}
@@ -434,6 +431,19 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
               </div>
             ))}
           </div>
+          
+          <details className={`mt-2 rounded-xl border ${t.border} p-3 ${t.bgSunken}`}>
+            <summary className={`caption font-bold ${t.textMain} cursor-pointer outline-none select-none`}>Lihat Nutrisi Ekstra (Vitamin, Mineral, dll)</summary>
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              {NUTRIENT_FIELDS.filter(([k]) => !['protein','carbs','fat','sodium','sugar','cholesterol','satFat','transFat'].includes(k)).map(([k, label]) => (
+                <div key={k}>
+                  <p className={`caption font-medium mb-0.5 ${t.textMuted} truncate`}>{label}</p>
+                  <input type="number" inputMode="decimal" className={`${inputCls} no-spinners`} value={form[k]}
+                    onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} placeholder="0" />
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
         <button disabled={!form.name} onClick={saveForm} className={`w-full py-3 shrink-0 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40`}>
           Simpan

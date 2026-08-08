@@ -15,6 +15,9 @@ export const NUTRIENTS = [
   { key: 'sugar',       label: 'Gula',         unit: 'g'  },
   { key: 'cholesterol', label: 'Kolesterol',   unit: 'mg' },
   { key: 'satFat',      label: 'Lemak Jenuh',  unit: 'g'  },
+  { key: 'transFat',    label: 'Lemak Trans',  unit: 'g'  },
+  { key: 'polyFat',     label: 'Lemak Tak Jenuh Ganda', unit: 'g' },
+  { key: 'monoFat',     label: 'Lemak Tak Jenuh Tunggal', unit: 'g' },
   { key: 'iron', label: 'Zat Besi', macro: false, unit: 'mg' },
   { key: 'calcium', label: 'Kalsium', macro: false, unit: 'mg' },
   { key: 'purine', label: 'Purin', macro: false, unit: 'mg', conditional: true }, // Khusus low_purine
@@ -35,9 +38,10 @@ export const NUTRIENTS = [
   { key: 'vitD', label: 'Vitamin D', macro: false, unit: 'mcg' },
   { key: 'vitE', label: 'Vitamin E', macro: false, unit: 'mg' },
   { key: 'vitK', label: 'Vitamin K', macro: false, unit: 'mcg' },
+  { key: 'omega3', label: 'Omega-3', macro: false, unit: 'mg' },
 ];
 
-export const EMPTY_NUTRITION = { kcal: 0, protein: 0, carbs: 0, fat: 0, sodium: 0, sugar: 0, cholesterol: 0, satFat: 0, iron: 0, calcium: 0, purine: 0, fiber: 0, kalium: 0, fosfor: 0, zinc: 0, tembaga: 0, magnesium: 0, vitA: 0, vitB1: 0, vitB2: 0, vitB3: 0, vitB6: 0, vitB9: 0, vitB12: 0, vitC: 0, vitD: 0, vitE: 0, vitK: 0 };
+export const EMPTY_NUTRITION = { kcal: 0, protein: 0, carbs: 0, fat: 0, sodium: 0, sugar: 0, cholesterol: 0, satFat: 0, transFat: 0, polyFat: 0, monoFat: 0, iron: 0, calcium: 0, purine: 0, fiber: 0, kalium: 0, fosfor: 0, zinc: 0, tembaga: 0, magnesium: 0, vitA: 0, vitB1: 0, vitB2: 0, vitB3: 0, vitB6: 0, vitB9: 0, vitB12: 0, vitC: 0, vitD: 0, vitE: 0, vitK: 0, omega3: 0 };
 
 export const addNutrition = (a, b, factor = 1) => {
   const out = { ...a };
