@@ -152,3 +152,11 @@ input[type=number] {
   -moz-appearance: textfield;
 }
 
+
+/* Hide bottom nav and drop smart input bar when keyboard opens */
+body.keyboard-open #bottom-nav {
+  display: none !important;
+}
+body.keyboard-open #smart-input-bar {
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+}

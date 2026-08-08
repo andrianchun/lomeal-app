@@ -1148,8 +1148,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       </div>
 
       {/* ===== SMART INPUT BAR (menempel di atas BottomNav, besar ala Logym) ===== */}
-      <div className="fixed left-0 right-0 z-30 px-3 pb-2 pointer-events-none" style={{ bottom: 'calc(82px + env(safe-area-inset-bottom, 20px))' }}>
-        <div className={`no-swipe pointer-events-auto relative max-w-2xl mx-auto flex items-center gap-1.5 px-3 py-2.5 rounded-[32px] border ${t.border} ${t.navBg} shadow-2xl`}>
+      <div id="smart-input-bar" className="fixed left-0 right-0 z-30 px-3 pb-2 pointer-events-none" style={{ bottom: 'calc(82px + env(safe-area-inset-bottom, 20px))' }}>
+        <div className={`no-swipe pointer-events-auto relative max-w-2xl mx-auto flex items-center gap-1.5 px-3 py-2.5 rounded-[32px] border ${t.border} ${t.navBg} shadow-2xl transition-all`}>
           {aiBusy ? (
             <div className="absolute inset-0 rounded-[32px] overflow-hidden pointer-events-none">
               <div className="absolute inset-0 bg-green-500/20 dark:bg-green-400/20 w-full origin-left" style={{ animation: 'progressFill 10s cubic-bezier(0.1, 0.8, 0.2, 1) forwards' }} />

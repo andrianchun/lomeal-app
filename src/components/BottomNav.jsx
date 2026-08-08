@@ -14,7 +14,7 @@ const BottomNav = ({ t, activeTab, setActiveTab, soundEnabled, playSoundEffect }
   ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 pb-safe px-3 pointer-events-none">
+    <div id="bottom-nav" className="fixed bottom-0 left-0 right-0 z-40 pb-safe px-3 pointer-events-none">
       <div className={`pointer-events-auto flex items-center gap-1 max-w-2xl mx-auto mb-3 px-2 py-2 rounded-[28px] border ${t.border} ${t.navBg} ${t.glow} transition-colors duration-300`}>
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
