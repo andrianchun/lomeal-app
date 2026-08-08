@@ -218,7 +218,11 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   // Swipe kiri/kanan buat pindah tab utama — pola sama kayak App.jsx Logym. Elemen yang gak
   // boleh kesenggol (grafik, modal, dst) ditandai `.no-swipe` atau stopPropagation lokal.
   const swipeStartRef = useRef({ x: 0, y: 0 });
-  const isSwipeGuarded = (e) => e.target.closest('input[type="range"]') || e.target.closest('[role="dialog"]') || e.target.closest('.no-swipe');
+  const isSwipeGuarded = (e) => {
+    const activeTagName = document.activeElement?.tagName?.toLowerCase();
+    if (activeTagName === 'input' || activeTagName === 'textarea') return true;
+    return e.target.closest('input[type="range"]') || e.target.closest('[role="dialog"]') || e.target.closest('.no-swipe');
+  };
   const handleSwipeStart = (e) => {
     if (isSwipeGuarded(e)) return;
     swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
