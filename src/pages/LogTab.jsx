@@ -747,6 +747,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
   const baseVoiceTextRef = useRef('');
   const voiceTimerRef = useRef(null);
+  const voiceListenersRef = useRef([]);
 
   const stopVoice = async () => {
     if (voiceTimerRef.current) {
@@ -757,7 +758,12 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       try {
         const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
         await SpeechRecognition.stop();
-        await SpeechRecognition.removeAllListeners();
+        for (const listener of voiceListenersRef.current) {
+          if (listener && listener.remove) {
+            try { await listener.remove(); } catch (e) {}
+          }
+        }
+        voiceListenersRef.current = [];
       } catch (e) {}
     } else {
       if (recogRef.current) {
@@ -785,7 +791,12 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
 
         try { await SpeechRecognition.stop(); } catch (e) {}
-        try { await SpeechRecognition.removeAllListeners(); } catch (e) {}
+        for (const listener of voiceListenersRef.current) {
+          if (listener && listener.remove) {
+            try { await listener.remove(); } catch (e) {}
+          }
+        }
+        voiceListenersRef.current = [];
 
         const { available } = await SpeechRecognition.available();
         if (!available) {
@@ -804,18 +815,20 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
         baseVoiceTextRef.current = chatText;
 
-        await SpeechRecognition.addListener('partialResults', (data) => {
+        const l1 = await SpeechRecognition.addListener('partialResults', (data) => {
           if (data.matches && data.matches.length > 0) {
             const text = data.matches[0];
             setChatText((baseVoiceTextRef.current ? baseVoiceTextRef.current + ' ' : '') + text);
           }
         });
 
-        await SpeechRecognition.addListener('listeningState', (data) => {
+        const l2 = await SpeechRecognition.addListener('listeningState', (data) => {
           if (data.status === 'stopped') {
             stopVoice();
           }
         });
+
+        voiceListenersRef.current = [l1, l2];
 
         setListening(true);
 
