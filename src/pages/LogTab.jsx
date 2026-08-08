@@ -745,6 +745,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     showToast(`${foods.length} catatan makanan berhasil disimpan!`);
   };
 
+  const baseVoiceTextRef = useRef('');
+
   // ---------- Voice (Web Speech API bila tersedia) ----------
   const toggleVoice = async () => {
     if (isNativeApp()) {
@@ -771,22 +773,32 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           }
         }
 
-        setListening(true);
-        const res = await SpeechRecognition.start({
-          language: 'id-ID',
-          maxResults: 1,
-          prompt: 'Sebutkan makananmu...',
-          partialResults: false,
-          popup: true
+        baseVoiceTextRef.current = chatText;
+        await SpeechRecognition.removeAllListeners();
+
+        await SpeechRecognition.addListener('partialResults', (data) => {
+          if (data.matches && data.matches.length > 0) {
+            const text = data.matches[0];
+            setChatText((baseVoiceTextRef.current ? baseVoiceTextRef.current + ' ' : '') + text);
+          }
         });
 
-        if (res && res.matches && res.matches.length > 0) {
-          setChatText(prev => (prev ? prev + ' ' : '') + res.matches[0]);
-        }
+        await SpeechRecognition.addListener('listeningState', (data) => {
+          if (data.status === 'stopped') {
+            setListening(false);
+          }
+        });
+
+        setListening(true);
+        await SpeechRecognition.start({
+          language: 'id-ID',
+          maxResults: 1,
+          partialResults: true,
+          popup: false
+        });
       } catch (e) {
         console.error("Native Speech Error:", e);
         showAlert(`Gagal merekam suara: ${e.message || 'Error tidak diketahui'}`);
-      } finally {
         setListening(false);
       }
       return;
