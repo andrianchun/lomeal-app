@@ -757,10 +757,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     if (isNativeApp()) {
       try {
         const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
-        await SpeechRecognition.stop();
+        // Jangan di-await karena plugin native bisa hang jika dipanggil saat sudah mati (silence)
+        SpeechRecognition.stop().catch(() => {});
         for (const listener of voiceListenersRef.current) {
           if (listener && listener.remove) {
-            try { await listener.remove(); } catch (e) {}
+            listener.remove().catch(() => {});
           }
         }
         voiceListenersRef.current = [];
@@ -792,7 +793,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
         for (const listener of voiceListenersRef.current) {
           if (listener && listener.remove) {
-            try { await listener.remove(); } catch (e) {}
+            listener.remove().catch(() => {});
           }
         }
         voiceListenersRef.current = [];
