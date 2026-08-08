@@ -790,7 +790,6 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       try {
         const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
 
-        try { await SpeechRecognition.stop(); } catch (e) {}
         for (const listener of voiceListenersRef.current) {
           if (listener && listener.remove) {
             try { await listener.remove(); } catch (e) {}

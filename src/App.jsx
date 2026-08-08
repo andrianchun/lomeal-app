@@ -114,24 +114,19 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
           // Sengaja !== bukan >: mem-publish versi lama = rollback, dan itu harus ikut terkirim.
           if (data.ota_version && data.ota_version !== installedVer) {
-            console.log(`[OTA] Auto-updating from ${installedVer} to ${data.ota_version}...`);
-            if (Capacitor.isNativePlatform()) {
-              try {
-                const bundle = await CapacitorUpdater.download({
-                  url: data.ota_url,
-                  version: data.ota_version,
-                });
-                await CapacitorUpdater.set(bundle);
-                return;
-              } catch (e) {
-                console.error('Auto OTA failed:', e);
-              }
-            } else {
-              const reg = await navigator.serviceWorker?.getRegistration();
-              if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-              window.location.reload();
+            const dismissed = localStorage.getItem('lomeal_dismissed_ota');
+            if (dismissed === data.ota_version && !data.is_forced) {
+              setOtaState(prev => ({ ...prev, open: false }));
               return;
             }
+            console.log(`[OTA] Update available: ${installedVer} to ${data.ota_version}`);
+            setOtaState({
+              open: true,
+              version: data.ota_version,
+              url: data.ota_url,
+              notes: data.release_notes || 'Pembaruan baru tersedia.',
+              force: !!data.is_forced,
+            });
           } else {
             setOtaState(prev => ({ ...prev, open: false }));
           }
