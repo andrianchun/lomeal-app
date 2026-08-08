@@ -836,12 +836,16 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           stopVoice();
         }, 30000);
 
-        await SpeechRecognition.start({
+        const result = await SpeechRecognition.start({
           language: 'id-ID',
           maxResults: 1,
-          partialResults: true,
-          popup: false
+          popup: true
         });
+        
+        if (result && result.matches && result.matches.length > 0) {
+          const text = result.matches[0];
+          setChatText((baseVoiceTextRef.current ? baseVoiceTextRef.current + ' ' : '') + text);
+        }
       } catch (e) {
         console.error("Native Speech Error:", e);
         showAlert(`Gagal merekam suara: ${e.message || 'Error tidak diketahui'}`);
