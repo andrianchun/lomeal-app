@@ -114,24 +114,23 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
           // Sengaja !== bukan >: mem-publish versi lama = rollback, dan itu harus ikut terkirim.
           if (data.ota_version && data.ota_version !== installedVer) {
-            const dismissed = localStorage.getItem('lomeal_dismissed_ota');
-            if (!data.is_forced && dismissed === data.ota_version) {
-              setOtaState(prev => ({
-                ...prev,
-                open: false,
-                force: data.is_forced,
-                url: data.ota_url,
-                version: data.ota_version,
-                notes: data.release_notes
-              }));
+            console.log(`[OTA] Auto-updating from ${installedVer} to ${data.ota_version}...`);
+            if (Capacitor.isNativePlatform()) {
+              try {
+                const bundle = await CapacitorUpdater.download({
+                  url: data.ota_url,
+                  version: data.ota_version,
+                });
+                await CapacitorUpdater.set(bundle);
+                return;
+              } catch (e) {
+                console.error('Auto OTA failed:', e);
+              }
             } else {
-              setOtaState({
-                open: true,
-                force: data.is_forced,
-                url: data.ota_url,
-                version: data.ota_version,
-                notes: data.release_notes
-              });
+              const reg = await navigator.serviceWorker?.getRegistration();
+              if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+              window.location.reload();
+              return;
             }
           } else {
             setOtaState(prev => ({ ...prev, open: false }));
@@ -144,17 +143,12 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
     checkOta();
 
-    // Empat pemicu supaya update muncul sendiri tanpa user refresh/hapus cache: saat
-    // dibuka, saat kembali ke foreground, saat koneksi baru nyambung lagi (kalau tadi
-    // cek gagal karena offline), dan tiap 5 menit selama app terbuka (turun dari 15 —
-    // 5 menit tetap ringan buat sekadar fetch JSON kecil, dan update darurat nyusul user
-    // yang lagi pakai app berjam-jam jauh lebih cepat).
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') checkOta();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('online', checkOta);
-    const poll = setInterval(checkOta, 5 * 60 * 1000);
+    const poll = setInterval(checkOta, 15 * 1000);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
