@@ -440,7 +440,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   // ikut pilihan user biar gak ke-reset tiap nambah item baru.
   const appendAiResult = (newFoods, meta = {}) => {
     if (!aiResult) setAiTargetSession(getNearestSessionId());
-    setAiResult(prev => prev ? { ...prev, foods: [...prev.foods, ...withBase(newFoods)] } : { foods: withBase(newFoods), ...meta });
+    setAiResult(prev => prev ? { ...prev, foods: [...prev.foods, ...withBase(newFoods)] } : { foods: withBase(newFoods), time: new Date().toTimeString().slice(0, 5), ...meta });
   };
 
   const runMagicPrompt = async (forcedText = null) => {
@@ -686,7 +686,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
        }
     });
 
-    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: entryUnit(f.unit, f.isDrink), nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai' }));
+    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: entryUnit(f.unit, f.isDrink), nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai', time: aiResult.time || new Date().toTimeString().slice(0, 5) }));
     
     meals[aiTargetSession] = [
       ...(meals[aiTargetSession] || []),
@@ -746,12 +746,62 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   };
 
   // ---------- Voice (Web Speech API bila tersedia) ----------
-  const toggleVoice = () => {
+  const toggleVoice = async () => {
+    if (isNativeApp()) {
+      try {
+        const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
+        if (listening) {
+          await SpeechRecognition.stop();
+          setListening(false);
+          return;
+        }
+
+        const { available } = await SpeechRecognition.available();
+        if (!available) {
+          showAlert('Input suara tidak didukung perangkat ini. Ketik saja ya 🙂');
+          return;
+        }
+
+        const perm = await SpeechRecognition.checkPermissions();
+        if (perm.speechRecognition !== 'granted') {
+          const req = await SpeechRecognition.requestPermissions();
+          if (req.speechRecognition !== 'granted') {
+            showAlert('Izin mikrofon ditolak.');
+            return;
+          }
+        }
+
+        setListening(true);
+        const res = await SpeechRecognition.start({
+          language: 'id-ID',
+          maxResults: 1,
+          prompt: 'Sebutkan makananmu...',
+          partialResults: false,
+          popup: true
+        });
+
+        if (res && res.matches && res.matches.length > 0) {
+          setChatText(prev => (prev ? prev + ' ' : '') + res.matches[0]);
+        }
+      } catch (e) {
+        console.error("Native Speech Error:", e);
+        showAlert(`Gagal merekam suara: ${e.message || 'Error tidak diketahui'}`);
+      } finally {
+        setListening(false);
+      }
+      return;
+    }
+
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showAlert('Input suara tidak didukung perangkat ini. Ketik saja ya 🙂'); return; }
     if (listening) { recogRef.current?.stop(); return; }
     const r = new SR();
     r.lang = 'id-ID'; r.interimResults = false;
+    r.onerror = (e) => {
+      console.error("Web Speech Error:", e.error);
+      if (e.error !== 'aborted' && e.error !== 'no-speech') showAlert(`Error mic: ${e.error}`);
+      setListening(false);
+    };
     r.onresult = (e) => setChatText(prev => (prev ? prev + ' ' : '') + e.results[0][0].transcript);
     r.onend = () => setListening(false);
     recogRef.current = r; setListening(true); r.start();
@@ -1084,7 +1134,14 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
             className={`w-full max-w-sm max-h-full overflow-y-auto hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
             <div className="flex items-center gap-2 mb-3">
               <h2 className={`h2 ${t.textMain}`}>Catat Makanan</h2>
-              <button onClick={() => setAiResult(null)} className={`ml-auto p-2 rounded-xl ${t.btnBg}`}><X size={15} className={t.textMuted} /></button>
+              <div className="ml-auto flex items-center gap-2">
+                <input type="time"
+                  value={aiResult.time || ''}
+                  onChange={(e) => setAiResult(r => ({ ...r, time: e.target.value }))}
+                  className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1`}
+                />
+                <button onClick={() => setAiResult(null)} className={`p-2 rounded-xl ${t.btnBg}`}><X size={15} className={t.textMuted} /></button>
+              </div>
             </div>
             {aiResult.photoDataUrl && (
               <div className="w-24 h-24 rounded-full overflow-hidden mx-auto mb-3 border-2 border-green-500/40">
