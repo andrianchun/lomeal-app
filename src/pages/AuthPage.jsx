@@ -235,7 +235,7 @@ const AuthPage = ({ t, theme, soundEnabled, onLogin }) => {
 
             <h1 className="h1 leading-tight mb-4">
               <span className={t.textMain}>{isLoginMode ? 'Masuk untuk' : 'Daftar untuk'}</span><br />
-              <span className={`bg-gradient-to-r ${t.gradientText} bg-clip-text text-transparent`}>Kendalikan Pola Makanmu</span>
+              <span className={`bg-gradient-to-r ${t.gradientText} bg-clip-text text-transparent`}>Atur Pola Makanmu</span>
             </h1>
 
             {/* Tombol ringkas: pencet untuk buka form */}

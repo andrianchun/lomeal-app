@@ -233,7 +233,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
                         <div key={e.id} className={`flex items-center justify-between pl-3 pr-1 py-1.5 mt-1 rounded-xl ${t.bgSunken}`}>
                           <p className={`caption font-semibold flex-1 ${t.textMain}`}>
                             {e.name}
-                            {e.source === 'ai' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500"><Sparkles size={12} strokeWidth={2.5} /></span>}
+                            {(e.source === 'ai' || e.source === 'text_ai') && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500"><Sparkles size={12} strokeWidth={2.5} /></span>}
                             {e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500"><ChefHat size={12} strokeWidth={2.5} /></span>}
                             {e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500"><Box size={12} strokeWidth={2.5} /></span>}
                           </p>

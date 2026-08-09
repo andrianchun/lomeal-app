@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
-import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Trash2, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download } from 'lucide-react';
+import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download } from 'lucide-react';
 import RingChart from '../components/RingChart';
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
@@ -9,13 +9,13 @@ import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TAR
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
 import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, toDataUrl, PHOTO_KEEPSAKE, PHOTO_THUMB } from '../utils/aiFood';
-import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto } from '../utils/foodLog';
+import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto, getDayPhotos } from '../utils/foodLog';
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
 import { isNativeApp, captureToFile } from '../utils/nativeCamera';
 import { markDomusItemConsumed, updateDomusItemQuantity } from '../utils/domusSync';
 import { deductStock } from '../utils/stockConverter';
-import SpeedDialScanner from '../components/SpeedDialScanner';
+import AttachmentMenu from '../components/AttachmentMenu';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
 import { URT_DICTIONARY, normalizeUnit, entryUnit } from '../utils/urtMapping';
@@ -79,16 +79,30 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
   const [pickerOpen, setPickerOpen] = useState(false); // FoodPicker terbuka? (nambah ke batch aiResult yang sama)
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
+  const [detailSlide, setDetailSlide] = useState(0);
   const [copySourceSession, setCopySourceSession] = useState(null);
   const [copyTargetSessions, setCopyTargetSessions] = useState([]);
+  const [copyTargetDate, setCopyTargetDate] = useState(todayYmd);
+  const [copySelectedItems, setCopySelectedItems] = useState([]);
+  const [copySourcePhoto, setCopySourcePhoto] = useState(null);
   const [showDayStatsModal, setShowDayStatsModal] = useState(false);
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [editingPhotoObj, setEditingPhotoObj] = useState(null);
   const [waterEdit, setWaterEdit] = useState(false);
   const [listening, setListening] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
   const [rackExpanded, setRackExpanded] = useState(false);
   const [saveToDb, setSaveToDb] = useState(false); // Default jangan simpan ke custom DB agar tidak menumpuk
+  const [fullscreenPhotos, setFullscreenPhotos] = useState(null);
+  const [fullscreenIndex, setFullscreenIndex] = useState(0);
+  const fullscreenViewerRef = useRef(null);
+  
+  useEffect(() => {
+    if (fullscreenPhotos && fullscreenViewerRef.current) {
+      fullscreenViewerRef.current.scrollLeft = fullscreenIndex * fullscreenViewerRef.current.clientWidth;
+    }
+  }, [fullscreenPhotos]); // Intentionally omitting fullscreenIndex so it only aligns on open
+
 
   // Tombol back (hardware Android/gesture/browser) nutup sheet yang lagi kebuka dulu,
   // bukan lompat ke tab lain. `detailSession` bisa nyalain `deleteConfirm` di atasnya
@@ -99,8 +113,24 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   useBackClose(!!copySourceSession, () => { setCopySourceSession(null); setCopyTargetSessions([]); });
   useBackClose(showDayStatsModal, () => setShowDayStatsModal(false));
   useBackClose(showAddSessionModal, () => setShowAddSessionModal(false));
-  useBackClose(!!deleteConfirm, () => setDeleteConfirm(null));
   // pickerOpen (FoodPickerModal) sudah dihandle di dalam komponennya sendiri lewat prop `open`.
+  
+  // Safe dismiss for smart-input-bar (menyembunyikan bar ketika tap di luarnya, menghindari glitch onBlur)
+  useEffect(() => {
+    const handlePointerDown = (e) => {
+      if (document.body.classList.contains('keyboard-open')) {
+        const bar = document.getElementById('smart-input-bar');
+        const sheet = document.getElementById('ai-result-sheet');
+        // If clicking outside both the input bar AND the AI result sheet (if open)
+        if (bar && !bar.contains(e.target) && (!sheet || !sheet.contains(e.target))) {
+          document.body.classList.remove('keyboard-open');
+          if (document.activeElement) document.activeElement.blur();
+        }
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, []);
 
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
@@ -169,9 +199,9 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   // Foto langsung kelihatan detik itu juga lewat object URL lokal — kompresi (~1 detik untuk
   // foto belasan MP) dan upload jalan di belakang. Preview disimpan terpisah dari daftar
   // tersimpan supaya gak ketiban snapshot Firestore yang datang di tengah proses.
-  const addPhoto = async (sessionId, fileOrDataUrl) => {
+  const addPhoto = async (sessionId, fileOrDataUrl, forcedId = null) => {
     const isFile = typeof fileOrDataUrl !== 'string';
-    const tempId = `tmp_${Date.now()}`;
+    const tempId = forcedId || `p_${Date.now()}`;
     const localUrl = isFile ? URL.createObjectURL(fileOrDataUrl) : fileOrDataUrl;
     setPendingPhotos((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: tempId, url: localUrl, pending: true }] }));
     await new Promise(r => setTimeout(r, 50)); // Jeda 50ms agar UI merender preview SEBELUM thread diblokir kompresi!
@@ -179,7 +209,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       const { url, thumbUrl } = await uploadPhotoPair(sessionId, fileOrDataUrl);
       await writePhotos(sessionId, [
         ...storedPhotos(sessionId),
-        { id: `p_${Date.now()}`, url, originalUrl: url, thumbUrl, originalThumbUrl: thumbUrl },
+        { id: tempId, url, originalUrl: url, thumbUrl, originalThumbUrl: thumbUrl },
       ]);
     } catch (e) {
       showAlert(`Gagal menyimpan foto: ${e.message}`);
@@ -193,12 +223,15 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   // Di browser: jatuh balik ke <input capture> — web gak boleh nulis ke galeri.
   const openCamera = async (onFile, inputRef) => {
     if (isNativeApp()) {
+      setCameraLoading(true);
       try {
         const file = await captureToFile();
         if (file) return onFile(file);
       } catch (e) {
         if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka kamera: ${e.message}`);
         return;
+      } finally {
+        setCameraLoading(false);
       }
     }
     inputRef.current?.click();
@@ -296,7 +329,21 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
   const persistDay = (newDay) => saveDay(selectedYmd, newDay);
 
-  const removeEntry = (sessionId, entryId) => {
+  const handleRemoveSession = async (sessionId) => {
+    const sessionLabel = activeSessions.find(s => s.id === sessionId)?.label || '';
+    if (!(await showConfirm(`Yakin ingin menghapus sesi ${sessionLabel} beserta isinya dari hari ini?`, { title: 'Hapus Sesi?', confirmText: 'Hapus', danger: true }))) return;
+    
+    const meals = { ...(day.meals || {}) };
+    delete meals[sessionId];
+    const hidden = [...(day.hiddenSessions || []), sessionId];
+    storedPhotos(sessionId).forEach((p) => dropFiles(p.url, p.originalUrl, p.thumbUrl, p.originalThumbUrl));
+    writePhotos(sessionId, []);
+    persistDay({ ...day, meals, hiddenSessions: hidden });
+    setDetailSession(null);
+  };
+
+  const removeEntry = async (sessionId, entryId) => {
+    if (!(await showConfirm('Hapus menu ini dari catatan?', { title: 'Hapus Menu', confirmText: 'Hapus', danger: true }))) return;
     const meals = { ...(day.meals || {}) };
     meals[sessionId] = (meals[sessionId] || []).filter(e => e.id !== entryId);
     persistDay({ ...day, meals });
@@ -390,13 +437,18 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     persistDay({ ...day, sessionTimes });
   };
 
-  const executeCopyOrMove = (isMove) => {
-    if (!copySourceSession || copyTargetSessions.length === 0) return;
-    const sourceMeals = day.meals?.[copySourceSession] || [];
+  const executeCopyOrMove = async (isMove) => {
+    if (!copySourceSession || copyTargetSessions.length === 0 || copySelectedItems.length === 0) return;
+    const allSourceMeals = day.meals?.[copySourceSession] || [];
+    const sourceMeals = allSourceMeals.filter(e => copySelectedItems.includes(e.id));
     if (sourceMeals.length === 0) return;
     
-    const meals = { ...(day.meals || {}) };
-    const sessionTimes = day.sessionTimes || profile?.settings?.defaultSessionTimes || DEFAULT_SESSION_TIMES;
+    const isSameDate = copyTargetDate === selectedYmd;
+    const targetDay = isSameDate ? { ...day } : { meals: {}, water: 0, ...(daysMap[copyTargetDate] || {}) };
+    const targetMeals = { ...(targetDay.meals || {}) };
+    const sessionTimes = targetDay.sessionTimes || profile?.settings?.defaultSessionTimes || DEFAULT_SESSION_TIMES;
+    
+    let targetDayPhotos = isSameDate ? { ...photosRef.current } : { ...(await getDayPhotos(user.uid, copyTargetDate)) };
     
     copyTargetSessions.forEach(targetId => {
       const targetTime = sessionTimes[targetId] || '12:00';
@@ -405,16 +457,54 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         id: Math.random().toString(36).substr(2, 9),
         time: targetTime
       }));
-      meals[targetId] = [...(meals[targetId] || []), ...cloned];
+      
+      if (copySourcePhoto) {
+         const clonedPhoto = { ...copySourcePhoto, id: `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` };
+         cloned.forEach(c => c.photoId = clonedPhoto.id);
+         targetDayPhotos[targetId] = [...(targetDayPhotos[targetId] || []), clonedPhoto];
+      }
+      
+      targetMeals[targetId] = [...(targetMeals[targetId] || []), ...cloned];
     });
+    targetDay.meals = targetMeals;
     
     if (isMove) {
-      delete meals[copySourceSession];
+      const sourceDayMeals = isSameDate ? targetMeals : { ...(day.meals || {}) };
+      sourceDayMeals[copySourceSession] = allSourceMeals.filter(e => !copySelectedItems.includes(e.id));
+      if (sourceDayMeals[copySourceSession].length === 0) delete sourceDayMeals[copySourceSession];
+      
+      let sourceDayPhotos = isSameDate ? targetDayPhotos : { ...photosRef.current };
+      if (copySourcePhoto) {
+         const remainingItemsForPhoto = sourceDayMeals[copySourceSession]?.filter(e => e.photoId === copySourcePhoto.id) || [];
+         if (remainingItemsForPhoto.length === 0) {
+             sourceDayPhotos[copySourceSession] = (sourceDayPhotos[copySourceSession] || []).filter(p => p.id !== copySourcePhoto.id);
+             if (!isSameDate) {
+                 await saveDayPhotos(user.uid, selectedYmd, sourceDayPhotos);
+                 applyPhotos(sourceDayPhotos);
+             } else {
+                 targetDayPhotos = sourceDayPhotos;
+             }
+         }
+      }
+      
+      if (!isSameDate) {
+        saveDay(selectedYmd, { ...day, meals: sourceDayMeals });
+      }
     }
     
-    persistDay({ ...day, meals });
+    if (isSameDate) {
+      persistDay(targetDay);
+      applyPhotos(targetDayPhotos);
+      await saveDayPhotos(user.uid, selectedYmd, targetDayPhotos);
+    } else {
+      saveDay(copyTargetDate, targetDay);
+      await saveDayPhotos(user.uid, copyTargetDate, targetDayPhotos);
+    }
+    
     setCopySourceSession(null);
     setCopyTargetSessions([]);
+    setCopySelectedItems([]);
+    setCopySourcePhoto(null);
     showToast(isMove ? 'Menu berhasil dipindah!' : 'Menu berhasil disalin!');
   };
 
@@ -440,13 +530,14 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   // pencet "Catat". Sesi target cuma di-auto-pilih untuk item PERTAMA di batch; abis itu
   // ikut pilihan user biar gak ke-reset tiap nambah item baru.
   const appendAiResult = (newFoods, meta = {}) => {
-    if (!aiResult) setAiTargetSession(getNearestSessionId());
     setAiResult(prev => prev ? { ...prev, foods: [...prev.foods, ...withBase(newFoods)] } : { foods: withBase(newFoods), time: new Date().toTimeString().slice(0, 5), ...meta });
   };
 
   const runMagicPrompt = async (forcedText = null) => {
     const text = typeof forcedText === 'string' ? forcedText.trim() : chatText.trim();
     if (!text || aiBusy) return;
+
+    if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId());
 
     const controller = new AbortController();
     setAiAbortController(controller);
@@ -472,7 +563,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
       if (localResult && localResult.foods?.length > 0) {
           saveLocalPatternCache(text, localResult.foods);
-          appendAiResult(localResult.foods, { isOffline: true }); // Tanda diproses lokal
+          appendAiResult(localResult.foods, { isOffline: true, source: 'text_ai' }); // Tanda diproses lokal
           setChatText('');
           setAiAbortController(null);
           return;
@@ -486,7 +577,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     const globalFoods = await checkGlobalPatternCache(normalizedText);
     if (globalFoods && globalFoods.length > 0) {
        saveLocalPatternCache(text, globalFoods);
-       appendAiResult(globalFoods, { isOffline: true, source: 'global_cache' });
+       appendAiResult(globalFoods, { isOffline: true, source: 'text_ai' });
        setChatText('');
        setAiAbortController(null);
        setAiBusy(false);
@@ -517,20 +608,24 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       // LOG SEARCH MISS ANONIMOUSLY (untuk trend catcher / kurasi)
       const safeText = text.trim().toLowerCase().substring(0, 100);
       if (safeText.length > 2) {
-         import('firebase/firestore').then(({ doc, setDoc, increment }) => {
-            setDoc(doc(import('../firebase').then(m => m.db), 'lomeal_search_misses', safeText.replace(/\//g, '_')), {
-               query: safeText,
-               count: increment(1),
-               lastSearched: new Date().toISOString()
-            }, { merge: true }).catch(() => {});
-         });
+         (async () => {
+            try {
+               const { doc, setDoc, increment } = await import('firebase/firestore');
+               const { db } = await import('../firebase');
+               await setDoc(doc(db, 'lomeal_search_misses', safeText.replace(/\//g, '_')), {
+                  query: safeText,
+                  count: increment(1),
+                  lastSearched: new Date().toISOString()
+               }, { merge: true });
+            } catch (e) {}
+         })();
       }
 
       const res = await parseFoodText(aiKey, text, controller.signal, customFoods);
       if (res.foods?.length) {
          saveLocalPatternCache(text, res.foods);
          saveGlobalPatternCache(text, res.foods);
-         appendAiResult(res.foods, { isOffline: false });
+         appendAiResult(res.foods, { isOffline: false, source: 'text_ai' });
          setChatText('');
       }
       else await showAlert('AI tidak menemukan makanan pada teks itu. Coba lebih spesifik, mis. "nasi 1 centong, ayam goreng 1 potong".');
@@ -560,8 +655,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     addPhoto(sessionId, file);
   };
 
-  const handleReanalyzeSessionPhoto = async (sessionId, photoSrc) => {
-    if (!photoSrc) return;
+  const handleReanalyzeSessionPhoto = async (sessionId, photo) => {
+    if (!photo || !photo.url) return;
     if (!(await guardAi())) return;
 
     const controller = new AbortController();
@@ -569,7 +664,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     setAiBusy(true);
 
     try {
-      const photoBase64 = await toDataUrl(photoSrc);
+      const photoBase64 = await toDataUrl(photo.url);
       const mimeType = photoBase64.substring(photoBase64.indexOf(":") + 1, photoBase64.indexOf(";"));
       const rawBase64 = photoBase64.split(",")[1];
       const res = await analyzeSmartPhoto(aiKey, rawBase64, mimeType, controller.signal);
@@ -582,7 +677,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       }
       if (!items.length) throw new Error('AI tidak menemukan makanan.');
       
-      const newEntries = items.map(f => makeEntry({ name: f.name, grams: f.grams, unit: 'g', nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai' }));
+      const newEntries = items.map(f => makeEntry({ name: f.name, grams: f.grams, unit: 'g', nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai', photoId: photo.id }));
       const existingItems = day.meals?.[sessionId] || [];
       
       const stringSimilarity = (a, b) => {
@@ -633,6 +728,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const runPhotoScan = async (file) => {
     if (!file || aiBusy) return;
     if (!(await guardAi())) return;
+
+    if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId());
 
     const controller = new AbortController();
     setAiAbortController(controller);
@@ -687,7 +784,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
        }
     });
 
-    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: entryUnit(f.unit, f.isDrink), nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai', time: aiResult.time || new Date().toTimeString().slice(0, 5) }));
+    const photoId = (photoFile || photoDataUrl) ? `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` : null;
+    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: entryUnit(f.unit, f.isDrink), nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: f.source || aiResult.source || 'ai', time: aiResult.time || new Date().toTimeString().slice(0, 5), photoId }));
     
     meals[aiTargetSession] = [
       ...(meals[aiTargetSession] || []),
@@ -708,7 +806,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     }
     // Foto ikut disimpan (nambah, gak nimpa). Yang diarsip versi 1600px dari file aslinya —
     // photoDataUrl cuma versi kecil 800px yang tadi dikirim ke AI.
-    if (photoFile || photoDataUrl) addPhoto(aiTargetSession, photoFile || photoDataUrl);
+    if (photoId) addPhoto(aiTargetSession, photoFile || photoDataUrl, photoId);
     
     // Simpan ke DB Custom jika dicentang — LEWATI yang namanya sudah ada (di database bawaan
     // maupun custom). Dulu tiap catatan selalu bikin entri baru, jadi "matcha latte" numpuk
@@ -743,6 +841,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     
     persistDay(newDay);
     setAiResult(null);
+    setDetailSession(aiTargetSession);
     showToast(`${foods.length} catatan makanan berhasil disimpan!`);
   };
 
@@ -865,6 +964,13 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     r.interimResults = true;
     r.continuous = true;
 
+    const resetSilenceTimer = () => {
+      if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current);
+      voiceTimerRef.current = setTimeout(() => {
+        stopVoice();
+      }, 2500); // 2.5s silence auto-stop
+    };
+
     r.onerror = (e) => {
       console.error("Web Speech Error:", e.error);
       if (e.error !== 'aborted' && e.error !== 'no-speech') showAlert(`Error mic: ${e.error}`);
@@ -878,6 +984,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       }
       if (interim) {
         setChatText((baseVoiceTextRef.current ? baseVoiceTextRef.current + ' ' : '') + interim);
+        resetSilenceTimer();
       }
     };
 
@@ -887,10 +994,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
     recogRef.current = r;
     setListening(true);
-
-    voiceTimerRef.current = setTimeout(() => {
-      stopVoice();
-    }, 30000);
+    resetSilenceTimer(); // Start initial 2.5s timer
 
     r.start();
   };
@@ -1020,12 +1124,12 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const water = day.water || 0;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 pt-3 pb-52">
+    <div className="max-w-2xl mx-auto px-4 pt-0 pb-72">
       {/* ===== HORIZONTAL DATE STRIP (dikunci, gak ikut scroll vertikal) =====
           t.bgApp sama persis dengan background body (background-attachment: fixed, posisi
           dihitung dari viewport) jadi nyambung mulus walau strip-nya sticky di atas konten
           yang lewat di baliknya. */}
-      <div className={`sticky z-30 -mx-4 px-4 pt-1 pb-2 ${t.bgApp}`} style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))' }}>
+      <div className={`sticky z-30 -mx-4 px-4 pt-3 pb-3 ${t.bgApp}`} style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))' }}>
       <div className="flex gap-1.5 overflow-x-auto hide-scrollbar no-swipe"
         ref={stripRef}>
         {dates.map(d => {
@@ -1099,6 +1203,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                              transform: rackExpanded ? 'translateX(0)' : 'translateX(20px)'
                          }}
                      >
+                         <div className="flex-1 min-w-0 shrink"></div>
+                         
                          {medicines.map(med => {
                            const IconComp = ICONS[med.icon] || Pill;
                            const textClass = COLORS.find(c => c.id === med.color)?.bg.replace('bg-', 'text-') || 'text-zinc-500';
@@ -1109,7 +1215,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                                persistDay({ ...day, medChecks });
                              }} className={`shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border shadow-md transition-all ${isChecked ? `${t.bgAccent} border-transparent text-white` : `${t.bgCard} ${t.border} ${t.textMuted}`}`}>
                                {isChecked ? <Check size={18} className="mb-0.5" /> : <IconComp size={18} className={`mb-0.5 ${textClass}`} />}
-                               <span className="text-[8px] font-bold px-1 text-center truncate w-full">{med.name}</span>
+                               <span className="text-[8px] font-bold px-1 text-center line-clamp-2 leading-tight w-full whitespace-normal">{med.name}</span>
                              </button>
                            )
                          })}
@@ -1125,7 +1231,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                                showAlert(`${drink.name} ditambahkan ke sesi Minuman!`);
                              }} className={`shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border border-transparent shadow-md text-white active:scale-95 transition-all ${bgClass}`}>
                                <IconComp size={18} className="mb-0.5" />
-                               <span className="text-[8px] font-bold px-1 text-center truncate w-full">{drink.name}</span>
+                               <span className="text-[8px] font-bold px-1 text-center line-clamp-2 leading-tight w-full whitespace-normal">{drink.name}</span>
                              </button>
                            )
                          })}
@@ -1133,7 +1239,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                  )}
                  
                  {(drinkTemplates.length > 0 || medicines.length > 0) && (
-                   <button onClick={() => setRackExpanded(!rackExpanded)} className={`shrink-0 flex items-center justify-center w-6 h-12 rounded-xl bg-black/10 dark:bg-white/10 active:scale-95 transition-all backdrop-blur-md mb-1`}>
+                   <button onClick={() => setRackExpanded(!rackExpanded)} className={`relative z-10 shrink-0 flex items-center justify-center w-6 h-12 rounded-xl bg-black/10 dark:bg-white/10 active:scale-95 transition-all backdrop-blur-md mb-1`}>
                       {rackExpanded ? <ChevronRight size={14} className={t.textMuted}/> : <ChevronLeft size={14} className={t.textMuted}/>}
                    </button>
                  )}
@@ -1150,20 +1256,21 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       </div>
 
       {/* ===== SMART INPUT BAR (menempel di atas BottomNav, besar ala Logym) ===== */}
-      <div id="smart-input-bar" className="fixed left-0 right-0 z-30 px-3 pb-2 pointer-events-none" style={{ bottom: 'calc(82px + env(safe-area-inset-bottom, 20px))' }}>
-        <div className={`no-swipe pointer-events-auto relative max-w-2xl mx-auto flex items-center gap-1.5 px-3 py-2.5 rounded-[32px] border ${t.border} ${t.navBg} shadow-2xl transition-all`}>
+      <div id="smart-input-bar" className="fixed left-0 right-0 z-30 px-3 pb-2 pointer-events-none transition-all duration-300 ease-out" style={{ bottom: 'calc(82px + env(safe-area-inset-bottom, 20px))' }}>
+        <div className={`no-swipe pointer-events-auto relative max-w-2xl mx-auto flex items-center gap-1.5 px-3 py-2.5 rounded-[32px] border ${t.border} ${t.navBg} shadow-2xl transition-all duration-300 ease-out`}>
           {aiBusy ? (
             <div className="absolute inset-0 rounded-[32px] overflow-hidden pointer-events-none">
               <div className="absolute inset-0 bg-green-500/20 dark:bg-green-400/20 w-full origin-left" style={{ animation: 'progressFill 10s cubic-bezier(0.1, 0.8, 0.2, 1) forwards' }} />
             </div>
           ) : null}
-          <div className="shrink-0 relative z-10">
-             <SpeedDialScanner 
-               mainIcon={Camera} 
-               mainColorClass={`p-3.5 rounded-full ${t.btnBg} ${t.textAccent}`}
+          <div className="relative shrink-0 z-20">
+             <AttachmentMenu 
+               mainColorClass={t.bgAccent}
                disabled={aiBusy}
+               isListening={listening}
                onSelectCamera={() => openCamera(runPhotoScan, cameraRef)}
                onSelectGallery={() => galleryRef.current?.click()}
+               onSelectMic={toggleVoice}
              />
           </div>
           <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
@@ -1193,19 +1300,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                 }
               }}
               onFocus={() => document.body.classList.add('keyboard-open')}
-              onBlur={() => {
-                // Beri jeda sblm balikin layout biar tombol di smart bar gak lari sebelum klik diproses
-                setTimeout(() => document.body.classList.remove('keyboard-open'), 150);
-              }}
               placeholder="Ketik makananmu..."
               className={`relative z-10 flex-1 min-w-0 bg-transparent outline-none body-lg px-2 py-3.5 font-medium ${t.textMain} placeholder:${t.textMuted} placeholder:opacity-50 hide-scrollbar resize-none overflow-y-auto`}
               rows={1}
               style={{ height: 'auto' }} />
           )}
-          
-          <button onClick={toggleVoice} className={`relative z-10 shrink-0 p-3.5 rounded-full ${t.btnBg} ${listening ? 'text-red-400 animate-pulse' : t.textMuted} transition-transform active:scale-95`} aria-label="Input suara">
-            <Mic size={22} />
-          </button>
           
           {aiBusy ? (
             <button onClick={cancelAiRequest} className={`relative z-10 shrink-0 p-3.5 rounded-full bg-red-500 text-white shadow-lg transition-transform active:scale-95`} aria-label="Batal">
@@ -1227,7 +1326,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           Mulai di bawah header (bukan top-0) biar gak numpuk header, dan belakangnya di-blur+dim
           + gak bisa di-scroll selama sheet ini kebuka (lihat useEffect scroll-lock di atas). */}
       {aiResult && (
-        <div className="fixed inset-x-0 z-40 flex flex-col justify-end items-center p-4 no-swipe bg-black/40 backdrop-blur-sm"
+        <div id="ai-result-sheet" className="fixed inset-x-0 z-40 flex flex-col justify-end items-center p-4 no-swipe bg-black/40 backdrop-blur-sm"
           style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))', bottom: 'calc(170px + env(safe-area-inset-bottom, 20px))' }}
           onClick={() => setAiResult(null)}>
           <div onClick={(e) => e.stopPropagation()}
@@ -1324,6 +1423,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                         ...r,
                         foods: r.foods.map((x, j) => j === i ? {
                           ...x, grams,
+                          baseGrams,
+                          baseNutrition,
                           nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])),
                         } : x),
                       }));
@@ -1389,85 +1490,141 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
       {/* ===== SHEET DETAIL SESI (edit/hapus entri) ===== */}
       {detailSession && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe" onClick={() => setDetailSession(null)}>
+        <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe ${pickerOpen || copySourceSession || editingPhotoObj || !!aiResult || aiBusy ? 'hidden' : ''}`} onClick={() => setDetailSession(null)}>
           <div onClick={(e) => e.stopPropagation()}
             className={`w-full max-w-sm max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl anim-rise`}>
             
-            {/* Header / Foto Section — bisa lebih dari satu foto, digeser ke samping */}
-            <div className={`relative h-48 w-full shrink-0 ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
-               <div className="flex h-full w-full overflow-x-auto snap-x snap-mandatory hide-scrollbar">
-                 {photosOf(detailSession).map((p) => (
-                   <div key={p.id} className="relative h-full w-full shrink-0 snap-center">
-                     <img src={p.thumbUrl || p.url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
-                     <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80" />
-                     {p.pending ? (
-                       <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 text-white caption font-bold backdrop-blur-md">
-                         <Loader2 size={12} className="animate-spin" /> Menyimpan
-                       </div>
-                     ) : (
-                       <>
-                         <div className="absolute top-3 right-3 flex gap-2">
-                           <button onClick={() => downloadPhoto(detailSession, p)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP"><Download size={16} /></button>
-                           <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: p })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95"><Edit2 size={16} /></button>
-                           <button onClick={() => removePhoto(detailSession, p)} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95"><X size={16} /></button>
-                         </div>
-                         <div className="absolute bottom-4 inset-x-4 flex items-center gap-2">
-                           <button onClick={() => handleReanalyzeSessionPhoto(detailSession, p.url)} disabled={aiBusy} className={`flex-1 py-2 rounded-xl bg-emerald-500/90 text-white caption font-bold shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2 backdrop-blur-md ${aiBusy ? 'opacity-50' : ''}`}>
-                             {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Analisa Ulang
-                           </button>
-                         </div>
-                       </>
-                     )}
-                   </div>
-                 ))}
-                 {/* Tile terakhir: nambah foto lagi — foto lama TIDAK ketimpa */}
-                 <div className={`h-full shrink-0 snap-center flex flex-col items-center justify-center gap-2 ${photosOf(detailSession).length ? 'w-32 border-l border-white/10' : 'w-full'}`}>
-                   <div className="flex items-center gap-3">
-                     <button onClick={() => openCamera((file) => addPhoto(detailSession, file), detailCameraRef)}
-                       className={`p-4 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`} aria-label="Jepret foto">
-                       <Camera size={24} />
-                     </button>
-                     <button onClick={() => detailPhotoRef.current?.click()}
-                       className={`p-4 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`} aria-label="Pilih dari galeri">
-                       <Image size={24} />
-                     </button>
-                   </div>
-                   <span className={`caption font-medium ${t.textMuted}`}>Tambah Foto</span>
-                 </div>
-               </div>
-               <input ref={detailPhotoRef} type="file" accept="image/*" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
-               <input ref={detailCameraRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
+            {/* FIXED HEADER */}
+            <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5`}>
+              <div className="flex flex-col flex-1 mr-4">
+                <input key={detailSession} type="text" className={`bg-transparent outline-none h2 ${t.textMain} w-full`} 
+                  placeholder="Sesi Baru"
+                  defaultValue={activeSessions.find(s => s.id === detailSession)?.label || ''}
+                  onBlur={(e) => {
+                    const newVal = e.target.value.trim();
+                    if (newVal && newVal !== activeSessions.find(s => s.id === detailSession)?.label) {
+                      persistDay({ ...day, sessionLabels: { ...(day.sessionLabels || {}), [detailSession]: newVal } });
+                    }
+                  }} />
+              </div>
+              <div className="flex items-center gap-2">
+                {detailSession !== 'drink' && (
+                  <input type="time" 
+                    value={activeSessions.find(s => s.id === detailSession)?.time || '12:00'}
+                    onChange={(e) => setSessionTime(detailSession, e.target.value)}
+                    className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1`} />
+                )}
+                <button onClick={() => handleRemoveSession(detailSession)} className={`p-2 rounded-xl bg-red-400/10 text-red-400`}><X size={15} /></button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto hide-scrollbar p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex flex-col flex-1 mr-4">
-                  <input key={detailSession} type="text" className={`bg-transparent outline-none h2 ${t.textMain} w-full`} 
-                    placeholder="Sesi Baru"
-                    defaultValue={activeSessions.find(s => s.id === detailSession)?.label || ''}
-                    onBlur={(e) => {
-                      const newVal = e.target.value.trim();
-                      if (newVal && newVal !== activeSessions.find(s => s.id === detailSession)?.label) {
-                        persistDay({ ...day, sessionLabels: { ...(day.sessionLabels || {}), [detailSession]: newVal } });
-                      }
-                    }} />
-                </div>
-                <div className="flex items-center gap-2">
-                  {detailSession !== 'drink' && (
-                    <input type="time" 
-                      value={activeSessions.find(s => s.id === detailSession)?.time || '12:00'}
-                      onChange={(e) => setSessionTime(detailSession, e.target.value)}
-                      className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1`} />
-                  )}
-                  <button onClick={() => { setCopySourceSession(detailSession); setDetailSession(null); }} className={`p-2 rounded-xl ${t.btnBg} text-emerald-500`}><Copy size={15} /></button>
-                  <button onClick={() => setDeleteConfirm(detailSession)} className={`p-2 rounded-xl bg-red-400/10 text-red-400`}><X size={15} /></button>
-                </div>
-              </div>
-              <div className="space-y-1.5 mb-3">
-                {(day.meals?.[detailSession] || []).map(e => {
-                  const isMealPrep = e.isMealPrep || e.source === 'recipe';
-                  const isEaten = e.isEaten !== undefined ? e.isEaten : !isMealPrep;
-                  return (
+            {/* CAROUSEL */}
+            <div className="flex-1 flex flex-col min-h-0">
+              {(() => {
+                 const sessionPhotos = photosOf(detailSession);
+                 let sessionItems = day.meals?.[detailSession] || [];
+                 
+                 // Auto-migrate data lama: jika ada foto tapi item AI tidak punya photoId, masukkan ke foto pertama
+                 if (sessionPhotos.length > 0) {
+                   sessionItems = sessionItems.map(item => {
+                     if (!item.photoId && item.source === 'ai') {
+                       return { ...item, photoId: sessionPhotos[0].id };
+                     }
+                     return item;
+                   });
+                 }
+
+                 const itemsByPhoto = {};
+                 const noPhotoItems = [];
+                 
+                 sessionItems.forEach(item => {
+                   if (item.photoId && sessionPhotos.some(p => p.id === item.photoId)) {
+                     if (!itemsByPhoto[item.photoId]) itemsByPhoto[item.photoId] = [];
+                     itemsByPhoto[item.photoId].push(item);
+                   } else {
+                     noPhotoItems.push(item);
+                   }
+                 });
+
+                 const slides = sessionPhotos.map(p => ({ type: 'photo', photo: p, items: itemsByPhoto[p.id] || [] }));
+                 if (noPhotoItems.length > 0 || slides.length === 0) {
+                   slides.push({ type: 'manual', items: noPhotoItems });
+                 }
+
+                 return (
+                   <>
+                     <div className="flex-1 flex w-full overflow-x-auto snap-x snap-mandatory hide-scrollbar"
+                          onScroll={(e) => {
+                            const idx = Math.round(e.target.scrollLeft / e.target.clientWidth);
+                            if (idx !== detailSlide && idx >= 0 && idx < slides.length) setDetailSlide(idx);
+                          }}>
+                       {slides.map((slide, slideIdx) => (
+                         <div key={slide.photo?.id || 'manual'} className="w-full h-full flex flex-col shrink-0 snap-center relative">
+                      {/* Sub-Session Header */}
+                      {slide.type === 'photo' ? (
+                        <div className={`relative h-48 w-full shrink-0 ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
+                           <img src={slide.photo.thumbUrl || slide.photo.url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover cursor-pointer"
+                                onClick={() => {
+                                  setFullscreenPhotos(slides.filter(s => s.type === 'photo').map(s => s.photo));
+                                  setFullscreenIndex(slideIdx);
+                                }} />
+                           <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80 pointer-events-none" />
+                           {slide.photo.pending ? (
+                             <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 text-white caption font-bold backdrop-blur-md">
+                               <Loader2 size={12} className="animate-spin" /> Menyimpan
+                             </div>
+                           ) : (
+                             <>
+                               <div className="absolute top-3 right-3 flex gap-2">
+                                 <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP"><Download size={16} /></button>
+                                 <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95"><Edit2 size={16} /></button>
+                                 <button onClick={() => removePhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95"><X size={16} /></button>
+                               </div>
+                               <div className="absolute bottom-4 inset-x-4 flex items-center gap-2">
+                                 <button onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)} disabled={aiBusy} className={`flex-1 py-2 rounded-xl bg-emerald-500/90 text-white caption font-bold shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2 backdrop-blur-md ${aiBusy ? 'opacity-50' : ''}`}>
+                                   {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Analisa Ulang
+                                 </button>
+                               </div>
+                             </>
+                           )}
+                        </div>
+                      ) : (
+                        <div className={`relative h-28 w-full shrink-0 flex flex-col items-center justify-center gap-3 ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
+                           <div className="flex items-center gap-3">
+                             <button onClick={() => openCamera((file) => addPhoto(detailSession, file), detailCameraRef)}
+                               className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`} aria-label="Jepret foto">
+                               <Camera size={20} />
+                             </button>
+                             <button onClick={() => detailPhotoRef.current?.click()}
+                               className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`} aria-label="Pilih dari galeri">
+                               <Image size={20} />
+                             </button>
+                           </div>
+                           <span className={`caption font-medium ${t.textMuted}`}>Tambah Foto (Menu Manual)</span>
+                        </div>
+                      )}
+
+                      {/* Items List for this Sub-Session */}
+                      <div className="flex-1 overflow-y-auto p-5 pb-8">
+                         <div className="flex items-center justify-between mb-3">
+                           <p className={`caption font-bold ${t.textMain}`}>
+                             Daftar Menu {slides.length > 1 ? `(${slideIdx + 1}/${slides.length})` : ''}
+                           </p>
+                           {slide.items.length > 0 && (
+                             <button onClick={() => { 
+                               setCopySourceSession(detailSession);
+                               setCopyTargetDate(selectedYmd);
+                               setCopySelectedItems(slide.items.map(e => e.id));
+                               setCopySourcePhoto(slide.type === 'photo' ? slide.photo : null);
+                               setDetailSession(null);
+                             }} className={`p-2 rounded-xl ${t.btnBg} text-emerald-500 flex items-center gap-1.5`}><Copy size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Pindah / Salin</span></button>
+                           )}
+                         </div>
+                         <div className="space-y-1.5 mb-3">
+                             {slide.items.map(e => {
+                             const isMealPrep = e.isMealPrep || e.source === 'recipe';
+                             const isEaten = e.isEaten !== undefined ? e.isEaten : !isMealPrep;
+                             return (
                   <div key={e.id} className={`flex items-center justify-between p-3 rounded-2xl border ${theme === 'dark' ? 'bg-black/20 border-white/5' : 'bg-white/50 border-black/5'} transition-all ${isEaten === false ? 'opacity-50' : ''}`}>
                     <div className="flex items-center gap-3 flex-1 overflow-hidden">
                       { isMealPrep && (
@@ -1497,8 +1654,8 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                                 return {
                                   ...x,
                                   grams,
-                                  baseGrams, // Preserve the fallback baseGrams
-                                  baseNutrition, // Preserve the fallback baseNutrition
+                                  baseGrams,
+                                  baseNutrition,
                                   nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
                                 };
                               });
@@ -1506,51 +1663,109 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                             }} className={`w-12 bg-transparent border-b border-dashed ${t.border} outline-none no-spinners text-center ${t.textMain}`} />
                             {e.unit || 'g'} · {Math.round(e.nutrition?.kcal || 0)} kkal
                           </span>
-                          {e.source === 'ai' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <Sparkles size={14} strokeWidth={2.5} /></span>}{e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}{e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500">· <Box size={14} strokeWidth={2.5} /></span>}
+                          {(e.source === 'ai' || e.source === 'text_ai') && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <Sparkles size={14} strokeWidth={2.5} /></span>}{e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}{e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500">· <Box size={14} strokeWidth={2.5} /></span>}
                           {e.isMealPrep && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border shrink-0 ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>Meal Prep</span>}
                         </div>
                       </div>
                     </div>
                     <button onClick={() => removeEntry(detailSession, e.id)} className="p-2 rounded-xl text-red-400 shrink-0"><X size={14} /></button>
                   </div>
-                )})}
-              </div>
-              <button onClick={() => { if (!aiResult) setAiTargetSession(detailSession); setPickerOpen(true); setDetailSession(null); }}
-                className={`w-full py-3 rounded-2xl border-2 border-dashed ${t.borderDashed} body-md ${t.textMuted}`}>
-                <Plus size={14} className="inline mr-1" />Tambah item
-              </button>
+                             );
+                           })}
+                         </div>
+                         {slide.items.length === 0 && (
+                           <div className={`p-4 text-center rounded-2xl border border-dashed ${t.border}`}>
+                             <p className={`caption ${t.textMuted}`}>Tidak ada menu di grup ini.</p>
+                           </div>
+                         )}
+                       </div>
+                       
+                       {/* Input Manual Picker per slide */}
+                       <div className="px-5 mt-auto pb-5 pt-2 bg-gradient-to-t from-black/5 dark:from-black/40 to-transparent sticky bottom-0">
+                          <button onClick={() => { setAiTargetSession(detailSession); setPickerOpen(true); }}
+                            className={`w-full py-3 rounded-2xl ${t.btnBg} ${t.textMain} body-md font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95`}>
+                            <Plus size={16} /> Tambah Menu Manual
+                          </button>
+                       </div>
+                       </div>
+                   ))}
+                     </div>
+                   </>
+                 );
+              })()}
+            </div>
+               <input ref={detailPhotoRef} type="file" accept="image/*" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
+               <input ref={detailCameraRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
             </div>
           </div>
-        </div>
       )}
 
       {/* ===== SHEET COPY SESI ===== */}
       {copySourceSession && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe" onClick={() => setCopySourceSession(null)}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
-            <h2 className={`h2 mb-2 ${t.textMain}`}>Salin / Pindah Menu</h2>
-            <p className={`caption ${t.textMuted} mb-4`}>Pilih sesi tujuan untuk menu dari <span className="font-bold">{activeSessions.find(s => s.id === copySourceSession)?.label}</span>:</p>
+            className={`w-full max-w-sm max-h-[90vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
+            <h2 className={`h2 mb-4 ${t.textMain}`}>Salin / Pindah Menu</h2>
             
-            <div className="space-y-2 mb-4 max-h-[40vh] overflow-y-auto">
-              {activeSessions.filter(s => s.id !== copySourceSession).map(s => (
-                <label key={s.id} className={`flex items-center gap-3 p-3 rounded-xl border ${t.border} ${t.bgCard}`}>
-                  <input type="checkbox" 
-                    checked={copyTargetSessions.includes(s.id)} 
-                    onChange={(e) => {
-                      if (e.target.checked) setCopyTargetSessions(prev => [...prev, s.id]);
-                      else setCopyTargetSessions(prev => prev.filter(id => id !== s.id));
-                    }}
-                    className="w-5 h-5 rounded accent-emerald-500" />
-                  <span className={`body-md ${t.textMain}`}>{s.emoji} {s.label}</span>
-                </label>
-              ))}
+            <div className="flex-1 overflow-y-auto hide-scrollbar -mx-2 px-2 space-y-4">
+              {/* Pemilihan Item */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className={`caption font-bold ${t.textMain}`}>Pilih Menu (Sesi {activeSessions.find(s => s.id === copySourceSession)?.label}):</p>
+                  {copySelectedItems.length === (day.meals?.[copySourceSession]?.length || 0) ? (
+                    <button onClick={() => setCopySelectedItems([])} className={`text-[11px] font-bold ${t.textMuted}`}>Hapus Semua</button>
+                  ) : (
+                    <button onClick={() => setCopySelectedItems(day.meals?.[copySourceSession]?.map(e => e.id) || [])} className={`text-[11px] font-bold ${t.textAccent}`}>Pilih Semua</button>
+                  )}
+                </div>
+                <div className={`space-y-1 p-2 rounded-2xl border ${t.border} ${t.bgSunken} max-h-[25vh] overflow-y-auto`}>
+                  {(day.meals?.[copySourceSession] || []).map(item => (
+                    <label key={item.id} className="flex items-start gap-2 p-2 rounded-xl active:bg-black/5 dark:active:bg-white/5 transition-colors cursor-pointer">
+                      <input type="checkbox" 
+                        checked={copySelectedItems.includes(item.id)} 
+                        onChange={(e) => {
+                          if (e.target.checked) setCopySelectedItems(prev => [...prev, item.id]);
+                          else setCopySelectedItems(prev => prev.filter(id => id !== item.id));
+                        }}
+                        className="w-4 h-4 mt-0.5 rounded accent-emerald-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className={`body-md font-medium ${t.textMain} truncate`}>{item.name}</p>
+                        <p className={`caption ${t.textMuted}`}>{item.grams}{item.unit || 'g'} · {Math.round(item.nutrition?.kcal || 0)} kkal</p>
+                      </div>
+                    </label>
+                  ))}
+                  {(day.meals?.[copySourceSession] || []).length === 0 && (
+                    <p className={`caption text-center p-3 ${t.textMuted}`}>Sesi kosong.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Pemilihan Tujuan */}
+              <div>
+                <p className={`caption font-bold ${t.textMain} mb-2`}>Tanggal & Sesi Tujuan:</p>
+                <input type="date" value={copyTargetDate} onChange={(e) => setCopyTargetDate(e.target.value)} 
+                  className={`w-full p-3 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md mb-2 outline-none`} />
+                <div className="space-y-2">
+                  {activeSessions.filter(s => (copyTargetDate === selectedYmd ? s.id !== copySourceSession : true)).map(s => (
+                    <label key={s.id} className={`flex items-center gap-3 p-3 rounded-xl border ${t.border} ${t.bgCard}`}>
+                      <input type="checkbox" 
+                        checked={copyTargetSessions.includes(s.id)} 
+                        onChange={(e) => {
+                          if (e.target.checked) setCopyTargetSessions(prev => [...prev, s.id]);
+                          else setCopyTargetSessions(prev => prev.filter(id => id !== s.id));
+                        }}
+                        className="w-5 h-5 rounded accent-emerald-500" />
+                      <span className={`body-md ${t.textMain}`}>{s.emoji} {s.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 mt-4 pt-4 border-t border-black/10 dark:border-white/10 shrink-0">
               <button onClick={() => { setCopySourceSession(null); setCopyTargetSessions([]); }} className={`flex-1 py-3 rounded-2xl ${t.btnBg} ${t.textMain} body-md font-bold`}>Batal</button>
-              <button onClick={() => executeCopyOrMove(true)} disabled={copyTargetSessions.length === 0} className={`flex-1 py-3 rounded-2xl bg-orange-500 text-white body-md font-bold disabled:opacity-50`}>Pindah</button>
-              <button onClick={() => executeCopyOrMove(false)} disabled={copyTargetSessions.length === 0} className={`flex-1 py-3 rounded-2xl ${t.bgAccent} text-white body-md font-bold disabled:opacity-50`}>Salin</button>
+              <button onClick={() => executeCopyOrMove(true)} disabled={copyTargetSessions.length === 0 || copySelectedItems.length === 0} className={`flex-1 py-3 rounded-2xl bg-orange-500 text-white body-md font-bold shadow-sm disabled:opacity-50`}>Pindah</button>
+              <button onClick={() => executeCopyOrMove(false)} disabled={copyTargetSessions.length === 0 || copySelectedItems.length === 0} className={`flex-1 py-3 rounded-2xl ${t.bgAccent} text-white body-md font-bold shadow-sm disabled:opacity-50`}>Salin</button>
             </div>
           </div>
         </div>
@@ -1652,38 +1867,27 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           customFoods={customFoods} recipes={recipes} domusItems={domusItems}
           favoriteFoods={profile?.favoriteFoods || []}
           onAdd={(entry) => {
-            appendAiResult([entry], { source: 'picker' });
-            showToast(`${entry.name} ditambahkan ke catatan makan, silakan cek sebelum disimpan.`);
+            if (detailSession) {
+               const newEntry = makeEntry({ name: entry.name, grams: entry.grams, unit: entryUnit(entry.unit, entry.isDrink), nutrition: { ...EMPTY_NUTRITION, ...entry.nutrition }, source: 'picker', time: activeSessions.find(s => s.id === detailSession)?.time || new Date().toTimeString().slice(0, 5) });
+               let meals = { ...(day.meals || {}) };
+               meals[detailSession] = [...(meals[detailSession] || []), newEntry];
+               let newDay = { ...day, meals };
+               newDay = persistDay(newDay);
+               setDay(newDay);
+               showToast(`${entry.name} langsung ditambahkan ke ${activeSessions.find(s => s.id === detailSession)?.label}.`);
+            } else {
+               appendAiResult([entry], { source: 'picker' });
+               showToast(`${entry.name} ditambahkan ke catatan makan, silakan cek sebelum disimpan.`);
+            }
+          }}
+          onSearchAi={(term) => {
+            setPickerOpen(false);
+            setChatText(term);
+            runMagicPrompt(term);
           }}
         />
       )}
       
-      {/* ===== SHEET KONFIRMASI HAPUS SESI ===== */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setDeleteConfirm(null)}>
-          <div onClick={(e) => e.stopPropagation()} className={`w-[90%] max-w-sm rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]' : 'bg-white'} p-6 anim-rise text-center`}>
-            <div className="w-14 h-14 rounded-full bg-red-400/10 text-red-400 flex items-center justify-center mx-auto mb-4 border border-red-400/20">
-              <Trash2 size={24} />
-            </div>
-            <h3 className={`h2 ${t.textMain} mb-2`}>Hapus Sesi?</h3>
-            <p className={`body-md ${t.textMuted} mb-6`}>Yakin ingin menghapus sesi {activeSessions.find(s => s.id === deleteConfirm)?.label} beserta isinya dari hari ini?</p>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className={`flex-1 py-3 rounded-2xl border ${t.border} ${t.btnBg} body-md font-medium ${t.textMain}`}>Batal</button>
-              <button onClick={() => {
-                const meals = { ...(day.meals || {}) };
-                delete meals[deleteConfirm];
-                const hidden = [...(day.hiddenSessions || []), deleteConfirm];
-                storedPhotos(deleteConfirm).forEach((p) => dropFiles(p.url, p.originalUrl, p.thumbUrl, p.originalThumbUrl));
-                writePhotos(deleteConfirm, []);
-                persistDay({ ...day, meals, hiddenSessions: hidden });
-                setDeleteConfirm(null);
-                setDetailSession(null);
-              }} className="flex-1 py-3 rounded-2xl bg-red-500/80 text-white body-md font-medium shadow-glow">Hapus</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ===== IMAGE CROPPER MODAL ===== */}
       {/* Selalu buka FOTO ASLI, bukan hasil crop sebelumnya — biar crop berulang gak makin burik. */}
       <ImageCropperModal
@@ -1699,6 +1903,37 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           setEditingPhotoObj(null);
         } : undefined}
       />
+
+      {/* ===== FULLSCREEN PHOTO VIEWER ===== */}
+      {fullscreenPhotos && fullscreenPhotos.length > 0 && (
+        <div className="fixed inset-0 z-[100] bg-black flex flex-col no-swipe">
+          <div className="absolute top-0 inset-x-0 p-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] flex justify-between items-center z-10 bg-gradient-to-b from-black/80 to-transparent">
+            <span className="text-white font-bold body-md">
+              {fullscreenPhotos.length > 1 ? `${fullscreenIndex + 1} / ${fullscreenPhotos.length}` : ''}
+            </span>
+            <button onClick={() => setFullscreenPhotos(null)} className="p-2 rounded-full bg-white/20 backdrop-blur-md text-white active:scale-95"><X size={20} /></button>
+          </div>
+          <div className="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar"
+               ref={fullscreenViewerRef}
+               onScroll={(e) => {
+                 const idx = Math.round(e.target.scrollLeft / e.target.clientWidth);
+                 if (idx !== fullscreenIndex && idx >= 0 && idx < fullscreenPhotos.length) setFullscreenIndex(idx);
+               }}>
+            {fullscreenPhotos.map((photo, i) => (
+              <div key={photo.id} className="w-full h-full shrink-0 snap-center flex items-center justify-center p-4">
+                <img src={photo.originalUrl || photo.url} alt="" className="max-w-full max-h-full object-contain rounded-xl" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* ===== GLOBAL CAMERA LOADING OVERLAY ===== */}
+      {cameraLoading && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300">
+          <Loader2 size={48} className="text-white animate-spin mb-4" />
+          <p className="text-white font-medium body-md tracking-wide">Membuka Kamera...</p>
+        </div>
+      )}
 
     </div>
   );

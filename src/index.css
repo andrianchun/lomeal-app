@@ -137,10 +137,8 @@ body:has(.fixed.inset-0:not(.pointer-events-none)) {
 }
 
 /* Fix native time/date picker icons in dark mode */
-.dark input[type="time"]::-webkit-calendar-picker-indicator,
-.dark input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1) brightness(0.8);
-}
+html.dark { color-scheme: dark; }
+html { color-scheme: light; }
 
 /* Hide number input spinners */
 input[type=number]::-webkit-inner-spin-button, 
@@ -158,5 +156,12 @@ body.keyboard-open #bottom-nav {
   display: none !important;
 }
 body.keyboard-open #smart-input-bar {
-  bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+  bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+body.keyboard-open #smart-input-bar > div {
+  align-items: flex-start !important;
+  padding-bottom: calc(100px + env(safe-area-inset-bottom, 20px)) !important;
+  border-radius: 28px 28px 0 0 !important;
+  border-bottom: none !important;
 }

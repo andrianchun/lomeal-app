@@ -20,8 +20,8 @@ const Header = ({ t, theme, isOffline, logymUser, onOpenSocial, onOpenSettings, 
 
   return (
     <header
-      className={`sticky top-0 z-40 ${t.navBg} border-b ${t.border} px-4 flex justify-between items-center transition-colors duration-300 relative`}
-      style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))', paddingBottom: '0.75rem' }}
+      className={`sticky top-0 w-full z-40 ${t.navBg} border-b ${t.border} px-4 flex justify-between items-center transition-colors duration-300 relative`}
+      style={{ height: 'calc(64px + env(safe-area-inset-top, 0px))', paddingTop: 'env(safe-area-inset-top, 0px)' }}
     >
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-green-400/40 to-transparent" />
 

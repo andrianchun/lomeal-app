@@ -51,7 +51,7 @@ export const searchOpenFoodFacts = async (query) => {
     }
     return null;
   } catch (e) {
-    console.error('OFF Search Error', e);
+    // Silently return null on search error
     return null;
   }
 };

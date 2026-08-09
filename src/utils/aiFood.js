@@ -159,7 +159,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null) {
         lastErr = err.message;
       }
     }
-    console.warn('Personal key failed, falling back to server...', lastErr);
+    // Fallback to server on personal key failure
   }
 
   abortIfCancelled(signal);

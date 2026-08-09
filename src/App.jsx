@@ -110,6 +110,11 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
         const res = await fetch(`${otaUrl}?t=${Date.now()}`, { cache: 'no-store' });
         if (res.ok) {
+          const contentType = res.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            setOtaState(prev => ({ ...prev, open: false }));
+            return;
+          }
           const data = await res.json();
 
           // Sengaja !== bukan >: mem-publish versi lama = rollback, dan itu harus ikut terkirim.
@@ -132,7 +137,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
           }
         }
       } catch (err) {
-        console.error('Failed to check OTA', err);
+        // Silently ignore OTA errors in dev or offline
       }
     };
 

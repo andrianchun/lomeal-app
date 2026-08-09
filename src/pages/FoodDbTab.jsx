@@ -2,7 +2,7 @@ import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, setDoc, increment } from 'firebase/firestore';
-import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star, Trash2, AlertTriangle, Heart, Filter, ChevronDown, Home } from 'lucide-react';
+import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star, AlertTriangle, Heart, Filter, ChevronDown, Home } from 'lucide-react';
 import { searchFoods, FOOD_CATEGORIES, getDefaultImageForFood, nutritionForAmount } from '../data/foodDatabase';
 import { AI_DAILY_LIMIT } from '../data/constants';
 import { NUTRIENTS } from '../data/nutrition';
@@ -12,14 +12,14 @@ import { checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
 import { isNativeApp, captureToFile } from '../utils/nativeCamera';
 import { sortFoodsByUsage } from '../utils/foodUsage';
 import ImageCropperModal from '../components/ImageCropperModal';
-import SpeedDialScanner from '../components/SpeedDialScanner';
+import AttachmentMenu from '../components/AttachmentMenu';
 import useBackClose from '../hooks/useBackClose';
 
 const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key, `${n.label} (${n.unit})`]);
 const EXTRA_NUTRIENT_FIELDS = NUTRIENTS.filter(n => !n.macro).map(n => [n.key, `${n.label} (${n.unit})`]);
 
 const emptyForm = () => {
-  const obj = { name: '', grams: 100, kcal: '' };
+  const obj = { name: '', grams: 100, kcal: '', portionLabel: '', portionGrams: 100, isDrink: false };
   NUTRIENT_FIELDS.forEach(([k]) => obj[k] = '');
   return obj;
 };
@@ -126,6 +126,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [macroFilter, setMacroFilter] = useState([]);
   const [detail, setDetail] = useState(null);
+  const [detailViewMode, setDetailViewMode] = useState('100g'); // '100g' | 'portion'
 
   const MACRO_FILTERS = useMemo(() => {
     return [
@@ -269,10 +270,21 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
 
   const openNewForm = () => { setForm(emptyForm()); setEditing('new'); };
   const openEditForm = (food) => {
+    const pGrams = food.portion?.grams || 100;
+    const factor = pGrams / 100;
+    
+    // Bersihkan label lama bawaan sistem ("100g" / "100ml") agar placeholder/fallback "1 porsi" bisa muncul
+    let pLabel = food.portion?.label || '';
+    if (pLabel === '100g' || pLabel === '100ml') pLabel = '';
+
     setForm({
-      name: food.name, grams: food.portion?.grams || 100,
-      kcal: food.nutrition?.kcal ?? '',
-      ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, food.nutrition?.[k] ?? ''])),
+      name: food.name, 
+      grams: pGrams,
+      portionLabel: pLabel,
+      portionGrams: pGrams,
+      isDrink: !!food.isDrink,
+      kcal: food.nutrition?.kcal ? Math.round(food.nutrition.kcal * factor * 1000) / 1000 : '',
+      ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, food.nutrition?.[k] ? Math.round(food.nutrition[k] * factor * 1000) / 1000 : ''])),
     });
     setEditing(food);
   };
@@ -294,9 +306,14 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
       if (res.type === 'label') {
         const grams = Number(res.servingGrams) > 0 ? Number(res.servingGrams) : 100;
         const perServing = res.nutrition || {};
+        const servingText = (res.servingSize || '').toLowerCase();
+        const isDrink = servingText.includes('ml') || servingText.includes('liter') || servingText.includes(' l');
         parsed = {
           name: res.name || '',
           grams,
+          portionLabel: res.servingSize || (grams === 100 ? (isDrink ? '100ml' : '100g') : (isDrink ? `${grams}ml` : `${grams}g`)),
+          portionGrams: grams,
+          isDrink,
           kcal: perServing.kcal ?? '',
           ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, perServing[k] ?? ''])),
         };
@@ -306,6 +323,9 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         parsed = {
           name: first.name || '',
           grams: first.grams || 100,
+          portionLabel: first.unit === 'ml' ? '1 gelas' : '1 porsi',
+          portionGrams: first.grams || 100,
+          isDrink: first.unit === 'ml' || !!first.isDrink,
           kcal: first.nutrition?.kcal ?? '',
           ...Object.fromEntries(NUTRIENT_FIELDS.map(([k]) => [k, first.nutrition?.[k] ?? ''])),
         };
@@ -366,9 +386,9 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
       Object.entries(nutrition).forEach(([k, v]) => { per100[k] = Math.round(v * factor * 1000) / 1000; });
 
     const isNew = editing === 'new';
-    // Satuan minuman WAJIB ikut entri aslinya. Dulu dipaku 'g'/'100g', jadi menyunting satu
-    // minuman diam-diam mengubahnya jadi gram dan membatalkan penandaan isDrink.
-    const isDrink = isNew ? false : !!editing.isDrink;
+    const isDrink = !!form.isDrink;
+    const pLabel = form.portionLabel || (isDrink ? '1 porsi' : '1 porsi');
+    const pGrams = Number(form.portionGrams) || 100;
     const item = {
       id: isNew ? `custom_${Date.now()}` : editing.id,
       name: form.name || 'Bahan Custom',
@@ -376,7 +396,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
       category: isNew ? 'packaged' : editing.category,
       unit: isDrink ? 'ml' : 'g',
       isDrink,
-      portion: { label: isDrink ? '100ml' : '100g', grams: 100 },
+      portion: { label: pLabel, grams: pGrams },
       nutrition: per100,
       source: 'Custom',
       isCustom: true,
@@ -414,10 +434,32 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
              </div>
           </div>
           <input ref={editGalleryRef} type="file" accept="image/*" onChange={handleEditImage} className="hidden" />
-          <div>
-            <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Berat acuan nilai gizi di bawah (g/ml)</p>
-            <input type="number" inputMode="numeric" className={`${inputCls} no-spinners`} value={form.grams} onChange={(e) => setForm((f) => ({ ...f, grams: e.target.value }))} />
+          
+          <div className="grid grid-cols-2 gap-3 mb-2">
+            <div>
+              <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Wujud</p>
+              <div className={`flex rounded-xl p-1 border ${t.border} ${t.inputBg}`}>
+                <button type="button" onClick={() => setForm(f => ({ ...f, isDrink: false }))} className={`flex-1 py-1.5 rounded-lg caption font-bold ${!form.isDrink ? `${t.bgCard} shadow-sm text-white` : t.textMuted}`}>Makanan</button>
+                <button type="button" onClick={() => setForm(f => ({ ...f, isDrink: true }))} className={`flex-1 py-1.5 rounded-lg caption font-bold ${form.isDrink ? `${t.bgCard} shadow-sm text-white` : t.textMuted}`}>Minuman</button>
+              </div>
+            </div>
+            <div>
+              <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Label 1 Porsi (opsional)</p>
+              <input type="text" className={inputCls} value={form.portionLabel} onChange={(e) => setForm(f => ({ ...f, portionLabel: e.target.value }))} placeholder={form.isDrink ? '1 gelas' : '1 bungkus'} />
+            </div>
           </div>
+          
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Berat 1 Porsi ({form.isDrink ? 'ml' : 'g'})</p>
+              <input type="number" inputMode="numeric" className={`${inputCls} no-spinners`} value={form.portionGrams} onChange={(e) => setForm((f) => ({ ...f, portionGrams: e.target.value }))} placeholder="100" />
+            </div>
+            <div>
+              <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Acuan gizi di bawah ({form.isDrink ? 'ml' : 'g'})</p>
+              <input type="number" inputMode="numeric" className={`${inputCls} no-spinners`} value={form.grams} onChange={(e) => setForm((f) => ({ ...f, grams: e.target.value }))} placeholder="100" />
+            </div>
+          </div>
+          
           <div className="grid grid-cols-2 gap-2">
             <div>
               <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Energi (kkal)</p>
@@ -465,32 +507,54 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         
         <div className="flex-1 overflow-y-auto hide-scrollbar -mx-4 px-4 space-y-4">
           <div className="flex items-center justify-between">
-            <p className={`caption font-medium ${t.textMuted}`}>Sumber: {detail.source || 'Custom'} · per 100{detail.unit}</p>
+            <p className={`caption font-medium ${t.textMuted}`}>Sumber: {detail.source || 'Custom'}</p>
             {(!detail.isCustom && detail.source !== 'TKPI') && (
                <button onClick={() => reportData(detail)} className="flex items-center gap-1 text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2 py-1 rounded-md active:scale-95 transition-transform">
                  <AlertTriangle size={12} /> Laporkan Data
                </button>
             )}
           </div>
-          <div className={`grid grid-cols-4 gap-2 p-3 rounded-2xl ${t.bgSunken}`}>
-            {[['kcal', 'kkal'], ['protein', 'P (g)'], ['carbs', 'K (g)'], ['fat', 'L (g)']].map(([k, label]) => (
-              <div key={k} className="text-center">
-                <p className={`text-sm font-black tabular-nums ${t.textMain}`}>{Math.round(detail.nutrition[k])}</p>
-                <p className={`caption ${t.textMuted}`}>{label}</p>
-              </div>
-            ))}
+          
+          <div className={`flex rounded-xl p-1 border ${t.border} ${t.inputBg}`}>
+            <button onClick={() => setDetailViewMode('100g')} className={`flex-1 py-2 rounded-lg body-md font-bold transition-all ${detailViewMode === '100g' ? `${t.bgCard} shadow-sm ${t.textMain}` : t.textMuted}`}>Per 100{detail.unit}</button>
+            <button onClick={() => setDetailViewMode('portion')} className={`flex-1 py-2 rounded-lg body-md font-bold transition-all ${detailViewMode === 'portion' ? `${t.bgCard} shadow-sm ${t.textMain}` : t.textMuted}`}>
+              Per {(() => {
+                const label = detail.portion?.label || '1 porsi';
+                // Hindari duplikasi teks jika label porsi persis "100g" atau "100ml" (data lama)
+                if (label === `100${detail.unit}` || label === `100 ${detail.unit}`) {
+                  return `Sajian (${detail.portion?.grams || 100}${detail.unit})`;
+                }
+                return label;
+              })()}
+            </button>
           </div>
-          <div className={`rounded-2xl border ${t.border} ${t.bgCard} divide-y ${t.border}`}>
-            {EXTRA_NUTRIENT_FIELDS.filter(([k]) => detail.nutrition[k] && detail.nutrition[k] !== 0).map(([k, label]) => (
-              <div key={k} className="flex justify-between px-4 py-2.5">
-                <span className={`body-md ${t.textMuted}`}>{label}</span>
-                <span className={`body-md font-bold ${t.textMain}`}>{detail.nutrition[k]}</span>
-              </div>
-            ))}
-            {EXTRA_NUTRIENT_FIELDS.filter(([k]) => detail.nutrition[k] && detail.nutrition[k] !== 0).length === 0 && (
-              <div className={`px-4 py-3 caption text-center ${t.textMuted}`}>Tidak ada data nutrisi mikro.</div>
-            )}
-          </div>
+          
+          {(() => {
+            const factor = detailViewMode === 'portion' ? ((detail.portion?.grams || 100) / 100) : 1;
+            return (
+              <>
+                <div className={`grid grid-cols-4 gap-2 p-3 rounded-2xl ${t.bgSunken}`}>
+                  {[['kcal', 'kkal'], ['protein', 'P (g)'], ['carbs', 'K (g)'], ['fat', 'L (g)']].map(([k, label]) => (
+                    <div key={k} className="text-center">
+                      <p className={`text-sm font-black tabular-nums ${t.textMain}`}>{Math.round((detail.nutrition[k] || 0) * factor)}</p>
+                      <p className={`caption ${t.textMuted}`}>{label}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className={`rounded-2xl border ${t.border} ${t.bgCard} divide-y ${t.border}`}>
+                  {EXTRA_NUTRIENT_FIELDS.filter(([k]) => detail.nutrition[k] && detail.nutrition[k] !== 0).map(([k, label]) => (
+                    <div key={k} className="flex justify-between px-4 py-2.5">
+                      <span className={`body-md ${t.textMuted}`}>{label}</span>
+                      <span className={`body-md font-bold ${t.textMain}`}>{Math.round((detail.nutrition[k] || 0) * factor * 10) / 10}</span>
+                    </div>
+                  ))}
+                  {EXTRA_NUTRIENT_FIELDS.filter(([k]) => detail.nutrition[k] && detail.nutrition[k] !== 0).length === 0 && (
+                    <div className={`px-4 py-3 caption text-center ${t.textMuted}`}>Tidak ada data nutrisi mikro.</div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
           
           {(() => {
             const domusMatch = domusItems.find(d => d.name.toLowerCase() === detail.name.toLowerCase());
@@ -647,7 +711,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
           </button>
           {duplicateNames > 0 && (
             <button onClick={cleanDuplicates} className={`shrink-0 px-3 h-[48px] rounded-2xl border ${t.border} ${t.btnBg} ${t.textMain} caption font-bold flex items-center gap-1.5`}>
-              <Trash2 size={14} /> {duplicateNames} dobel
+              <X size={14} /> {duplicateNames} dobel
             </button>
           )}
           <div className="flex gap-2 shrink-0">

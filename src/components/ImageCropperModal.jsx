@@ -34,11 +34,12 @@ export default function ImageCropperModal({
   const [rotate, setRotate] = useState(0);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [proxyImageSrc, setProxyImageSrc] = useState(null);
   const imgRef = useRef(null);
 
   // Komponen ini gak pernah di-unmount (cuma return null), jadi state crop foto sebelumnya
   // bakal nempel di foto berikutnya kalau gak direset tiap ganti gambar.
-  useEffect(() => { setCrop(undefined); setCompletedCrop(null); setRotate(0); setLoadError(false); }, [imageSrc]);
+  useEffect(() => { setCrop(undefined); setCompletedCrop(null); setRotate(0); setLoadError(false); setProxyImageSrc(null); }, [imageSrc]);
 
   useBackClose(!!(open && imageSrc), onClose);
 
@@ -114,7 +115,7 @@ export default function ImageCropperModal({
       
       <div className="flex-1 flex items-center justify-center p-4 overflow-hidden">
         {loadError && (
-          <div className="absolute inset-x-8 top-1/2 -translate-y-1/2 rounded-3xl bg-lime-300 text-black p-5 text-center">
+          <div className="absolute inset-x-8 top-1/2 -translate-y-1/2 rounded-3xl bg-emerald-500 text-white p-5 text-center shadow-lg">
             <p className="text-sm font-bold leading-relaxed break-words">
               Foto tidak bisa dimuat untuk diedit. Coba lagi saat koneksi stabil — kalau tetap gagal, foto ini perlu diunggah ulang.
             </p>
@@ -130,7 +131,7 @@ export default function ImageCropperModal({
           <img
             ref={imgRef}
             alt=""
-            src={imageSrc}
+            src={proxyImageSrc || imageSrc}
             // Foto diambil dari URL Firebase Storage (beda origin). Tanpa ini canvas-nya ke-taint
             // dan toDataURL() lempar SecurityError. KONSEKUENSINYA: bucket WAJIB punya konfigurasi
             // CORS, kalau tidak gambarnya gagal dimuat sama sekali (lihat onError di bawah).
@@ -138,8 +139,13 @@ export default function ImageCropperModal({
             style={{ transform: `rotate(${rotate}deg)`, maxHeight: '70vh', objectFit: 'contain' }}
             onLoad={onImageLoad}
             onError={() => {
-              console.error('[Cropper] Gagal memuat foto lintas-origin. Bucket Storage kemungkinan belum punya konfigurasi CORS untuk origin ini.');
-              setLoadError(true);
+              if (!proxyImageSrc && typeof imageSrc === 'string' && imageSrc.startsWith('http')) {
+                console.warn('[Cropper] Gagal memuat foto lintas-origin. Mencoba menggunakan proxy CORS...');
+                setProxyImageSrc(`https://corsproxy.io/?${encodeURIComponent(imageSrc)}`);
+              } else {
+                console.error('[Cropper] Proxy CORS juga gagal atau gambar invalid.');
+                setLoadError(true);
+              }
             }}
           />
         </ReactCrop>

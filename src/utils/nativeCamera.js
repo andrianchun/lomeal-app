@@ -16,7 +16,7 @@ export const captureToFile = async () => {
   const photo = await Camera.getPhoto({
     source: CameraSource.Camera,
     resultType: CameraResultType.Uri, // Uri, bukan Base64 — hemat memori buat foto belasan MP
-    saveToGallery: true,
+    saveToGallery: localStorage.getItem('lomeal_autosave_camera') !== 'false',
     correctOrientation: true,
     quality: 90,
   });

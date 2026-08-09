@@ -52,35 +52,35 @@ export default function useDialog() {
       onClick={() => state.mode === 'alert' && close()}
     >
       <div
-        className="w-full max-w-xs rounded-3xl p-5 bg-gradient-to-br from-green-500 to-green-600 text-white shadow-2xl animate-in zoom-in-95 duration-200"
+        className="w-full max-w-xs rounded-3xl p-6 bg-white/80 dark:bg-[#0b1f16]/80 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl animate-in zoom-in-95 duration-200 text-center"
         onClick={e => e.stopPropagation()}
       >
         {state.title && (
-          <h3 className="font-black text-base mb-1 text-center break-words">{state.title}</h3>
+          <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white break-words">{state.title}</h3>
         )}
-        <p className="text-sm leading-relaxed mb-4 text-center break-words">{state.message}</p>
+        <p className="text-sm font-medium mb-6 text-gray-600 dark:text-gray-400 break-words">{state.message}</p>
 
         {state.mode === 'alert' && (
           <button
             onClick={() => close()}
-            className="w-full py-2.5 rounded-2xl font-black text-sm bg-white text-green-700 active:scale-95 transition-all shadow-sm"
+            className="w-full py-3 rounded-2xl font-bold text-sm bg-emerald-500 text-white active:scale-95 transition-all shadow-sm"
           >
             OK
           </button>
         )}
 
         {state.mode === 'confirm' && (
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <button
               onClick={() => close(false)}
-              className="flex-1 py-2.5 rounded-2xl font-black text-sm bg-black/15 text-white active:scale-95 transition-all"
+              className="flex-1 py-3 rounded-2xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-gray-900 dark:text-white font-medium text-sm active:scale-95 transition-all"
             >
               {state.cancelText}
             </button>
             <button
               onClick={() => close(true)}
-              className={`flex-1 py-2.5 rounded-2xl font-black text-sm active:scale-95 transition-all shadow-sm ${
-                state.danger ? 'bg-red-500 text-white' : 'bg-white text-green-700'
+              className={`flex-1 py-3 rounded-2xl font-bold text-sm active:scale-95 transition-all shadow-lg ${
+                state.danger ? 'bg-red-500 text-white shadow-red-500/20' : 'bg-emerald-500 text-white shadow-emerald-500/20'
               }`}
             >
               {state.confirmText}

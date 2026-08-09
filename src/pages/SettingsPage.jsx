@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   X, Moon, Sun, Globe, Volume2, VolumeX, Timer, Download, Upload, CalendarDays,
   Bell, BellOff, Clock, Activity, Scale, Ruler, Thermometer, Plus,
-  MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw, DownloadCloud
+  MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw, DownloadCloud, Camera
 } from 'lucide-react';
 import { getLang } from '../i18n';
 import AdminDashboard from './AdminDashboard';
@@ -93,6 +93,7 @@ const SettingsPage = ({
   const [hcConnecting, setHcConnecting] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [autoSaveCamera, setAutoSaveCamera] = useState(() => localStorage.getItem('lomeal_autosave_camera') !== 'false');
 
   const handleSyncAll = async () => {
     if (!syncAllNutritionToLogym || isSyncing) return;
@@ -189,6 +190,11 @@ const SettingsPage = ({
               <Row icon={CalendarDays} label={lang.weekStart} t={t}>
                 <Toggle2 t={t} leftLabel={lang.monday} rightLabel={lang.sunday} leftActive={settings.weekStartDay !== 0}
                   onLeft={() => updateSetting('weekStartDay', 1)} onRight={() => updateSetting('weekStartDay', 0)} />
+              </Row>
+              <Row icon={Camera} label="Simpan Foto Otomatis" t={t}>
+                <Toggle2 t={t} leftLabel="Ya" rightLabel="Tidak" leftActive={autoSaveCamera}
+                  onLeft={() => { setAutoSaveCamera(true); localStorage.setItem('lomeal_autosave_camera', 'true'); }}
+                  onRight={() => { setAutoSaveCamera(false); localStorage.setItem('lomeal_autosave_camera', 'false'); }} />
               </Row>
             </Section>
 

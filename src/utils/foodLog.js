@@ -65,6 +65,11 @@ export const uploadMealPhoto = async (uid, ymd, sessionId, dataUrl) => {
 export const subscribeDayPhotos = (uid, ymd, cb) =>
   onSnapshot(flDoc(uid, `photos_${ymd}`), (snap) => cb(snap.exists() ? snap.data() : {}));
 
+export const getDayPhotos = async (uid, ymd) => {
+  const snap = await getDoc(flDoc(uid, `photos_${ymd}`));
+  return snap.exists() ? snap.data() : {};
+};
+
 export const saveDayPhotos = (uid, ymd, photos) =>
   setDoc(flDoc(uid, `photos_${ymd}`), photos, { merge: false });
 
