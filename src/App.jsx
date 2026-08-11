@@ -7,16 +7,17 @@ import { buildTheme } from './theme';
 import { getLocalYMD, getMonthKey, computeAge, MEAL_SESSIONS, DEFAULT_SESSION_TIMES } from './data/constants';
 import {
   subscribeLomealProfile, saveLomealProfile,
-  subscribeMonth, saveDay as saveDayFs,
+  subscribeMonth, getMonth, saveDay as saveDayFs,
   subscribeRecipes, saveRecipes,
   subscribeMealPreps, saveMealPreps,
   subscribeCustomFoods, saveCustomFoods,
   deleteAllUserData,
 } from './utils/foodLog';
 import { subscribeDomusItems, subscribeDomusLocations } from './utils/domusSync';
-import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitProfile } from './utils/lyfitSync';
+import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitProfile, fetchLyfitYear } from './utils/lyfitSync';
 import {
   pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym, pushNutritionBioToLogym,
+  pushNutritionBatchToLogym,
 } from './utils/biometricSync';
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
 import { computeDayTotals, calcTargets, DIET_PROFILES } from './data/nutrition';
@@ -365,20 +366,77 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     }
   }, [user, settings.healthConnectEnabled, logymUser, todayYmd, profile?.targets, showAlert]);
 
-  // Sinkron SEMUA riwayat Lomeal ke Logym sekaligus (bioData.nutritionCalories)
-  // ponytail: 10 per batch paralel, bukan serial — histori 1 tahun bisa 300+ hari,
-  // serial-await satu-satu bikin UI freeze menunggu network round-trip berkali-kali.
+  // TAMBAL LUBANG kalori-dimakan di Logym, 12 bulan ke belakang.
+  //
+  // Kenapa perlu: saveDay cuma mendorong hari yang BARU DIEDIT. Hari yang dicatat sebelum jalur
+  // itu ada, atau yang push-nya gagal saat offline, tidak pernah terisi sendiri.
+  //
+  // Bulan diambil langsung dari Firestore, BUKAN dari daysMap. daysMap cuma berisi bulan yang
+  // listener-nya sedang hidup — dibatasi 4 (LRU) dan saat boot cuma bulan berjalan. Versi lama
+  // fungsi ini membaca daysMap, jadi tombol "sinkron semua" praktis cuma menyinkronkan bulan ini.
+  //
+  // Yang sudah benar di Logym dilewati: satu getDoc per tahun buat tahu hari mana yang bolong,
+  // lalu SATU tulisan per tahun buat sisanya. Jadi jalan kedua (dan seterusnya) nulis nol byte.
   const syncAllNutritionToLogym = useCallback(async () => {
-    if (!logymUser) return;
-    const entries = Object.entries(daysMap).filter(([ymd, d]) => computeDayTotals(d, ymd <= todayYmd).kcal > 0);
-    let synced = 0;
-    for (let i = 0; i < entries.length; i += 10) {
-      const chunk = entries.slice(i, i + 10);
-      await Promise.all(chunk.map(([ymd, dayData]) => pushNutritionBioToLogym(logymUser.uid, ymd, computeDayTotals(dayData, ymd <= todayYmd).kcal)));
-      synced += chunk.length;
+    if (!logymUser) return 0;
+    // 1. Kumpulkan kalori Lomeal 12 bulan ke belakang.
+    const lomealKcal = {};
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(`${todayYmd}T12:00:00`);
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      const mk = getMonthKey(getLocalYMD(d));
+      const days = monthsData[mk] || await getMonth(user.uid, mk);
+      Object.entries(days || {}).forEach(([ymd, dayData]) => {
+        // Argumen kedua WAJIB: tanpa itu makanan yang dijadwalkan besok ikut terkirim seolah
+        // sudah masuk perut (lihat catatan di saveDay).
+        const kcal = computeDayTotals(dayData, ymd <= todayYmd).kcal;
+        if (kcal > 0) lomealKcal[ymd] = kcal;
+      });
     }
-    return synced;
-  }, [logymUser, daysMap, todayYmd]);
+
+    // 2. Buang yang di Logym sudah benar, lalu tulis sisanya satu kali per tahun.
+    const tahun = [...new Set(Object.keys(lomealKcal).map((ymd) => ymd.slice(0, 4)))];
+    let tertambal = 0;
+    for (const year of tahun) {
+      const logymYear = await fetchLyfitYear(logymUser.uid, year);
+      const bolong = {};
+      Object.entries(lomealKcal).forEach(([ymd, kcal]) => {
+        if (!ymd.startsWith(year)) return;
+        if (Number(logymYear?.[ymd]?.bioData?.nutritionCalories) === Math.round(kcal)) return;
+        bolong[ymd] = kcal;
+      });
+      tertambal += await pushNutritionBatchToLogym(logymUser.uid, year, bolong);
+    }
+    return tertambal;
+  }, [logymUser, user, monthsData, todayYmd]);
+
+  // Jalan sendiri sekali sehari per perangkat. Saat sudah bersih ongkosnya cuma pembacaan
+  // (12 getMonth + 1-2 getDoc) dan NOL tulisan — itulah yang bikin aman dijalankan otomatis.
+  // Penanda dipasang baru SETELAH selesai (app ditutup di tengah jalan = diulang besok), jadi
+  // butuh ref terpisah: `monthsData` ikut deps callback-nya, dan tiap listener bulan yang berbunyi
+  // akan menjalankan effect ini lagi sebelum penandanya sempat terpasang.
+  const healingNutrition = useRef(false);
+  useEffect(() => {
+    if (!logymUser || !user || healingNutrition.current) return;
+    // Penjaga yang sama dengan tombol manual di SettingsPage: kalau akun Lomeal dan akun Logym
+    // beda email, koneksinya sedang salah dan menulis berarti mencampur data dua orang. Di jalur
+    // otomatis ini lebih penting lagi — tidak ada user yang membaca dialog konfirmasi.
+    if (user.email && logymUser.email && user.email !== logymUser.email) {
+      console.warn('[Heal Lomeal] dilewati — akun Lomeal & Logym beda email.');
+      return;
+    }
+    const KEY = 'lomeal_heal_nutrition_last';
+    if (localStorage.getItem(KEY) === todayYmd) return;
+    healingNutrition.current = true;
+    syncAllNutritionToLogym()
+      .then((n) => {
+        localStorage.setItem(KEY, todayYmd);
+        if (n > 0) console.log(`[Heal Lomeal] ${n} hari kalori-dimakan ditambal ke Logym.`);
+      })
+      .catch((e) => console.warn('[Heal Lomeal] gagal, dicoba lagi nanti:', e))
+      .finally(() => { healingNutrition.current = false; });
+  }, [logymUser, user, todayYmd, syncAllNutritionToLogym]);
 
   // --- Resep & custom foods ---
   const [recipes, setRecipes] = useState([]);

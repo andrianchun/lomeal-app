@@ -107,6 +107,33 @@ export const pushActivityOverrideToLogym = async (logymUid, ymd, burnedKcal) => 
   }
 };
 
+// Versi BATCH dari pushNutritionBioToLogym: satu tulisan untuk seluruh tahun.
+//
+// Dokumen history_years/{tahun} menampung SEMUA tanggal tahun itu, jadi menambal 300 hari yang
+// bolong tidak butuh 300 setDoc — satu merge sudah cukup. Bentuk per-harinya identik dengan
+// fungsi tunggal di atas; kalau salah satu diubah, ubah keduanya.
+// @param {object} byYmd - { 'YYYY-MM-DD': kcal }
+export const pushNutritionBatchToLogym = async (logymUid, year, byYmd) => {
+  const dates = Object.keys(byYmd || {});
+  if (!logymUid || dates.length === 0) return 0;
+  const payload = {};
+  dates.forEach((ymd) => {
+    payload[ymd] = {
+      bioData: {
+        nutritionCalories: Math.round(byYmd[ymd]) || 0,
+        _manualFlags: { nutritionCalories: true },
+      },
+    };
+  });
+  try {
+    await setDoc(doc(db, 'logym_users', logymUid, 'history_years', String(year)), payload, { merge: true });
+    return dates.length;
+  } catch (e) {
+    console.warn(`Gagal menambal kalori dimakan tahun ${year} ke Logym:`, e);
+    return 0;
+  }
+};
+
 // Push total kalori-dimakan dari Lomeal ke bioData.nutritionCalories Logym
 // (di path history_years yang sama dengan activityCalories), agar grafik Logym
 // bisa menampilkan data yang konsisten dengan food log Lomeal.

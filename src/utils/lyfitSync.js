@@ -94,6 +94,19 @@ export const extractLyfitDay = (yearDays, ymd) => {
   };
 };
 
+// Baca sekali dokumen tahun berapa pun (bukan cuma tahun berjalan) — dipakai penambalan lubang
+// `nutritionCalories` buat tahu hari mana yang BENERAN bolong di Logym, supaya yang sudah benar
+// tidak ditulis ulang tiap hari tanpa guna.
+export const fetchLyfitYear = async (uid, year) => {
+  try {
+    const snap = await getDoc(doc(db, 'logym_users', uid, 'history_years', String(year)));
+    return snap.exists() ? snap.data() : {};
+  } catch (e) {
+    console.warn('fetchLyfitYear gagal:', e);
+    return {};
+  }
+};
+
 // Langganan dokumen tahun berjalan Logym (read-only listener).
 export const subscribeLyfitYear = (uid, year, cb) =>
   onSnapshot(
