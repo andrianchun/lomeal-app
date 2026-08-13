@@ -137,7 +137,7 @@ const extractFoodParts = (chunk) => {
 
 /**
  * Run local NLP parsing for a given text.
- * Returns { foods: [...] } if fully successful, otherwise null (requires AI fallback)
+ * Returns { foods: [...] } if fully successful, otherwise null (requires Lomy fallback)
  */
 export const runLocalNlpParse = (text, customFoods = []) => {
   const chunks = splitInput(text);

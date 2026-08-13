@@ -1,23 +1,25 @@
 // src/pages/SettingsPage.jsx — port struktur 3-tab dari lyfit.app/src/modals/SettingsModal.jsx
 // (Preferensi/FAQ/Lanjutan), diadaptasi untuk Lomeal. Field yang dilewati (Jarak km/mi,
-// Apple Health, Kepribadian/Memori AI Coach BELUM punya chat-consumer) dijelaskan inline.
+// Apple Health, Kepribadian/Memori Lomy BELUM punya chat-consumer) dijelaskan inline.
 import React, { useState, useEffect, useRef } from 'react';
 import {
   X, Moon, Sun, Globe, Volume2, VolumeX, Timer, Download, Upload, CalendarDays,
   Bell, BellOff, Clock, Activity, Scale, Ruler, Thermometer, Plus,
-  MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw, DownloadCloud, Camera
+  MessageCircle, Brain, HelpCircle, ChevronDown, Copy, Lock, RefreshCw, DownloadCloud, Camera,
+  FileText, ShieldCheck, ChevronRight
 } from 'lucide-react';
 import { getLang } from '../i18n';
 import AdminDashboard from './AdminDashboard';
+import LegalModal from '../components/LegalModal';
 import useBackClose from '../hooks/useBackClose';
 
 const FAQ_ITEMS_ID = [
   { q: 'Bagaimana cara sinkronisasi data antar HP dan laptop?', a: 'Cukup login pakai akun Google yang sama di semua perangkat. Data otomatis tersinkron lewat cloud dalam hitungan detik.' },
-  { q: 'Kenapa saya tidak bisa pakai fitur AI (scan foto/Magic Prompt)?', a: 'Lomeal menggunakan kuota server bersama. Jika kuota server sedang habis, Anda bisa memasukkan Gemini API Key pribadi di tab Lanjutan di bawah untuk melewati batas harian tersebut.' },
-  { q: 'Bagaimana cara menambah bahan makanan yang tidak ada di Database?', a: 'Buka tab Database, klik "+ Tambah Bahan", isi manual atau foto label gizi kemasan (AI akan baca otomatis).' },
-  { q: 'Apa itu Smart Warning?', a: 'Peringatan otomatis (kuning/merah) di Dashboard kalau asupan natrium/gula/kolesterol/purin mendekati atau melewati batas harian. Berjalan offline, tanpa AI.' },
+  { q: 'Kenapa saya tidak bisa pakai fitur Lomy (scan foto/Magic Prompt)?', a: 'Lomeal menggunakan kuota server bersama. Jika kuota server sedang habis, Anda bisa memasukkan Gemini API Key pribadi di tab Lanjutan di bawah untuk melewati batas harian tersebut.' },
+  { q: 'Bagaimana cara menambah bahan makanan yang tidak ada di Database?', a: 'Buka tab Database, klik "+ Tambah Bahan", isi manual atau foto label gizi kemasan (Lomy akan baca otomatis).' },
+  { q: 'Apa itu Smart Warning?', a: 'Peringatan otomatis (kuning/merah) di Dashboard kalau asupan natrium/gula/kolesterol/purin mendekati atau melewati batas harian. Berjalan offline, tanpa Lomy.' },
   { q: 'Bagaimana cara membuat resep sendiri?', a: 'Buka tab Resep, buat resep dari bahan-bahan di Database, lalu bisa dijadwalkan otomatis ke Meal Prep di Kalender.' },
-  { q: 'Apa bedanya Evaluasi Mingguan dengan Smart Warning?', a: 'Smart Warning otomatis & instan (logika lokal). Evaluasi Mingguan cuma jalan kalau kamu pencet tombolnya sendiri di tab Histori — AI menulis 1 paragraf umpan balik dari data 7 hari terakhir.' },
+  { q: 'Apa bedanya Evaluasi Mingguan dengan Smart Warning?', a: 'Smart Warning otomatis & instan (logika lokal). Evaluasi Mingguan cuma jalan kalau kamu pencet tombolnya sendiri di tab Histori — Lomy menulis 1 paragraf umpan balik dari data 7 hari terakhir.' },
   { q: 'Bagaimana cara pakai fitur Social Hub?', a: 'Klik ikon avatar di pojok kanan atas. Akun Lomeal & Logym otomatis satu identitas sejak kamu login (Google Sign-In yang sama) — tidak ada langkah "hubungkan" manual — jadi langsung bisa posting, follow, dan lihat feed gabungan Lomeal+Logym.' },
   { q: 'Data saya aman gak kalau ganti HP?', a: 'Aman — sinkron otomatis lewat akun. Kamu juga bisa backup manual (export/import JSON) di tab Lanjutan.' },
   { q: 'Bisa gak lacak air minum?', a: 'Bisa — di tab Catat ada ikon gelas air, tap buat +200ml, atau tap ikon pensil buat input angka presisi.' },
@@ -26,11 +28,11 @@ const FAQ_ITEMS_ID = [
 
 const FAQ_ITEMS_EN = [
   { q: 'How do I sync data across my phone and laptop?', a: 'Just log in with the same Google account on all devices. Data syncs automatically via the cloud within seconds.' },
-  { q: "Why can't I use the AI features (photo scan/Magic Prompt)?", a: 'Lomeal uses a shared backend quota. If the quota is exhausted, you can put your own personal Gemini API Key in the Advanced tab below to bypass the limit.' },
-  { q: 'How do I add a food item not in the Database?', a: 'Open the Database tab, tap "+ Add Ingredient", fill it in manually or photograph a packaged nutrition label (AI reads it automatically).' },
-  { q: 'What is Smart Warning?', a: 'Automatic warnings (yellow/red) on the Dashboard when sodium/sugar/cholesterol/purine intake nears or exceeds the daily limit. Runs offline, no AI needed.' },
+  { q: "Why can't I use the Lomy features (photo scan/Magic Prompt)?", a: 'Lomeal uses a shared backend quota. If the quota is exhausted, you can put your own personal Gemini API Key in the Advanced tab below to bypass the limit.' },
+  { q: 'How do I add a food item not in the Database?', a: 'Open the Database tab, tap "+ Add Ingredient", fill it in manually or photograph a packaged nutrition label (Lomy reads it automatically).' },
+  { q: 'What is Smart Warning?', a: 'Automatic warnings (yellow/red) on the Dashboard when sodium/sugar/cholesterol/purine intake nears or exceeds the daily limit. Runs offline, no Lomy needed.' },
   { q: 'How do I create my own recipe?', a: 'Open the Recipes tab, build a recipe from Database ingredients, then optionally schedule it to Meal Prep on the Calendar.' },
-  { q: "What's the difference between Weekly Evaluation and Smart Warning?", a: 'Smart Warning is automatic and instant (local logic). Weekly Evaluation only runs when you tap the button yourself in the History tab — AI writes one feedback paragraph from your last 7 days of data.' },
+  { q: "What's the difference between Weekly Evaluation and Smart Warning?", a: 'Smart Warning is automatic and instant (local logic). Weekly Evaluation only runs when you tap the button yourself in the History tab — Lomy writes one feedback paragraph from your last 7 days of data.' },
   { q: 'How do I use the Social Hub?', a: 'Tap the avatar icon in the top-right corner. Your Lomeal and Logym accounts are automatically the same identity once you’re signed in (same Google Sign-In) — no manual "connect" step — so you can post, follow, and see a combined Lomeal+Logym feed right away.' },
   { q: 'Is my data safe if I switch phones?', a: 'Yes — it syncs automatically via your account. You can also manually back up (export/import JSON) in the Advanced tab.' },
   { q: 'Can I track water intake?', a: 'Yes — in the Log tab there\'s a water glass icon, tap for +200ml, or tap the pencil icon to enter a precise number.' },
@@ -92,6 +94,9 @@ const SettingsPage = ({
   const [hcBackfilling, setHcBackfilling] = useState(false);
   const [hcConnecting, setHcConnecting] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
+  // Dokumen hukum lengkap dibaca dari sini — dulu satu-satunya jalan masuknya adalah
+  // tautan di langkah persetujuan onboarding, yang sesudah disetujui tidak pernah muncul lagi.
+  const [legalType, setLegalType] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [autoSaveCamera, setAutoSaveCamera] = useState(() => localStorage.getItem('lomeal_autosave_camera') !== 'false');
 
@@ -152,7 +157,7 @@ const SettingsPage = ({
   return (
     <div className={`fixed inset-0 z-[999] ${t.bgApp} flex flex-col animate-in slide-in-from-bottom-full duration-300 no-swipe`}
       onTouchStart={handleSwipeStart} onTouchEnd={handleSwipeEnd}>
-      <div className={`relative px-4 pt-4 pb-4 border-b ${t.border} shrink-0 flex items-center justify-between`}>
+      <div className={`relative px-4 pt-safe pb-4 border-b ${t.border} shrink-0 flex items-center justify-between`}>
         <h1 className={`text-2xl font-black ${t.textMain} tracking-tight`}>{lang.settings}</h1>
         <button onClick={onClose} className={`p-2 rounded-full ${t.btnBg}`}>
           <X size={20} className={t.textMain} />
@@ -241,8 +246,26 @@ const SettingsPage = ({
                 ))}
               </div>
             </Section>
+
+            <Section title="Dokumen Hukum" icon={FileText} t={t}>
+              <div className="space-y-1">
+                {[
+                  ['tos', FileText, 'Syarat & Ketentuan'],
+                  ['privacy', ShieldCheck, 'Kebijakan Privasi'],
+                ].map(([type, Icon, label]) => (
+                  <button key={type} onClick={() => setLegalType(type)}
+                    className="w-full flex items-center gap-3 py-3 text-left">
+                    <Icon size={16} className={t.textMuted} />
+                    <span className={`flex-1 body-md ${t.textMain}`}>{label}</span>
+                    <ChevronRight size={16} className={t.textMuted} />
+                  </button>
+                ))}
+              </div>
+            </Section>
           </div>
         )}
+
+        <LegalModal type={legalType} onClose={() => setLegalType(null)} t={t} isDark={theme === 'dark'} />
 
         {activeTab === 'admin' && isAdmin && (
           <div className="animate-in fade-in duration-300">
@@ -252,7 +275,7 @@ const SettingsPage = ({
 
         {activeTab === 'lanjutan' && (
           <div className="space-y-4 animate-in fade-in duration-300">
-            {/* API UNTUK AI */}
+            {/* API UNTUK Lomy */}
             <Section title={lang.apiSection} icon={Activity} t={t}>
               <div className="space-y-2">
                 {userApiKeys.map((key, index) => (
@@ -333,7 +356,7 @@ const SettingsPage = ({
               )}
             </Section>
 
-            {/* KEPRIBADIAN & MEMORI AI COACH — settings disiapkan, chat interface menyusul pass terpisah */}
+            {/* KEPRIBADIAN & MEMORI Lomy COACH — settings disiapkan, chat interface menyusul pass terpisah */}
             <Section title={lang.aiCoachPersonality} icon={MessageCircle} t={t}>
               <div className="grid grid-cols-3 gap-2">
                 {AI_PERSONAS.map((p) => (

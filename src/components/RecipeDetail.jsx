@@ -1,0 +1,241 @@
+import React, { useMemo, useState } from 'react';
+import { X, Share2, Loader2, Minus, Plus, Clock, Flame, ChefHat, Pencil, Timer, ShoppingCart, Leaf, ChevronLeft, ChevronDown } from 'lucide-react';
+import { NUTRIENTS } from '../data/nutrition';
+import { heroForRecipe, formatDuration, formatClock } from '../data/constants';
+import { STATUS } from '../theme';
+import { matchDomusItem, requestShoppingListDomus } from '../utils/domusSync';
+import { PillTabs, CheckBox } from './RecipeBits';
+import useBackClose from '../hooks/useBackClose';
+
+/**
+ * Layar detail resep (gaya kartu program Logym): hero foto penuh + sheet melengkung
+ * berisi judul, penulis, penakar porsi, chip stat, lalu tab Bahan / Langkah.
+ * Read-only — mencentang di sini cuma alat bantu belanja/siap-siap, bukan sesi masak.
+ */
+const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onEdit, onShare, shareBusy, showToast }) => {
+  const [servings, setServings] = useState(Math.max(1, Number(recipe.portions) || 1));
+  const [tab, setTab] = useState('bahan');
+  const [showMicros, setShowMicros] = useState(false);
+  const [checked, setChecked] = useState(() => new Set());
+  const [cartBusy, setCartBusy] = useState(false);
+  const [cartDone, setCartDone] = useState(false);
+  const isDark = theme === 'dark';
+
+  useBackClose(true, onClose);
+
+  const basePortions = Math.max(1, Number(recipe.portions) || 1);
+  const factor = servings / basePortions;
+  const perPortion = recipe.perPortion || {};
+  const components = recipe.components || [];
+
+  const toggle = (key) => setChecked((s) => {
+    const next = new Set(s);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
+
+  const totalSteps = useMemo(() => components.reduce((n, c) => n + c.steps.length, 0), [components]);
+
+  // Cek bahan ke inventaris Domus — biar user tahu apa yang harus dibeli SEBELUM mulai masak,
+  // bukan pas wajan sudah panas. Dedupe pakai Set: satu bahan cuma sekali masuk keranjang.
+  const missing = useMemo(
+    () => [...new Set(recipe.ingredients.filter((ing, i) => {
+      const inStock = !!matchDomusItem(domusItems, ing.rawName || ing.name);
+      return !inStock && !checked.has(`i${i}`);
+    }).map((ing) => ing.rawName || ing.name))],
+    [recipe.ingredients, domusItems, checked]
+  );
+
+  const addMissingToCart = async () => {
+    setCartBusy(true);
+    try {
+      for (const name of missing) await requestShoppingListDomus(user.uid, name);
+      setCartDone(true);
+      showToast?.(`${missing.length} bahan masuk list belanja 🛒`);
+    } catch (e) {
+      showToast?.(`Gagal menambah ke list belanja: ${e.message}`, { type: 'error' });
+    } finally {
+      setCartBusy(false);
+    }
+  };
+
+  const roundBtn = `w-10 h-10 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-transform backdrop-blur-md border ${isDark ? 'bg-black/40 border-white/10 text-white' : 'bg-white/60 border-black/5 text-black'}`;
+  const softCard = isDark ? 'bg-white/[0.06]' : 'bg-black/[0.04]';
+
+  const StatChip = ({ value, label, tone }) => (
+    <div className={`flex-1 min-w-0 rounded-2xl px-2.5 py-2.5 flex flex-col items-center justify-center text-center ${softCard}`}>
+      <span className={`h2 tabular-nums truncate ${tone || t.textMain}`}>{value}</span>
+      <p className={`caption font-medium truncate ${t.textMuted}`}>{label}</p>
+    </div>
+  );
+
+  return (
+    <div className={`fixed inset-0 z-[60] overflow-hidden ${isDark ? 'bg-[#070a08]' : 'app-bg-light'}`}>
+      {/* ---------- HERO BACKGROUND (STATIC) ---------- */}
+      <div className="absolute top-0 inset-x-0 h-[38vh] min-h-[240px] w-full bg-cover bg-center"
+        style={{ backgroundImage: `url('${heroForRecipe(recipe)}')` }}>
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-transparent" />
+      </div>
+
+      {/* ---------- FLOATING TOP BUTTONS ---------- */}
+      <div className="absolute top-0 inset-x-0 p-4 pt-safe flex items-center justify-between z-20 pointer-events-none">
+        <div className="pointer-events-auto">
+          <button onClick={onClose} className={roundBtn}><ChevronLeft size={20} /></button>
+        </div>
+        <div className="flex gap-2 pointer-events-auto">
+          <button onClick={onEdit} className={roundBtn}><Pencil size={16} /></button>
+          <button onClick={onShare} disabled={shareBusy} className={`${roundBtn} disabled:opacity-60`}>
+            {shareBusy ? <Loader2 size={16} className="animate-spin" /> : <Share2 size={16} />}
+          </button>
+        </div>
+      </div>
+
+      {/* ---------- SCROLLABLE SHEET ---------- */}
+      <div className="absolute inset-0 z-10 overflow-y-auto pb-safe">
+        {/* Spacer */}
+        <div className="h-[38vh] min-h-[240px] w-full" />
+        
+        <div className={`relative -mt-8 rounded-t-[2rem] ${isDark ? 'bg-[#070a08]/85 border-t border-white/10' : 'bg-white/85 border-t border-black/5'} backdrop-blur-2xl min-h-[62vh] pb-48 shadow-[0_-8px_30px_rgba(0,0,0,0.12)]`}>
+        <div className={`w-10 h-1 rounded-full mx-auto mt-3 ${isDark ? 'bg-white/20' : 'bg-black/15'}`} />
+
+        <div className="max-w-2xl mx-auto px-4 pt-4 space-y-4">
+          <div>
+            <h1 className={`h1 text-center ${t.textMain}`}>{recipe.name}</h1>
+            <p className={`caption font-medium text-center mt-1 ${t.textMuted}`}>{recipe.authorName || 'Resep kamu'}</p>
+          </div>
+
+          {/* Grid Statistik 3x2 */}
+          <div className="grid grid-cols-3 gap-2">
+            {/* --- Baris Atas --- */}
+            <div className={`flex items-center justify-between rounded-2xl px-2 py-2.5 ${softCard}`}>
+              <button onClick={() => setServings((s) => Math.max(1, s - 1))}
+                className={`w-7 h-7 shrink-0 rounded-full ${t.btnBg} ${t.textMain} flex items-center justify-center`}><Minus size={13} /></button>
+              <div className="flex-1 text-center min-w-0">
+                <span className={`h2 tabular-nums ${t.textMain} block`}>{servings}</span>
+                <p className={`caption font-medium ${t.textMuted}`}>porsi</p>
+              </div>
+              <button onClick={() => setServings((s) => Math.min(20, s + 1))}
+                className={`w-7 h-7 shrink-0 rounded-full ${t.btnBg} ${t.textMain} flex items-center justify-center`}><Plus size={13} /></button>
+            </div>
+            
+            <StatChip value={formatDuration(recipe.durationMin)} label="durasi" tone={t.textMain} />
+            <StatChip value={Math.round(perPortion.kcal || 0)} label="kkal/porsi" tone={t.textAccent} />
+
+            {/* --- Baris Bawah --- */}
+            {[['protein', 'Protein'], ['carbs', 'Karbo'], ['fat', 'Lemak']].map(([k, label]) => (
+              <div key={k} className={`rounded-2xl px-2 py-2.5 flex flex-col items-center justify-center text-center ${isDark ? 'bg-white/[0.04]' : 'bg-black/[0.03]'}`}>
+                <span className={`h2 tabular-nums ${t.textMain}`}>{Math.round(perPortion[k] || 0)}g</span>
+                <p className={`caption font-medium ${t.textMuted}`}>{label}</p>
+              </div>
+            ))}
+          </div>
+
+          <button onClick={() => setShowMicros(!showMicros)}
+            className={`w-full flex items-center justify-center gap-1 py-2 caption font-bold rounded-xl ${t.btnBg} ${t.textMuted} active:scale-[0.98] transition-transform`}>
+            {showMicros ? 'Sembunyikan Mikronutrien' : 'Lihat Mikronutrien'}
+            <ChevronDown size={14} className={`transition-transform duration-300 ${showMicros ? 'rotate-180' : ''}`} />
+          </button>
+
+          {showMicros && (
+            <div className={`rounded-xl border ${t.border} divide-y ${t.border}`}>
+              {NUTRIENTS.filter(n => !n.macro && perPortion[n.key]).map(n => (
+                <div key={n.key} className="flex justify-between px-3 py-2.5">
+                  <span className={`caption ${t.textMuted}`}>{n.label}</span>
+                  <span className={`caption font-bold ${t.textMain}`}>{Math.round((perPortion[n.key] || 0) * 10) / 10} {n.unit}</span>
+                </div>
+              ))}
+              {!NUTRIENTS.some(n => !n.macro && perPortion[n.key]) && (
+                <div className={`px-4 py-3 caption text-center ${t.textMuted}`}>Tidak ada data nutrisi mikro.</div>
+              )}
+            </div>
+          )}
+
+          {recipe.note &&<p className={`body-md font-medium ${t.textMuted}`}>{recipe.note}</p>}
+
+          <PillTabs t={t} theme={theme} value={tab} onChange={setTab}
+            tabs={[['bahan', `Bahan (${recipe.ingredients.length})`], ['langkah', `Langkah (${totalSteps})`]]} />
+
+          {/* ---------- BAHAN ---------- */}
+          {tab === 'bahan' && (
+            <div className="space-y-3">
+              {servings !== basePortions && (
+                <p className={`caption italic opacity-70 ${t.textMuted}`}>Gramasi untuk {servings} porsi (resep asli {basePortions} porsi)</p>
+              )}
+              <div className="space-y-0.5">
+                {recipe.ingredients.map((ing, i) => {
+                  const key = `i${i}`;
+                  const inStock = !!matchDomusItem(domusItems, ing.rawName || ing.name);
+                  const on = inStock || checked.has(key);
+                  return (
+                    <button key={key} onClick={() => !inStock && toggle(key)} className={`w-full flex items-start gap-3 py-2.5 text-left ${inStock ? 'cursor-default opacity-80' : 'active:scale-[0.98] transition-transform'}`}>
+                      <span className={`w-1.5 h-1.5 shrink-0 rounded-full mt-2 ${inStock ? (isDark ? 'bg-white' : 'bg-black') : (isDark ? 'bg-white/20' : 'bg-black/20')}`} />
+                      <span className={`flex-1 body-md ${on ? `line-through ${t.textMuted}` : t.textMain}`}>{ing.rawName || ing.name}</span>
+                      <span className={`caption font-medium tabular-nums ${t.textMuted} pt-0.5`}>{Math.round((ing.grams || 0) * factor)} g</span>
+                      <CheckBox t={t} checked={on} />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {missing.length > 0 && (
+                <div className={`mt-6 rounded-2xl border ${t.border} ${t.bgCard} p-4`}>
+                  <p className={`body-md ${t.textMain}`}>{missing.length} bahan belum ada di dapur</p>
+                  <p className={`caption font-medium mt-1 ${t.textMuted}`}>{missing.join(', ')}</p>
+                  <button onClick={addMissingToCart} disabled={cartBusy || cartDone}
+                    className={`w-full mt-4 py-2.5 rounded-xl caption font-bold flex items-center justify-center gap-2 disabled:opacity-60 ${
+                      cartDone ? `${t.bgAccentSoft} border ${t.borderAccentSoft} ${t.textAccent}` : t.bgAccent}`}>
+                    {cartBusy ? <Loader2 size={14} className="animate-spin" /> : <ShoppingCart size={14} />}
+                    {cartDone ? 'Berhasil dikirim ke Domus' : 'Tambah List Belanja Domus'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ---------- LANGKAH ---------- */}
+          {tab === 'langkah' && (
+            <div className="space-y-5">
+              {components.length === 0 && (
+                <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-6 text-center`}>
+                  <ChefHat size={26} className={`mx-auto mb-2 ${t.textMuted}`} />
+                  <p className={`caption font-medium ${t.textMuted}`}>Resep ini belum punya langkah memasak. Tekan ikon pensil untuk menambahkannya.</p>
+                </div>
+              )}
+              {components.map((c, ci) => (
+                <div key={c.id} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-7 h-7 shrink-0 rounded-lg ${t.bgAccentSoft} ${t.textAccent} caption flex items-center justify-center`}>{ci + 1}</span>
+                    <p className={`h2 ${t.textMain}`}>{c.name || `Komponen ${ci + 1}`}</p>
+                  </div>
+                  {c.steps.map((s, si) => (
+                    <div key={s.id} className={`rounded-2xl border ${t.border} ${t.bgCard} p-4`}>
+                      <p className={`h3 mb-1 ${t.textMuted}`}>Langkah {si + 1}</p>
+                      <p className={`body-md ${t.textMain}`}>{s.text}</p>
+                      {s.photoUrl && <img src={s.photoUrl} alt="" className="w-full h-32 object-cover rounded-xl mt-3" />}
+                      {s.timerSec > 0 && (
+                        <p className={`caption mt-2 flex items-center gap-1.5 ${t.textAccent}`}>
+                          <Timer size={13} /> {formatClock(s.timerSec)}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      </div>
+
+      {/* ---------- CTA ---------- */}
+      <div className={`fixed bottom-0 inset-x-0 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] z-50 ${isDark ? 'bg-[#0a1510]/90' : 'bg-white/90'} backdrop-blur-xl border-t ${t.border}`}>
+        <button onClick={() => onCook(servings)}
+          className={`w-full max-w-2xl mx-auto py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow flex items-center justify-center gap-2`}>
+          <ChefHat size={18} /> Mulai Masak
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default RecipeDetail;

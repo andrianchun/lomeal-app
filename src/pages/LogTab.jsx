@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
 import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import RingChart from '../components/RingChart';
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
@@ -21,11 +22,11 @@ import SwipeInput from '../components/SwipeInput';
 import { URT_DICTIONARY, normalizeUnit, entryUnit } from '../utils/urtMapping';
 import useBackClose from '../hooks/useBackClose';
 
-// Satuan yang bisa dipilih user di sheet hasil AI — dikonversi otomatis ke gram
+// Satuan yang bisa dipilih user di sheet hasil Lomy — dikonversi otomatis ke gram
 // lewat URT_DICTIONARY (tabel ukuran rumah tangga generik, lihat urtMapping.js).
 const UNIT_OPTIONS = ['g', 'sdt', 'sdm', 'centong', 'gelas', 'cangkir', 'mangkok', 'piring', 'porsi', 'potong', 'iris', 'lembar', 'tusuk', 'ekor', 'butir', 'biji', 'buah', 'bungkus', 'kepal', 'genggam', 'batang', 'siung'];
 
-// Simpan baseline (gram & gizi) tetap di tiap item hasil AI begitu muncul di preview —
+// Simpan baseline (gram & gizi) tetap di tiap item hasil Lomy begitu muncul di preview —
 // tanpa ini, edit gramasi dihitung sebagai rasio ke NILAI SEBELUMNYA (bukan ke baseline
 // tetap): kalau user sempat ketik 0, rasio jadi 0/0 dan macet permanen di 0 kkal walau
 // gramasi diisi ulang. Edit gramasi berikutnya selalu dihitung ulang dari baseline ini.
@@ -80,6 +81,13 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const [pickerOpen, setPickerOpen] = useState(false); // FoodPicker terbuka? (nambah ke batch aiResult yang sama)
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
   const [detailSlide, setDetailSlide] = useState(0);
+
+  // Datang dari tombol "Makan" di stok Meal Prep: langsung buka sheet sesi tujuannya.
+  const routeState = useLocation().state;
+  useEffect(() => {
+    if (routeState?.openSession) setDetailSession(routeState.openSession);
+  }, [routeState?.openSession]);
+
   const [copySourceSession, setCopySourceSession] = useState(null);
   const [copyTargetSessions, setCopyTargetSessions] = useState([]);
   const [copyTargetDate, setCopyTargetDate] = useState(todayYmd);
@@ -121,7 +129,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       if (document.body.classList.contains('keyboard-open')) {
         const bar = document.getElementById('smart-input-bar');
         const sheet = document.getElementById('ai-result-sheet');
-        // If clicking outside both the input bar AND the AI result sheet (if open)
+        // If clicking outside both the input bar AND the Lomy result sheet (if open)
         if (bar && !bar.contains(e.target) && (!sheet || !sheet.contains(e.target))) {
           document.body.classList.remove('keyboard-open');
           if (document.activeElement) document.activeElement.blur();
@@ -297,7 +305,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const stripRef = useRef(null);
   const mountRef = useRef(true);
 
-  // Auto-scroll tombol sesi aktif ke tengah di sheet hasil AI, biar kelihatan walau
+  // Auto-scroll tombol sesi aktif ke tengah di sheet hasil Lomy, biar kelihatan walau
   // daftar sesi kepanjangan dan sesi terpilih ada di ujung yang ke-scroll keluar layar.
   const sessionStripRef = useRef(null);
   useEffect(() => {
@@ -309,7 +317,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     }
   }, [aiResult, aiTargetSession]);
 
-  // Kunci scroll halaman di belakang selama sheet hasil AI kebuka.
+  // Kunci scroll halaman di belakang selama sheet hasil Lomy kebuka.
   useEffect(() => {
     if (!aiResult) return;
     document.body.style.overflow = 'hidden';
@@ -366,6 +374,15 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         const otherBatches = mealPreps.filter(b => b.id !== batch.id);
         
         saveMealPrepsFn([updatedBatch, ...otherBatches]);
+
+        // Sync to Domus if linked
+        if (batch.domusItemId) {
+          if (newRemaining <= 0) {
+            markDomusItemConsumed(batch.domusItemId).catch(console.error);
+          } else {
+            updateDomusItemQuantity(batch.domusItemId, newRemaining).catch(console.error);
+          }
+        }
 
         if (checked) {
           // If eaten, check for deficit in future planned meals
@@ -515,17 +532,17 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     persistDay({ ...day, meals, water: Math.max(0, (day.water || 0) + ml) });
   };
 
-  // ---------- AI: Satpam + Magic Prompt ----------
+  // ---------- Lomy: Satpam + Magic Prompt ----------
   const guardAi = async () => {
     const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
     if (!quota.allowed) {
-      await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT} request/hari). Gunakan input manual — besok kuota reset. 🙏`);
+      await showAlert(`Kuota Lomy harian habis (${AI_DAILY_LIMIT} request/hari). Gunakan input manual — besok kuota reset. 🙏`);
       return false;
     }
     return true;
   };
 
-  // Batch: kalau sheet hasil AI sudah kebuka (aiResult ada isinya), item baru NAMBAH ke
+  // Batch: kalau sheet hasil Lomy sudah kebuka (aiResult ada isinya), item baru NAMBAH ke
   // list yang sama alih-alih ganti/nutup sheet — jadi user bisa kirim beberapa kali sebelum
   // pencet "Catat". Sesi target cuma di-auto-pilih untuk item PERTAMA di batch; abis itu
   // ikut pilihan user biar gak ke-reset tiap nambah item baru.
@@ -558,7 +575,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     try {
       // customFoods datang dari prop (dokumen custom_foods). Dulu di sini dibaca dari
       // profile.customFoods yang GAK PERNAH ADA isinya → parser lokal gak pernah lihat
-      // makanan custom user, jadi selalu jatuh ke AI dan kerasa lemot.
+      // makanan custom user, jadi selalu jatuh ke Lomy dan kerasa lemot.
       const localResult = runLocalNlpParse(text, customFoods);
 
       if (localResult && localResult.foods?.length > 0) {
@@ -569,7 +586,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           return;
       }
     } catch (e) {
-      console.warn("Offline NLP parsing failed, fallback ke AI:", e);
+      console.warn("Offline NLP parsing failed, fallback ke Lomy:", e);
     }
 
     // 3. CEK FIREBASE GLOBAL CACHE (hasil parse user lain untuk teks yang sama persis)
@@ -598,7 +615,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
        return;
     }
 
-    // 4. FALLBACK KE AI (Jika teks kompleks/nama makanan aneh)
+    // 4. FALLBACK KE Lomy (Jika teks kompleks/nama makanan aneh)
     if (!(await guardAi())) {
        setAiAbortController(null);
        return;
@@ -628,7 +645,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
          appendAiResult(res.foods, { isOffline: false, source: 'text_ai' });
          setChatText('');
       }
-      else await showAlert('AI tidak menemukan makanan pada teks itu. Coba lebih spesifik, mis. "nasi 1 centong, ayam goreng 1 potong".');
+      else await showAlert('Lomy tidak menemukan makanan pada teks itu. Coba lebih spesifik, mis. "nasi 1 centong, ayam goreng 1 potong".');
     } catch (e) {
       if (e.name === 'AbortError') return refundAiUsage(user.uid); // dibatalin user — kuota dibalikin
       await showAlert(`Maaf, gagal memproses: ${e.message}`);
@@ -675,7 +692,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       } else {
          items = res.foods || [];
       }
-      if (!items.length) throw new Error('AI tidak menemukan makanan.');
+      if (!items.length) throw new Error('Lomy tidak menemukan makanan.');
       
       const newEntries = items.map(f => makeEntry({ name: f.name, grams: f.grams, unit: 'g', nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai', photoId: photo.id }));
       const existingItems = day.meals?.[sessionId] || [];
@@ -749,7 +766,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       if (items.length) {
          appendAiResult(items, { photoDataUrl: dataUrl, photoFile: file, isOcr: res.type === 'label' });
       }
-      else await showAlert('AI tidak mengenali makanan di foto. Coba sudut/cahaya lain, atau input manual.');
+      else await showAlert('Lomy tidak mengenali makanan di foto. Coba sudut/cahaya lain, atau input manual.');
     } catch (e) {
       if (e.name === 'AbortError') return refundAiUsage(user.uid);
       await showAlert(`Gagal memindai foto: ${e.message}`);
@@ -763,7 +780,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     const { foods, photoDataUrl, photoFile } = aiResult;
     const meals = { ...(day.meals || {}) };
     const isFirstEntry = (meals[aiTargetSession] || []).length === 0;
-    // 1. Lacak sinyal koreksi manual (jika kalori akhir diedit jauh dari prediksi awal AI)
+    // 1. Lacak sinyal koreksi manual (jika kalori akhir diedit jauh dari prediksi awal Lomy)
     foods.forEach(f => {
        if (f.baseNutrition && f.nutrition) {
           const expectedKcal = Math.round(f.baseNutrition.kcal * (f.grams / (f.baseGrams || 100)));
@@ -805,7 +822,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       newDay.sessionTimes = sessionTimes;
     }
     // Foto ikut disimpan (nambah, gak nimpa). Yang diarsip versi 1600px dari file aslinya —
-    // photoDataUrl cuma versi kecil 800px yang tadi dikirim ke AI.
+    // photoDataUrl cuma versi kecil 800px yang tadi dikirim ke Lomy.
     if (photoId) addPhoto(aiTargetSession, photoFile || photoDataUrl, photoId);
     
     // Simpan ke DB Custom jika dicentang — LEWATI yang namanya sudah ada (di database bawaan
@@ -1322,7 +1339,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         </div>
       </div>
 
-      {/* ===== SHEET KONFIRMASI HASIL AI (batch — smart bar tetap aktif di bawahnya buat nambah item lagi) =====
+      {/* ===== SHEET KONFIRMASI HASIL Lomy (batch — smart bar tetap aktif di bawahnya buat nambah item lagi) =====
           Mulai di bawah header (bukan top-0) biar gak numpuk header, dan belakangnya di-blur+dim
           + gak bisa di-scroll selama sheet ini kebuka (lihat useEffect scroll-lock di atas). */}
       {aiResult && (
@@ -1436,7 +1453,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                           <p className={`caption font-medium ${t.textMuted}`}>
                             {Math.round(f.nutrition?.kcal || 0)} kkal · P {Math.round(f.nutrition?.protein || 0)}g · K {Math.round(f.nutrition?.carbs || 0)}g · L {Math.round(f.nutrition?.fat || 0)}g
                           </p>
-                          {/* AI sudah lama ngasih penanda ini tapi belum pernah ditampilkan:
+                          {/* Lomy sudah lama ngasih penanda ini tapi belum pernah ditampilkan:
                               tebakannya ragu, atau kalorinya gak nyambung sama makronya. */}
                           {f.lowConfidence && (
                             <p className="caption font-bold text-amber-500 mt-0.5">Estimasi kasar — cek angkanya</p>
@@ -1524,7 +1541,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                  const sessionPhotos = photosOf(detailSession);
                  let sessionItems = day.meals?.[detailSession] || [];
                  
-                 // Auto-migrate data lama: jika ada foto tapi item AI tidak punya photoId, masukkan ke foto pertama
+                 // Auto-migrate data lama: jika ada foto tapi item Lomy tidak punya photoId, masukkan ke foto pertama
                  if (sessionPhotos.length > 0) {
                    sessionItems = sessionItems.map(item => {
                      if (!item.photoId && item.source === 'ai') {
@@ -1643,7 +1660,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                             }} className={`bg-transparent outline-none border-b border-dashed ${t.border} text-center`} style={{ width: '40px' }} />
                           )}
                           <span className="truncate flex items-center gap-1">
-                            <input type="number" inputMode="numeric" value={Math.round(e.grams)} onChange={(ev) => {
+                            <input type="number" inputMode="numeric" value={Math.round(e.grams) || ''} placeholder="0" onChange={(ev) => {
                               const grams = Number(ev.target.value) || 0;
                               const meals = { ...(day.meals || {}) };
                               meals[detailSession] = meals[detailSession].map(x => {
@@ -1858,7 +1875,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
         </div>
       )}
 
-      {/* ===== FOOD PICKER — nambah ke batch aiResult yang sama kayak hasil AI, biar gak ada
+      {/* ===== FOOD PICKER — nambah ke batch aiResult yang sama kayak hasil Lomy, biar gak ada
           dua cara beda buat "tambah makanan" (satu sheet review buat semua sumber) ===== */}
       {pickerOpen && (
         <FoodPickerModal

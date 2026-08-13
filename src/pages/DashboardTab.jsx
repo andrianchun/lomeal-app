@@ -201,7 +201,7 @@ const DashboardTab = ({
             WebkitMaskImage: 'linear-gradient(to bottom, black 70%, transparent 95%)',
           }}
         >
-          <img src="/bg-dashboard.png" alt="" className={`w-full h-full object-cover object-top origin-top transition-transform duration-500 ease-out ${isChartExpanded ? 'scale-[1.45]' : 'scale-[1.25]'}`} />
+          <img src="/bg-dashboard.webp" alt="" className={`w-full h-full object-cover object-top origin-top transition-transform duration-500 ease-out ${isChartExpanded ? 'scale-[1.45]' : 'scale-[1.25]'}`} />
         </div>
 
         <div className="relative z-20 p-5">
@@ -361,7 +361,7 @@ const DashboardTab = ({
              <div className="p-4 flex items-center justify-between">
                  <div className="flex flex-col">
                      <span className={`h2 ${t.textMain}`}>Tren Kalori</span>
-                     <span className={`caption ${t.textMuted}`}>Pantau defisit & surplus kalori harian</span>
+                     <span className={`caption ${t.textMuted}`}> & surplus kalori harian</span>
                  </div>
              </div>
              <div className="pt-0 pb-4 no-swipe">

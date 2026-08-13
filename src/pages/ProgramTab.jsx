@@ -1,50 +1,61 @@
-import React, { useMemo, useState, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
-import { ChefHat, Plus, X, Search, CalendarPlus, Share2, Loader2, Pill, GlassWater, CupSoda, Coffee, Beaker, Syringe, Tablets, ShieldPlus, Bot, ClipboardList, Sparkles } from 'lucide-react';
-import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
-import { EMPTY_NUTRITION, addNutrition, scaleNutrition, DIET_PROFILES } from '../data/nutrition';
-import { MEAL_SESSIONS, getLocalYMD, DAY_NAMES_ID } from '../data/constants';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { ChefHat, Plus, X, Clock, CalendarPlus, Warehouse, Bot, ClipboardList, Sparkles, Send, Trash2, Utensils, Calculator, Coins } from 'lucide-react';
+import { EMPTY_NUTRITION } from '../data/nutrition';
+import { MEAL_SESSIONS, DEFAULT_SESSION_TIMES, macroText, getLocalYMD, DAY_NAMES_ID, heroForRecipe, formatDuration } from '../data/constants';
+import { STATUS } from '../theme';
 import { makeEntry } from '../utils/foodLog';
-import { generateDietRecipe, buildAiRecipe } from '../utils/aiFood';
-import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, markDomusItemConsumed } from '../utils/domusSync';
+import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from '../utils/aiFood';
+import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, markDomusItemConsumed, matchDomusItem } from '../utils/domusSync';
 import { deductStock } from '../utils/stockConverter';
-import SupplementBuilder from '../components/SupplementBuilder';
-import MedicineBuilder from '../components/MedicineBuilder';
+import { db } from '../firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import RecipeBuilder from '../components/RecipeBuilder';
+import RecipeDetail from '../components/RecipeDetail';
+import CookingSession from '../components/CookingSession';
+import InboxProcessor from '../components/InboxProcessor';
+import { loadCookSession, clearCookSession } from '../hooks/useCookTimers';
+import { markInboxClaimed, updateInboxNutrition } from '../utils/foodLog';
+import { runLocalNlpParse } from '../utils/nlpParser';
 import DietQuestionnaireModal from '../components/DietQuestionnaireModal';
 import useBackClose from '../hooks/useBackClose';
 
-const ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus };
-const COLORS = [
-  { id: 'sky', bg: 'bg-sky-500' }, { id: 'blue', bg: 'bg-blue-500' }, { id: 'indigo', bg: 'bg-indigo-500' },
-  { id: 'purple', bg: 'bg-purple-500' }, { id: 'pink', bg: 'bg-pink-500' }, { id: 'rose', bg: 'bg-rose-500' },
-  { id: 'orange', bg: 'bg-orange-500' }, { id: 'amber', bg: 'bg-amber-600' }, { id: 'emerald', bg: 'bg-emerald-500' },
-  { id: 'zinc', bg: 'bg-zinc-600' },
-];
+
 
 /**
  * TAB 4: RENCANA & PROGRAM
  */
-const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, customFoods, daysMap, saveDay, shareRecipe, showAlert, showToast, showConfirm, profile, saveProfilePatch, aiKey }) => {
+const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, inboxItems = [], customFoods, daysMap, saveDay, shareRecipe, showAlert, showToast, showConfirm, profile, saveProfilePatch, aiKey }) => {
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState(location.state?.swipeDir === 'right' ? 'suplemen_obat' : 'resep'); // 'resep', 'suplemen_obat'
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState(location.state?.swipeDir === 'right' ? 'meal_prep' : 'resep'); // 'resep', 'meal_prep'
   
   const swipeXRef = useRef({ start: 0, end: 0 });
-  const handleSubTabTouchStart = (e) => { swipeXRef.current.start = e.touches[0].clientX; };
+  // `end` WAJIB di-reset ke posisi awal tiap sentuhan baru. Kalau tidak, tap biasa (yang
+  // sama sekali tidak memicu touchmove) dihitung pakai `end` sisa swipe sebelumnya — jaraknya
+  // lewat 50px, jadi tap di kartu resep malah lompat ganti sub-tab dan kartunya terasa
+  // "tidak bisa diklik".
+  const handleSubTabTouchStart = (e) => {
+    swipeXRef.current.start = e.touches[0].clientX;
+    swipeXRef.current.end = e.touches[0].clientX;
+  };
   const handleSubTabTouchMove = (e) => { swipeXRef.current.end = e.touches[0].clientX; };
   const handleSubTabTouchEnd = (e) => {
     const dist = swipeXRef.current.start - swipeXRef.current.end;
     if (Math.abs(dist) < 50) return;
-    if (dist > 0 && activeTab === 'resep') { setActiveTab('suplemen_obat'); e.stopPropagation(); }
-    else if (dist < 0 && activeTab === 'suplemen_obat') { setActiveTab('resep'); e.stopPropagation(); }
+    if (dist > 0 && activeTab === 'resep') { setActiveTab('meal_prep'); e.stopPropagation(); }
+    else if (dist < 0 && activeTab === 'meal_prep') { setActiveTab('resep'); e.stopPropagation(); }
   };
   const [editing, setEditing] = useState(null);  // draft resep di builder
-  const [editingSupplement, setEditingSupplement] = useState(null);
-  const [editingMedicine, setEditingMedicine] = useState(null);
+  const [viewingId, setViewingId] = useState(null); // resep yang lagi dibuka detailnya
   const [assigning, setAssigning] = useState(null); // resep yang sedang dijadwalkan
-  const [cookingRecipe, setCookingRecipe] = useState(null); // resep yang mau dimasak (untuk milih lokasi kulkas)
-  const [ingSearch, setIngSearch] = useState('');
+  const [cooking, setCooking] = useState(null); // { recipe, servings } — sesi masak yang lagi jalan
   const [shareBusy, setShareBusy] = useState(null);
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+  const [processingInbox, setProcessingInbox] = useState(null);
+  const [openPrepSection, setOpenPrepSection] = useState('lomeal'); // 'lomeal', 'domus', 'darka'
+  const [autoParsingIds, setAutoParsingIds] = useState(new Set()); // track which inbox items are being auto-parsed
+
 
   // Tombol back nutup/mundurin layar builder & sheet, bukan lompat keluar tab.
   // editingSupplement/editingMedicine/showQuestionnaire SENGAJA gak didaftar di sini —
@@ -52,32 +63,66 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
   // DietQuestionnaireModal (daftar dobel bikin dua entri history buat satu modal).
   useBackClose(!!editing, () => setEditing(null));
   useBackClose(!!assigning, () => setAssigning(null));
-  useBackClose(!!cookingRecipe, () => setCookingRecipe(null));
 
   const isDark = theme === 'dark';
 
-  const drinkTemplates = profile?.drinkTemplates || [];
-  const medicines = profile?.medicines || [];
+  const viewing = useMemo(() => recipes.find(r => r.id === viewingId) || null, [recipes, viewingId]);
 
-  const ingResults = useMemo(() => ingSearch ? searchFoods(ingSearch, customFoods).slice(0, 8) : [], [ingSearch, customFoods]);
+  // Balik ke sesi masak yang timernya masih jalan (mis. user ketuk notifikasi "Sedang masak"
+  // sesudah app dibunuh Android). Sekali saja per mount — kalau user nutup sendiri, ya sudah.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || recipes.length === 0) return;
+    const s = loadCookSession();
+    if (!s?.recipeId) return;
+    resumedRef.current = true;
+    const r = recipes.find(x => x.id === s.recipeId);
+    if (!r) { clearCookSession(); return; }
+    if (s.timers?.length > 0) setCooking({ recipe: r, servings: s.servings || r.portions });
+  }, [recipes]);
+
+  // ========== AUTO-PARSE INBOX ITEMS (Client-Side, Free) ==========
+  const autoParsedRef = useRef(new Set());
+  useEffect(() => {
+    if (!inboxItems || inboxItems.length === 0) return;
+    const toParse = inboxItems.filter(inb =>
+      !inb.nutrition && !inb.autoParseFailed && !autoParsedRef.current.has(inb.id) && !autoParsingIds.has(inb.id)
+    );
+    if (toParse.length === 0) return;
+
+    toParse.forEach(inb => {
+      autoParsedRef.current.add(inb.id);
+      setAutoParsingIds(prev => new Set([...prev, inb.id]));
+      try {
+        const res = runLocalNlpParse(inb.text);
+        if (res && res.foods && res.foods.length > 0) {
+          const nutrition = {
+            kcal: res.foods.reduce((a, f) => a + (f.nutrition?.kcal || 0), 0),
+            protein: res.foods.reduce((a, f) => a + (f.nutrition?.protein || 0), 0),
+            carbs: res.foods.reduce((a, f) => a + (f.nutrition?.carbs || 0), 0),
+            fat: res.foods.reduce((a, f) => a + (f.nutrition?.fat || 0), 0),
+          };
+          updateInboxNutrition(inb.id, nutrition).catch(e => console.error('Auto-parse save fail', e));
+        } else {
+          updateInboxNutrition(inb.id, null, true).catch(e => console.error('Auto-parse mark fail', e));
+        }
+      } catch (e) {
+        console.error('Auto-parse error', e);
+        updateInboxNutrition(inb.id, null, true).catch(() => {});
+      }
+      setAutoParsingIds(prev => { const n = new Set(prev); n.delete(inb.id); return n; });
+    });
+  }, [inboxItems]);
 
   const newRecipe = () => setEditing({
-    id: `r_${Date.now()}`, name: '', portions: 2, ingredients: [], note: '', createdAt: new Date().toISOString(),
+    id: `r_${Date.now()}`, name: '', portions: 2, durationMin: 30,
+    ingredients: [], components: [], note: '',
+    authorName: logymUser?.displayName || user?.displayName || 'Kamu',
+    authorUid: user?.uid || null,
+    createdAt: new Date().toISOString(),
   });
 
-  const draftTotals = useMemo(() => {
-    if (!editing) return { ...EMPTY_NUTRITION };
-    return editing.ingredients.reduce((acc, ing) => addNutrition(acc, ing.nutrition), { ...EMPTY_NUTRITION });
-  }, [editing]);
-
-  const saveDraft = () => {
-    const totalGrams = editing.ingredients.reduce((s, i) => s + (i.grams || 0), 0);
-    const portions = Math.max(1, Number(editing.portions) || 1);
-    const recipe = {
-      ...editing, portions, totalGrams,
-      total: draftTotals,
-      perPortion: scaleNutrition(draftTotals, 1 / portions),
-    };
+  const saveRecipe = (recipe) => {
     const others = recipes.filter(r => r.id !== recipe.id);
     saveRecipesFn([recipe, ...others]);
     setEditing(null);
@@ -85,6 +130,7 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
 
   const deleteRecipe = async (r) => {
     if (!(await showConfirm(`Hapus resep "${r.name}"?`))) return;
+    if (viewingId === r.id) setViewingId(null);
     saveRecipesFn(recipes.filter(x => x.id !== r.id));
   };
 
@@ -92,6 +138,10 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
   const [assignDays, setAssignDays] = useState([1, 2, 3, 4, 5]); // Sen-Jum default
   const [assignSession, setAssignSession] = useState('lunch');
   const [assignWeeks, setAssignWeeks] = useState(1);
+  const [assignSelectedDates, setAssignSelectedDates] = useState([]);
+  const [assignCalMonth, setAssignCalMonth] = useState(null); // null = current month
+  const [movingBatch, setMovingBatch] = useState(null); // batch yang lagi pilih lokasi Domus
+  const [eating, setEating] = useState(null); // { batch, sessionId, time } konfirmasi sebelum masuk Catat
 
   const getAvailableStock = (b) => {
     let scheduledUneaten = 0;
@@ -104,100 +154,190 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
     return b.remainingPortions - scheduledUneaten;
   };
 
-  const startCook = (r) => {
-    setCookingRecipe({ ...r, selectedLocation: domusLocations?.[0]?.id || '' });
+  const startCook = (r, servings) => setCooking({ recipe: r, servings: Math.max(1, Number(servings) || Number(r.portions) || 1) });
+
+  // Potong stok bahan di Domus sesuai porsi yang BENAR-BENAR dimasak (bukan porsi resep),
+  // lalu bahan yang habis/tidak ada langsung diusulkan ke keranjang belanja Domus.
+  const syncIngredientsToDomus = async (recipe, factor) => {
+    if (!domusItems?.length) return;
+    const missing = new Set();
+    for (const ing of recipe.ingredients) {
+      const match = matchDomusItem(domusItems, ing.name);
+      if (!match) { missing.add(ing.name); continue; }
+      try {
+        const newQtyStr = deductStock(match.quantity, Number(ing.grams || 0) * factor);
+        if (newQtyStr === '0' || newQtyStr === null) {
+          await markDomusItemConsumed(match.id);
+          missing.add(ing.name);
+        } else {
+          await updateDomusItemQuantity(match.id, newQtyStr);
+        }
+      } catch (e) {
+        console.error(`Gagal potong stok untuk ${ing.name}`, e);
+      }
+    }
+    for (const m of missing) {
+      try { await requestShoppingListDomus(user.uid, m); }
+      catch (e) { console.error('Gagal tambah ke shopping list', e); }
+    }
   };
 
-  const executeCook = async () => {
-    const r = cookingRecipe;
-    if (!r) return;
-    
-    // 1. Recipe Bundle System (Collective Deduction) & Reverse Data Flow
-    if (domusItems) {
-      let missingOrEmpty = [];
-      for (const ing of r.ingredients) {
-        // Find matching item in Domus (fuzzy match name)
-        const match = domusItems.find(di => 
-          di.name.toLowerCase().includes(ing.name.toLowerCase()) || 
-          ing.name.toLowerCase().includes(di.name.toLowerCase())
-        );
-
-        try {
-          if (match) {
-            const newQtyStr = deductStock(match.quantity, Number(ing.grams || 0));
-            if (newQtyStr === '0' || newQtyStr === null) {
-              await markDomusItemConsumed(match.id);
-              missingOrEmpty.push(ing.name);
-            } else {
-              await updateDomusItemQuantity(match.id, newQtyStr);
-            }
-          } else {
-            // Ingredient completely missing in Domus
-            missingOrEmpty.push(ing.name);
-          }
-        } catch (e) {
-          console.error(`Gagal potong stok untuk ${ing.name}`, e);
-        }
-      }
-
-      // Inject missing items to Domus Shopping List
-      if (missingOrEmpty.length > 0) {
-        // Deduplicate
-        const uniqueMissing = [...new Set(missingOrEmpty)];
-        for (const m of uniqueMissing) {
-          try {
-            await requestShoppingListDomus(user.uid, m);
-          } catch (e) {
-            console.error('Gagal tambah ke shopping list', e);
-          }
-        }
-      }
-    }
-
-    // 2. Convert recipe into Domus Item (Meal Prep)
-    if (r.selectedLocation) {
-      try {
-        await createDomusItem(user.uid, {
-          name: `${r.name} (Meal Prep)`,
-          locationId: r.selectedLocation,
-          quantity: `${r.portions} porsi`,
-          isFood: true,
-          sourceApp: 'lomeal',
-        });
-      } catch (err) {
-        console.error('Gagal tambah ke Domus', err);
-        showToast('Gagal menyinkronkan dengan Domus.');
-      }
-    }
-
-    const existingIndex = mealPreps.findIndex(b => b.recipeId === r.id);
-    if (existingIndex >= 0) {
-      const existing = mealPreps[existingIndex];
-      const updatedBatch = {
+  // Porsi yang tidak langsung dimakan masuk ke stok Meal Prep. Kalau resep yang sama
+  // pernah dimasak dan stoknya belum habis, batch-nya ditambahkan, bukan bikin baris baru.
+  // `domus` diisi kalau stoknya juga tercatat di inventaris Domus — dipakai buat badge.
+  const addMealPrepStock = (recipe, portions, grams, domus = null) => {
+    const idx = mealPreps.findIndex(b => b.recipeId === recipe.id);
+    if (idx >= 0) {
+      const existing = mealPreps[idx];
+      const next = [...mealPreps];
+      next[idx] = {
         ...existing,
-        initialPortions: existing.initialPortions + r.portions,
-        remainingPortions: existing.remainingPortions + r.portions,
-        totalGrams: (existing.totalGrams || 0) + (r.totalGrams || 0),
-        perPortion: r.perPortion,
+        initialPortions: existing.initialPortions + portions,
+        remainingPortions: existing.remainingPortions + portions,
+        totalGrams: (existing.totalGrams || 0) + grams,
+        perPortion: recipe.perPortion,
+        ...(domus || {}),
       };
-      const newMealPreps = [...mealPreps];
-      newMealPreps[existingIndex] = updatedBatch;
-      saveMealPrepsFn(newMealPreps);
+      saveMealPrepsFn(next);
     } else {
-      const newBatch = {
+      saveMealPrepsFn([{
         id: `b_${Date.now()}`,
-        recipeId: r.id,
-        name: r.name,
-        initialPortions: r.portions,
-        remainingPortions: r.portions,
-        perPortion: r.perPortion,
-        totalGrams: r.totalGrams,
+        recipeId: recipe.id,
+        name: recipe.name,
+        initialPortions: portions,
+        remainingPortions: portions,
+        perPortion: recipe.perPortion,
+        totalGrams: grams,
         createdAt: new Date().toISOString(),
-      };
-      saveMealPrepsFn([newBatch, ...mealPreps]);
+        ...(domus || {}),
+      }, ...mealPreps]);
     }
-    showToast(`${r.portions} porsi ${r.name} berhasil dimasak! 👨‍🍳`);
-    setCookingRecipe(null);
+  };
+
+  // Dipanggil dari layar "Selesai Masak": mode 'eat' → 1 porsi langsung naik ke Meja Makan
+  // hari ini, sisanya jadi stok. mode 'prep' → semuanya jadi stok + item di Domus.
+  const finishCook = async ({ mode, sessionId, locationId, photoUrl, photoUrls = [], servings }) => {
+    const r = cooking.recipe;
+    const base = Math.max(1, Number(r.portions) || 1);
+    const cooked = Math.max(1, Number(servings) || base);
+    const gramsPerPortion = Math.round((r.totalGrams || 0) / base);
+
+    await syncIngredientsToDomus(r, cooked / base);
+
+    if (mode === 'eat') {
+      const ymd = getLocalYMD();
+      const day = daysMap[ymd] || { meals: {} };
+      const meals = { ...(day.meals || {}) };
+      meals[sessionId] = [
+        ...(meals[sessionId] || []),
+        makeEntry({
+          name: `${r.name} (1 porsi)`,
+          grams: gramsPerPortion, unit: 'g',
+          nutrition: r.perPortion,
+          recipeId: r.id, source: 'recipe',
+          isEaten: true,
+          ...(photoUrl ? { photoUrl } : {}),
+          ...(photoUrls.length > 1 ? { photoUrls } : {}),
+        }),
+      ];
+      await saveDay(ymd, { ...day, meals });
+    }
+
+    const stockPortions = cooked - (mode === 'eat' ? 1 : 0);
+    if (stockPortions > 0) {
+      // Domus duluan supaya id-nya bisa ikut disimpan di batch (badge "Domus · Kulkas").
+      let domus = null;
+      if (locationId) {
+        try {
+          const domusItemId = await createDomusItem(user.uid, {
+            name: `${r.name} (Meal Prep)`,
+            locationId,
+            quantity: `${stockPortions} porsi`,
+            isFood: true,
+            sourceApp: 'lomeal',
+            kind: 'mealprep',
+            portions: stockPortions,
+            kcalPerPortion: Math.round(r.perPortion?.kcal || 0),
+            cookedAt: new Date().toISOString(),
+            recipeId: r.id,
+            ...(photoUrl ? { photoUrl } : {}),
+          });
+          domus = {
+            domusItemId,
+            domusLocationName: domusLocations?.find(l => l.id === locationId)?.name || '',
+          };
+        } catch (err) {
+          console.error('Gagal tambah ke Domus', err);
+          showToast('Gagal menyinkronkan dengan Domus.');
+        }
+      }
+      addMealPrepStock(r, stockPortions, gramsPerPortion * stockPortions, domus);
+    }
+
+    // Foto hasil masakan pertama sekalian jadi foto hero resepnya.
+    if (photoUrl && !r.photoUrl) {
+      saveRecipesFn(recipes.map(x => (x.id === r.id ? { ...x, photoUrl } : x)));
+    }
+
+    showToast(mode === 'eat'
+      ? `Selamat makan! ${stockPortions > 0 ? `${stockPortions} porsi masuk stok.` : ''} 🍽️`
+      : `${stockPortions} porsi ${r.name} masuk stok Meal Prep! 👨‍🍳`);
+  };
+
+  const nowHHMM = () => new Date().toTimeString().slice(0, 5);
+
+  // Sesi yang jamnya paling dekat dengan sekarang — jadi tebakan awal di modal konfirmasi.
+  const nearestSessionId = () => {
+    const times = { ...DEFAULT_SESSION_TIMES, ...(profile?.settings?.defaultSessionTimes || {}) };
+    const now = new Date().getHours() * 60 + new Date().getMinutes();
+    return MEAL_SESSIONS.filter(s => s.id !== 'drink')
+      .map(s => {
+        const [h, m] = (times[s.id] || '12:00').split(':').map(Number);
+        return { id: s.id, diff: Math.abs(h * 60 + m - now) };
+      })
+      .sort((a, b) => a.diff - b.diff)[0]?.id || 'lunch';
+  };
+
+  // Konfirmasi "Makan": porsi dicatat ke hari ini pada sesi + jam pilihan user,
+  // lalu langsung dilempar ke tab Catat dengan sesi itu kebuka.
+  const confirmEat = async () => {
+    const { batch: b, sessionId, time } = eating;
+    const entry = makeEntry({
+      name: `${b.name} (1 porsi)`, time,
+      grams: Math.round((b.totalGrams || 0) / b.initialPortions), unit: 'g',
+      nutrition: b.perPortion, recipeId: b.recipeId, batchId: b.id,
+      source: 'recipe', isMealPrep: true, isEaten: true, planned: false,
+    });
+    const ymd = getLocalYMD(new Date());
+    const day = daysMap[ymd] || { meals: {} };
+    const meals = { ...(day.meals || {}) };
+    meals[sessionId] = [...(meals[sessionId] || []), entry];
+    await saveDay(ymd, { ...day, meals });
+    saveMealPrepsFn(mealPreps.map(x => (x.id === b.id ? { ...x, remainingPortions: x.remainingPortions - 1 } : x)));
+    setEating(null);
+    navigate('/log', { state: { openSession: sessionId } });
+  };
+
+  // Stok Lomeal dipindah ke inventaris Domus (buat user yang mulai pakai Domus). Batch-nya
+  // tetap di Lomeal supaya jadwal yang sudah nempel ke batchId gak putus — cuma dapat lokasi.
+  const moveBatchToDomus = async (b, locationId) => {
+    setMovingBatch(null);
+    try {
+      const domusItemId = await createDomusItem(user.uid, {
+        name: `${b.name} (Meal Prep)`,
+        locationId,
+        quantity: `${b.remainingPortions} porsi`,
+        isFood: true,
+        sourceApp: 'lomeal',
+      });
+      saveMealPrepsFn(mealPreps.map(x => x.id === b.id ? {
+        ...x, domusItemId, domusLocationName: domusLocations?.find(l => l.id === locationId)?.name || '',
+      } : x));
+      showToast('Stok dipindah ke Domus! 📦');
+    } catch (err) {
+      console.error('Gagal pindah ke Domus', err);
+      showToast('Gagal memindahkan ke Domus.');
+    }
   };
 
   const deleteBatch = async (b) => {
@@ -277,140 +417,47 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
     finally { setShareBusy(null); }
   };
 
-  const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
-
   // ============ BUILDER VIEWS ============
   if (editing) return (
-    <div className="max-w-2xl mx-auto px-4 pt-4 pb-32 space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className={`h1 ${t.textMain}`}>Recipe Builder</h1>
-        <button onClick={() => setEditing(null)} className={`p-2 rounded-xl ${t.btnBg}`}><X size={16} className={t.textMuted} /></button>
-      </div>
-      <input className={inputCls} placeholder='Nama resep, mis. "Ayam Gochujang Diet"' value={editing.name}
-        onChange={(e) => setEditing(r => ({ ...r, name: e.target.value }))} />
-      <div className={`flex items-center gap-3 p-3 rounded-2xl border ${t.border} ${t.bgCard}`}>
-        <span className={`body-md ${t.textMuted}`}>Jadi berapa porsi?</span>
-        <div className="flex items-center gap-2 ml-auto">
-          {[1, 2, 4, 6].map(n => (
-            <button key={n} onClick={() => setEditing(r => ({ ...r, portions: n }))}
-              className={`w-9 h-9 rounded-xl caption border ${editing.portions === n ? `${t.bgAccent} border-transparent text-white` : `${t.border} ${t.textMuted}`}`}>{n}</button>
-          ))}
-          <input type="number" inputMode="numeric" value={editing.portions}
-            onChange={(e) => setEditing(r => ({ ...r, portions: e.target.value }))}
-            className={`w-12 h-9 text-center rounded-xl border ${t.border} ${t.inputBg} caption ${t.textMain} no-spinners outline-none`} />
-        </div>
-      </div>
-
-      {/* Cari & tambah bahan */}
-      <div className={`p-3 rounded-2xl border ${t.border} ${t.bgCard}`}>
-        <div className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg}`}>
-          <Search size={14} className={t.textMuted} />
-          <input value={ingSearch} onChange={(e) => setIngSearch(e.target.value)} placeholder="Cari bahan (dada ayam, santan…)"
-            className={`flex-1 bg-transparent outline-none body-md ${t.textMain}`} />
-        </div>
-        {ingResults.map(f => (
-          <button key={f.id} onClick={() => {
-            setEditing(r => ({ ...r, ingredients: [...r.ingredients, { foodId: f.id, name: f.name, grams: f.portion.grams, nutrition: nutritionForAmount(f, f.portion.grams) }] }));
-            setIngSearch('');
-          }} className={`w-full flex justify-between items-center px-3 py-2.5 mt-1 rounded-xl ${t.bgSunken}`}>
-            <span className={`body-md ${t.textMain}`}>{f.name}</span>
-            <span className={`caption ${t.textMuted}`}>{f.portion.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Daftar bahan + gramasi */}
-      <div className="space-y-1.5">
-        {editing.ingredients.map((ing, i) => (
-          <div key={i} className={`flex items-center gap-2 p-3 rounded-2xl border ${t.border} ${t.bgCard}`}>
-            <p className={`body-md flex-1 ${t.textMain}`}>{ing.name}</p>
-            <input type="number" inputMode="numeric" value={ing.grams}
-              onChange={(e) => {
-                const grams = Number(e.target.value) || 0;
-                setEditing(r => ({
-                  ...r,
-                  ingredients: r.ingredients.map((x, j) => {
-                    if (j !== i) return x;
-                    const factor = x.grams > 0 ? grams / x.grams : 0;
-                    return { ...x, grams, nutrition: Object.fromEntries(Object.entries(x.nutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])) };
-                  }),
-                }));
-              }}
-              className={`w-16 text-right px-2 py-1 rounded-lg border ${t.border} ${t.inputBg} caption ${t.textMain} no-spinners outline-none`} />
-            <span className={`caption ${t.textMuted}`}>g</span>
-            <span className={`caption w-14 text-right ${t.textMuted}`}>{Math.round(ing.nutrition.kcal)} kkal</span>
-            <button onClick={() => setEditing(r => ({ ...r, ingredients: r.ingredients.filter((_, j) => j !== i) }))}
-              className="p-1.5 text-red-400"><X size={13} /></button>
-          </div>
-        ))}
-        {editing.ingredients.length === 0 && <p className={`body-md text-center py-4 ${t.textMuted}`}>Belum ada bahan — cari di atas ⬆️</p>}
-      </div>
-
-      {/* Estimasi nutrisi akhir */}
-      <div className={`rounded-2xl border ${t.borderAccentSoft} ${t.bgAccentSoft} p-4`}>
-        <p className={`h3 ${t.textMuted} mb-2`}>Estimasi Nutrisi per Porsi (÷{editing.portions || 1})</p>
-        <div className="grid grid-cols-4 gap-2">
-          {[['kcal', 'kkal'], ['protein', 'Protein'], ['carbs', 'Karbo'], ['fat', 'Lemak']].map(([k, label]) => (
-            <div key={k} className="text-center">
-              <p className={`text-lg font-black tabular-nums ${t.textMain}`}>{Math.round(draftTotals[k] / (Number(editing.portions) || 1))}</p>
-              <p className={`caption ${t.textMuted}`}>{label}{k !== 'kcal' && ' (g)'}</p>
-            </div>
-          ))}
-        </div>
-        <p className={`caption font-medium mt-2 ${t.textMuted}`}>
-          Na {Math.round(draftTotals.sodium / (Number(editing.portions) || 1))}mg · Gula {Math.round(draftTotals.sugar / (Number(editing.portions) || 1))}g · Kolesterol {Math.round(draftTotals.cholesterol / (Number(editing.portions) || 1))}mg
-        </p>
-      </div>
-
-      <button disabled={!editing.name || editing.ingredients.length === 0} onClick={saveDraft}
-        className={`w-full py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40`}>Simpan Resep</button>
-    </div>
+    <RecipeBuilder
+      t={t} theme={theme} user={user} customFoods={customFoods} showToast={showToast}
+      editing={editing} setEditing={setEditing}
+      onCancel={() => setEditing(null)}
+      onSave={saveRecipe}
+    />
   );
 
-  if (editingSupplement) return (
-    <SupplementBuilder t={t} theme={theme} editing={editingSupplement} setEditing={setEditingSupplement}
-      customFoods={customFoods}
-      onSave={(item) => {
-        const others = drinkTemplates.filter(d => d.id !== item.id);
-        saveProfilePatch({ drinkTemplates: [item, ...others] });
-        setEditingSupplement(null);
-      }} />
-  );
-
-  if (editingMedicine) return (
-    <MedicineBuilder t={t} editing={editingMedicine} setEditing={setEditingMedicine}
-      onSave={(item) => {
-        const others = medicines.filter(m => m.id !== item.id);
-        saveProfilePatch({ medicines: [item, ...others] });
-        setEditingMedicine(null);
-      }} />
-  );
 
   // ============ LIST VIEW ============
   
-  const currentDiet = DIET_PROFILES.find(d => d.id === profile?.dietProfile) || DIET_PROFILES[0];
   
-  const generateTrueAIRecipes = async () => {
-    const dietName = currentDiet.label;
-    showToast(`Memanggil AI untuk memformulasikan resep ${dietName}... 🤖`, { type: 'info', duration: 4000 });
+  // `freshProfile` datang dari DietQuestionnaireModal begitu kuesioner selesai. WAJIB dipakai
+  // kalau ada: prop `profile` baru saja disimpan lewat saveProfilePatch dan belum tentu
+  // sampai ke render ini, jadi memakainya = mengirim jawaban kuesioner yang lama ke Lomy.
+  const generateTrueAIRecipes = async (freshProfile) => {
+    const src = freshProfile || profile;
+    const input = buildRecipeProfileInput(src);
+    const dietName = input.dietName;
+
     try {
-        const generated = await generateDietRecipe(aiKey, {
-            dietProfile: currentDiet.id,
-            dietName: currentDiet.label,
-            medicalHistory: profile?.medicalHistory || [],
-            allergies: profile?.allergies || ''
-        });
+        const generated = await generateDietRecipe(aiKey, input);
         const aiRecipe = buildAiRecipe(generated, dietName);
         saveRecipesFn([aiRecipe, ...recipes]);
-        showToast(`Resep AI "${aiRecipe.name}" berhasil dibuat! 🍲`);
+        showToast(`Resep Lomy "${aiRecipe.name}" berhasil dibuat! 🍲`);
+        setViewingId(aiRecipe.id);
     } catch (err) {
         if (err.message === 'RATE_LIMIT_EXCEEDED') {
-            showAlert('Limit AI harian habis! Masukkan API Key pribadimu di Pengaturan untuk lanjut generate resep.');
+            showAlert('Limit Lomy harian habis! Masukkan API Key pribadimu di Pengaturan untuk lanjut generate resep.');
         } else {
-            showAlert(`Gagal generate AI: ${err.message}`);
+            showAlert(`Gagal generate Lomy: ${err.message}`);
         }
     }
   };
+
+  // Item Domus yang sebenarnya cerminan batch Lomeal dilewati — kalau tidak, satu stok
+  // tampil dua kali (di seksi Lomeal dengan badge Domus, dan lagi di seksi Domus).
+  const mirroredDomusIds = new Set(mealPreps.map(b => b.domusItemId).filter(Boolean));
+  const domusMatang = domusItems?.filter(i => i.isFood && (i.readyToEat || i.sourceApp === 'lomeal') && !mirroredDomusIds.has(i.id)) || [];
 
   return (
     <div className="max-w-2xl mx-auto px-4 pt-4 pb-32" onTouchStart={handleSubTabTouchStart} onTouchMove={handleSubTabTouchMove} onTouchEnd={handleSubTabTouchEnd}>
@@ -424,12 +471,12 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
           className={`absolute inset-0 z-0 pointer-events-none transition-all duration-700 opacity-100`}
           style={{
             backgroundImage: `url('/bg-program.webp')`,
-            backgroundSize: '150%',
-            backgroundPosition: 'center 20%',
+            backgroundSize: '165%',
+            backgroundPosition: '20% 10%',
             backgroundRepeat: 'no-repeat',
           }}
         />
-        <div className={`absolute inset-0 z-0 bg-gradient-to-t ${isDark ? 'from-[#05070d]/90 via-[#05070d]/50 to-transparent' : 'from-black/80 via-black/40 to-transparent'} pointer-events-none`} />
+        <div className={`absolute inset-0 z-0 bg-gradient-to-t ${isDark ? 'from-[#070a08]/90 via-[#070a08]/50 to-transparent' : 'from-black/80 via-black/40 to-transparent'} pointer-events-none`} />
         {/* ------------------------------ */}
         
         <div className="mt-auto relative z-10 w-full flex flex-col">
@@ -465,7 +512,7 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
 
       {showQuestionnaire && (
         <DietQuestionnaireModal
-          t={t} theme={theme} profile={profile} showAlert={showAlert}
+          t={t} theme={theme} profile={profile} user={user} logymUser={logymUser} showAlert={showAlert}
           onClose={() => setShowQuestionnaire(false)}
           onSave={async (newProfileData, showAlertMsg = true) => {
               await saveProfilePatch(newProfileData);
@@ -480,258 +527,489 @@ const ProgramTab = ({ t, theme, user, domusItems, domusLocations, recipes, saveR
       <div className={`flex items-center gap-1.5 mb-5 p-1.5 rounded-2xl ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'}`}>
         {[
           { id: 'resep', label: 'Buku Resep' },
-          { id: 'suplemen_obat', label: 'Suplemen & Obat' },
+          { id: 'meal_prep', label: 'Stok Matang' },
         ].map(tb => (
           <button key={tb.id} onClick={() => setActiveTab(tb.id)}
-            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === tb.id ? `${t.bgCard} shadow-sm text-emerald-500` : t.textMuted}`}>
+            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all relative ${activeTab === tb.id ? `${t.bgCard} shadow-sm text-emerald-500` : t.textMuted}`}>
             {tb.label}
+            {tb.id === 'meal_prep' && inboxItems?.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 text-[9px] font-black text-white items-center justify-center">
+                  {inboxItems.length}
+                </span>
+              </span>
+            )}
           </button>
         ))}
       </div>
 
       {activeTab === 'resep' && (
         <>
-          {/* MODAL COOK (MASAK MEAL PREP) */}
-      {cookingRecipe && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 pb-12 sm:p-4 anim-fade-in">
-          <div className={`w-full max-w-sm rounded-3xl border shadow-2xl overflow-hidden anim-rise ${theme === 'dark' ? 'bg-[#0a1510] border-white/10' : 'bg-white border-black/10'}`}>
-            <div className={`p-5 flex items-center justify-between border-b ${t.border}`}>
-              <h2 className={`h2 ${t.textMain}`}>Mulai Masak</h2>
-              <button onClick={() => setCookingRecipe(null)} className={`p-2 rounded-xl ${t.btnBg}`}><X size={18} className={t.textMuted} /></button>
+          {recipes.length === 0 && (
+            <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
+              <ChefHat size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
+              <p className={`body-md ${t.textMuted}`}>Belum ada resep. Buat resep pertamamu — bahan, langkah memasak, dan estimasi nutrisinya dihitung otomatis.</p>
             </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <p className={`body-md ${t.textMain}`}>Kamu akan memasak <strong>{cookingRecipe.name}</strong> sebanyak <strong>{cookingRecipe.portions} porsi</strong>.</p>
-                <p className={`caption mt-1 ${t.textMuted}`}>Hasil masakan akan disimpan sebagai Meal Prep dan disinkronkan ke Domus (Kulkas).</p>
-              </div>
+          )}
 
-              {domusLocations && domusLocations.length > 0 && (
-                <div>
-                  <label className={`block caption font-bold mb-1.5 ${t.textMuted}`}>Simpan di (Domus)</label>
-                  <select
-                    className={`w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`}
-                    value={cookingRecipe.selectedLocation}
-                    onChange={e => setCookingRecipe({ ...cookingRecipe, selectedLocation: e.target.value })}
-                  >
-                    {domusLocations.map(loc => (
-                      <option key={loc.id} value={loc.id}>{loc.name} {loc.emoji}</option>
+          <div className="space-y-4">
+            {recipes.map(r => (
+              <button key={r.id} onClick={() => setViewingId(r.id)}
+                className={`relative w-full text-left rounded-3xl overflow-hidden border ${t.border} ${t.bgCard} anim-rise active:scale-[0.99] transition-transform`}>
+                
+                <div className="absolute inset-y-0 left-0 w-[45%] bg-cover bg-center" 
+                  style={{ backgroundImage: `url('${heroForRecipe(r)}')`, WebkitMaskImage: 'linear-gradient(to right, black 50%, transparent)', maskImage: 'linear-gradient(to right, black 50%, transparent)' }} />
+                
+                <div className="relative z-10 p-4 pl-[45%] flex flex-col justify-center min-h-[140px]">
+                  <div className="pr-6">
+                    <p className={`h2 line-clamp-3 leading-tight ${t.textMain}`}>{r.name}</p>
+                    <p className={`caption font-medium mt-1 ${t.textMuted}`}>{r.authorName || 'Resep kamu'}</p>
+                  </div>
+                  
+                  <div className={`flex items-center gap-2 caption font-medium ${t.textMuted} mt-2.5 flex-wrap`}>
+                    <span><strong className={t.textAccent}>{Math.round(r.perPortion?.kcal || 0)} kkal</strong></span>
+                    <span className="flex items-center gap-1">· <Clock size={11} /> {formatDuration(r.durationMin)}</span>
+                    <span>· {r.portions} porsi</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 mt-2">
+                    {[['P', r.perPortion?.protein], ['K', r.perPortion?.carbs], ['L', r.perPortion?.fat]].map(([lbl, val]) => (
+                      <div key={lbl} className={`caption text-[10px] px-2 py-0.5 rounded-md border ${t.border} ${t.bgSunken} ${t.textMuted}`}>
+                        <span className="font-bold mr-0.5">{lbl}</span>{Math.round(val || 0)}g
+                      </div>
                     ))}
-                  </select>
-                </div>
-              )}
-              
-              <button onClick={executeCook} className={`w-full py-3.5 rounded-xl h2 font-bold ${t.bgAccent} shadow-glow flex items-center justify-center gap-2 mt-4`}>
-                <ChefHat size={18} /> Simpan ke Kulkas
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL ASSIGN / JADWALKAN (MEAL PREP) */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className={`h2 ${t.textMain}`}>Kulkas (Meal Prep)</h2>
-                <p className={`caption font-medium ${t.textMuted}`}>Stok makanan siap saji yang belum habis.</p>
-              </div>
-            </div>
-            {mealPreps.length === 0 && (
-              <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-6 text-center`}>
-                <ChefHat size={28} className={`mx-auto mb-2 ${t.textMuted}`} />
-                <p className={`caption ${t.textMuted}`}>Kulkas kosong. Masak resep di bawah untuk mengisi stok.</p>
-              </div>
-            )}
-            <div className="space-y-2.5">
-              {mealPreps.map(b => (
-                <div key={b.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise`}>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className={`h2 ${t.textMain}`}>{b.name}</p>
-                      <p className={`caption font-medium mt-0.5 ${t.textMuted}`}>
-                        Dimakan: <span className={`font-bold ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{b.initialPortions - b.remainingPortions}</span> / {b.initialPortions} porsi · Sisa: <span className={b.remainingPortions > 0 ? 'text-emerald-500 font-bold' : 'text-red-400 font-bold'}>{b.remainingPortions}</span>
-                      </p>
-                    </div>
-                    <button onClick={() => deleteBatch(b)} className="p-2 text-red-400"><X size={14} /></button>
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <button onClick={() => setAssigning(b)} disabled={b.remainingPortions <= 0}
-                      className={`flex-1 py-2.5 rounded-xl ${t.bgAccentSoft} border ${t.borderAccentSoft} ${t.textAccent} caption flex items-center justify-center gap-1.5 disabled:opacity-40`}>
-                      <CalendarPlus size={13} /> Jadwalkan
-                    </button>
                   </div>
                 </div>
-              ))}
-            </div>
+
+                <span onClick={(e) => { e.stopPropagation(); deleteRecipe(r); }} 
+                  className={`absolute top-3 right-3 p-2 text-red-400 opacity-60 z-20`}>
+                  <X size={16} />
+                </span>
+              </button>
+            ))}
           </div>
 
-          <hr className={`border-t ${t.border} mb-6`} />
+        </>
+      )}
 
-          {/* BUKU RESEP */}
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className={`h1 ${t.textMain}`}>Buku Resep</h1>
-              <p className={`body-md font-medium ${t.textMuted}`}>Template masakan andalan Anda.</p>
-            </div>
-            <button onClick={newRecipe} className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
+      {activeTab === 'meal_prep' && (
+        <div className="space-y-4">
+          
+          {/* LOMEAL SECTION */}
+          <div className={`rounded-3xl border ${t.border} ${t.bgCard} overflow-hidden`}>
+            <button onClick={() => setOpenPrepSection(openPrepSection === 'lomeal' ? '' : 'lomeal')} className="w-full flex items-center justify-between p-4 bg-black/5 dark:bg-white/5">
+              <div className="flex items-center gap-2 text-emerald-500 font-bold">
+                <ChefHat size={18} /> Lomeal ({mealPreps.length})
+              </div>
+            </button>
+            {openPrepSection === 'lomeal' && (
+              <div className="px-4 border-t border-black/5 dark:border-white/5">
+                {mealPreps.length === 0 ? (
+                  <p className={`caption text-center ${t.textMuted} py-6`}>Saat ini tidak ada meal prep di Lomeal.</p>
+                ) : (
+                  mealPreps.map(b => (
+                    <div key={b.id} className={`py-4 border-b last:border-b-0 border-black/5 dark:border-white/5 anim-rise`}>
+                      <div className="flex items-start gap-3">
+                        {b.recipeImage && (
+                          <img src={b.recipeImage} alt="thumb" className="w-12 h-12 rounded-xl object-cover shrink-0 bg-black/5 dark:bg-white/5" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-bold ${t.textMain} line-clamp-3`}>{b.name}</p>
+                          <p className={`caption font-medium mt-0.5 ${t.textMuted}`}>
+                            Sisa <span className={b.remainingPortions > 0 ? 'text-emerald-500 font-bold' : 'text-red-400 font-bold'}>{b.remainingPortions}</span>/{b.initialPortions} porsi
+                            {b.perPortion?.kcal ? ` · ${Math.round(b.perPortion.kcal)}Kcal · ${macroText(b.perPortion)}` : ''}
+                          </p>
+                          {b.domusItemId && (
+                            <span className={`inline-flex items-center gap-1 mt-2 px-2.5 py-1 rounded-full caption border ${STATUS.info.soft} ${STATUS.info.text} ${STATUS.info.border}`}>
+                              <Warehouse size={12} /> Domus{b.domusLocationName ? ` · ${b.domusLocationName}` : ''}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {!b.recipeId && (
+                          <button onClick={() => setProcessingInbox({ id: b.id, text: b.name, source: 'lomeal', nutrition: b.perPortion })} className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1`}>
+                            <Calculator size={12} /> Hitung
+                          </button>
+                        )}
+                        <button disabled={b.remainingPortions <= 0} onClick={() => setEating({ batch: b, sessionId: nearestSessionId(), time: nowHHMM() })}
+                          className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                          <Utensils size={12} /> Makan
+                        </button>
+                        <button onClick={() => setAssigning({ ...b, _source: 'lomeal' })} disabled={b.remainingPortions <= 0}
+                          className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                          <CalendarPlus size={12} /> Jadwal
+                        </button>
+                        {!b.domusItemId && domusLocations?.length > 0 && (
+                          <button onClick={() => setMovingBatch(b)}
+                            className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1`}>
+                            <Warehouse size={12} /> Pindah
+                          </button>
+                        )}
+                        <button onClick={() => deleteBatch(b)} className={`px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 caption font-bold flex items-center gap-1`}>
+                          <Trash2 size={12} /> Buang
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
 
-      {recipes.length === 0 && (
-        <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
-          <ChefHat size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
-          <p className={`body-md ${t.textMuted}`}>Belum ada resep. Buat template resep pertamamu — bahan, jumlah, porsi, dan estimasi nutrisinya dihitung otomatis.</p>
+          {/* DOMUS SECTION */}
+          <div className={`rounded-3xl border ${t.border} ${t.bgCard} overflow-hidden`}>
+            <button onClick={() => setOpenPrepSection(openPrepSection === 'domus' ? '' : 'domus')} className="w-full flex items-center justify-between p-4 bg-black/5 dark:bg-white/5">
+              <div className="flex items-center gap-2 text-amber-500 font-bold">
+                <Warehouse size={18} /> Domus ({domusMatang.length})
+              </div>
+            </button>
+            {openPrepSection === 'domus' && (
+              <div className="px-4 border-t border-black/5 dark:border-white/5">
+                {(() => {
+                  if (domusMatang.length === 0) {
+                    return <p className={`caption text-center ${t.textMuted} py-6`}>Saat ini tidak ada makanan matang di Domus.</p>;
+                  }
+
+                  // Group by location
+                  const grouped = domusMatang.reduce((acc, item) => {
+                    const locName = domusLocations?.find(l => l.id === item.locationId)?.name || 'Tanpa Lokasi';
+                    if (!acc[locName]) acc[locName] = [];
+                    acc[locName].push(item);
+                    return acc;
+                  }, {});
+
+                  return Object.entries(grouped).map(([locName, items]) => (
+                    <div key={locName} className="py-4 border-b last:border-b-0 border-black/5 dark:border-white/5">
+                      <p className={`caption font-bold text-amber-500 mb-3`}>{locName.toUpperCase()}</p>
+                      <div className="space-y-4">
+                        {items.map(i => (
+                          <div key={i.id} className="anim-rise py-3">
+                            <div className="flex items-start gap-3">
+                              {(i.imageUrl || i.image) && (
+                                <img src={i.imageUrl || i.image} alt="thumb" className="w-12 h-12 rounded-xl object-cover shrink-0 bg-black/5 dark:bg-white/5" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className={`font-bold ${t.textMain} line-clamp-3`}>{i.name}</p>
+                                <p className={`caption mt-0.5 ${t.textMuted}`}>
+                                  Sisa: {i.quantity || '?'}
+                                  {i.nutrition?.kcal ? ` · ${Math.round(i.nutrition.kcal)}Kcal · ${macroText(i.nutrition)}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 mt-3">
+                              <button onClick={() => setProcessingInbox({ id: i.id, text: i.name, source: 'domus', originalData: i })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1`}>
+                                <Calculator size={12} /> Hitung
+                              </button>
+                              <button disabled={!i.nutrition?.kcal} onClick={() => setProcessingInbox({ id: i.id, text: i.name, source: 'domus', originalData: i, skipToStep2: true })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                                <Utensils size={12} /> Makan
+                              </button>
+                              <button disabled={!i.nutrition?.kcal} onClick={() => setAssigning({ id: i.id, name: i.name, nutrition: i.nutrition, remainingPortions: 1, initialPortions: 1, _source: 'domus' })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                                <CalendarPlus size={12} /> Jadwal
+                              </button>
+                              <button onClick={() => {
+                                const newQty = window.prompt(`Ubah sisa stok menjadi berapa? (Kosongkan/0 untuk buang semua)\nSaat ini: ${i.quantity || '-'}`, i.quantity || '');
+                                if (newQty === null) return;
+                                if (!newQty || newQty.trim() === '0') {
+                                  markDomusItemConsumed(i.id).then(() => showToast('Dibuang dari Domus!'));
+                                } else {
+                                  updateDomusItemQuantity(i.id, newQty.trim()).then(() => showToast('Sisa stok diupdate!'));
+                                }
+                              }} className={`px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 caption font-bold flex items-center gap-1`}>
+                                <Trash2 size={12} /> Buang
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
+          </div>
+
+          {/* DARKA SECTION */}
+          <div className={`rounded-3xl border ${t.border} ${t.bgCard} overflow-hidden`}>
+            <button onClick={() => setOpenPrepSection(openPrepSection === 'darka' ? '' : 'darka')} className="w-full flex items-center justify-between p-4 bg-black/5 dark:bg-white/5">
+              <div className="flex items-center gap-2 text-lime-500 font-bold">
+                <Coins size={18} /> Darka ({inboxItems?.length || 0})
+              </div>
+            </button>
+            {openPrepSection === 'darka' && (
+              <div className="px-4 border-t border-black/5 dark:border-white/5">
+                {(!inboxItems || inboxItems.length === 0) ? (
+                  <p className={`caption text-center ${t.textMuted} py-6`}>Saat ini tidak ada makanan masuk dari Darka.</p>
+                ) : (
+                  inboxItems.map(inb => (
+                    <div key={inb.id} className={`py-4 border-b last:border-b-0 border-black/5 dark:border-white/5 anim-rise`}>
+                      <div className="flex items-start gap-3">
+                        {inb.imageUrl && (
+                          <img src={inb.imageUrl} alt="thumb" className="w-12 h-12 rounded-xl object-cover shrink-0 bg-black/5 dark:bg-white/5" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-bold ${t.textMain} line-clamp-3`}>{inb.text}</p>
+                          <p className={`caption font-medium mt-0.5 ${t.textMuted}`}>
+                            Sisa <span className="text-emerald-500 font-bold">{inb.quantity || 1}</span> porsi
+                            {inb.nutrition?.kcal ? ` · ${Math.round(inb.nutrition.kcal)}Kcal · ${macroText(inb.nutrition)}` : ''}
+                          </p>
+                          {!inb.nutrition?.kcal && inb.autoParseFailed ? (
+                            <p className={`caption mt-1 text-amber-500 italic`}>Silakan hitung nutrisi ulang</p>
+                          ) : !inb.nutrition?.kcal && autoParsingIds.has(inb.id) ? (
+                            <p className={`caption mt-1 ${t.textMuted} italic`}>Menghitung nutrisi...</p>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <button onClick={() => setProcessingInbox(inb)} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1`}>
+                          <Calculator size={12} /> Hitung
+                        </button>
+                        <button disabled={!inb.nutrition?.kcal} onClick={() => setProcessingInbox({ ...inb, skipToStep2: true })} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                          <Utensils size={12} /> Makan
+                        </button>
+                        <button disabled={!inb.nutrition?.kcal} onClick={() => setAssigning({ id: inb.id, name: inb.text, nutrition: inb.nutrition, remainingPortions: inb.quantity || 1, initialPortions: inb.quantity || 1, _source: 'darka' })} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                          <CalendarPlus size={12} /> Jadwal
+                        </button>
+                        <button onClick={() => {
+                          showConfirm(`Hapus jajanan ini dari inbox?`).then(yes => {
+                            if (yes) markInboxClaimed(inb.id).then(() => showToast('Dihapus dari inbox!'));
+                          });
+                        }} className={`px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 caption font-bold flex items-center gap-1`}>
+                          <Trash2 size={12} /> Buang
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
         </div>
       )}
 
-      <div className="space-y-2.5">
-        {recipes.map(r => (
-          <div key={r.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`h2 ${t.textMain}`}>{r.name}</p>
-                <p className={`caption font-medium mt-0.5 ${t.textMuted}`}>
-                  {r.ingredients.length} bahan · {r.portions} porsi · {Math.round(r.perPortion?.kcal || 0)} kkal/porsi
-                </p>
+
+      {/* ===== JADWAL CALENDAR MODAL ===== */}
+      {assigning && (() => {
+        const maxStock = assigning._source === 'lomeal' ? getAvailableStock(assigning) : (assigning.remainingPortions || 1);
+        const today = new Date();
+        const calMonth = assignCalMonth || new Date(today.getFullYear(), today.getMonth(), 1);
+        const daysInMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0).getDate();
+        const firstDow = new Date(calMonth.getFullYear(), calMonth.getMonth(), 1).getDay();
+        const monthName = calMonth.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const selectedCount = assignSelectedDates.length;
+
+        const toggleDate = (ymd) => {
+          setAssignSelectedDates(prev => {
+            if (prev.includes(ymd)) return prev.filter(d => d !== ymd);
+            if (prev.length >= maxStock) { showToast(`Maksimal ${maxStock} tanggal (sisa stok)`); return prev; }
+            return [...prev, ymd].sort();
+          });
+        };
+
+        const handleApply = () => {
+          if (selectedCount === 0 || !assignSession) return;
+          const batch = assigning;
+          for (const ymd of assignSelectedDates) {
+            const day = daysMap[ymd] || { meals: {} };
+            const meals = { ...(day.meals || {}) };
+            const nutrition = batch._source === 'lomeal' ? batch.perPortion : batch.nutrition;
+            meals[assignSession] = [
+              ...(meals[assignSession] || []),
+              makeEntry({
+                name: `${batch.name} (1 porsi)`,
+                grams: batch._source === 'lomeal' ? Math.round((batch.totalGrams || 0) / batch.initialPortions) : 1,
+                unit: batch._source === 'lomeal' ? 'g' : 'porsi',
+                nutrition: nutrition,
+                recipeId: batch.recipeId || null,
+                batchId: batch.id,
+                source: batch._source || 'lomeal',
+                planned: true,
+                isMealPrep: batch._source === 'lomeal',
+              }),
+            ];
+            saveDay(ymd, { ...day, meals });
+          }
+          setAssigning(null);
+          setAssignSelectedDates([]);
+          showAlert(`Dijadwalkan ke ${selectedCount} hari! 📅`);
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm no-swipe" onClick={() => { setAssigning(null); setAssignSelectedDates([]); }}>
+            <div onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-sm rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]/95 backdrop-blur-xl' : 'bg-white/95 backdrop-blur-xl'} p-5 anim-rise`}>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className={`h2 ${t.textMain} line-clamp-1`}>Jadwalkan "{assigning.name}"</h2>
+                <button onClick={() => { setAssigning(null); setAssignSelectedDates([]); }} className={`p-1.5 rounded-xl ${t.btnBg} ${t.textMuted}`}><X size={16} /></button>
               </div>
-              <button onClick={() => deleteRecipe(r)} className="p-2 text-red-400"><X size={14} /></button>
-            </div>
-            <p className={`caption font-medium mt-1 ${t.textMuted} truncate`}>{r.ingredients.map(i => i.name).join(', ')}</p>
-            <div className="flex gap-2 mt-3">
-              <button onClick={() => startCook(r)}
-                className={`flex-1 py-2.5 rounded-xl ${t.bgAccentSoft} border ${t.borderAccentSoft} ${t.textAccent} caption flex items-center justify-center gap-1.5`}>
-                <ChefHat size={13} /> Mulai Masak
-              </button>
-              <button onClick={() => setEditing(r)} className={`px-4 py-2.5 rounded-xl border ${t.border} ${t.btnBg} caption ${t.textMain}`}>Edit</button>
-              <button onClick={() => doShare(r)} disabled={shareBusy === r.id}
-                className={`px-3 py-2.5 rounded-xl border ${t.border} ${t.btnBg} ${t.textMuted}`}>
-                {shareBusy === r.id ? <Loader2 size={13} className="animate-spin" /> : <Share2 size={13} />}
+
+              <p className={`caption font-medium ${t.textMuted} mb-4`}>
+                Pilih tanggal di kalender. Maks <strong className={t.textAccent}>{maxStock}</strong> tanggal (sisa stok). Terpilih: <strong className={t.textAccent}>{selectedCount}</strong>.
+              </p>
+
+              {/* Sesi Makan */}
+              <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Sesi Makan:</p>
+              <div className="flex gap-1.5 overflow-x-auto hide-scrollbar mb-4">
+                {MEAL_SESSIONS.map(s => (
+                  <button key={s.id} onClick={() => setAssignSession(s.id)}
+                    className={`shrink-0 px-3 py-2 rounded-xl border caption ${assignSession === s.id ? `${t.bgAccentSoft} ${t.borderAccentSoft} ${t.textAccent}` : `${t.border} ${t.textMuted}`}`}>
+                    {s.emoji} {s.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Mini Calendar */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <button onClick={() => setAssignCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1))} className={`p-1.5 rounded-lg ${t.btnBg} ${t.textMuted}`}>‹</button>
+                  <span className={`caption font-bold ${t.textMain}`}>{monthName}</span>
+                  <button onClick={() => setAssignCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1))} className={`p-1.5 rounded-lg ${t.btnBg} ${t.textMuted}`}>›</button>
+                </div>
+                <div className="grid grid-cols-7 gap-1 text-center">
+                  {['M','S','S','R','K','J','S'].map((d,i) => <div key={i} className={`caption font-bold ${t.textMuted} py-1`}>{d}</div>)}
+                  {Array.from({ length: firstDow }, (_, i) => <div key={`e${i}`} />)}
+                  {Array.from({ length: daysInMonth }, (_, i) => {
+                    const day = i + 1;
+                    const d = new Date(calMonth.getFullYear(), calMonth.getMonth(), day);
+                    const ymd = getLocalYMD(d);
+                    const isPast = ymd <= getLocalYMD(today);
+                    const isSelected = assignSelectedDates.includes(ymd);
+                    return (
+                      <button key={day} disabled={isPast}
+                        onClick={() => toggleDate(ymd)}
+                        className={`py-1.5 rounded-lg caption font-bold transition-all
+                          ${isPast ? `${t.textMuted} opacity-30` : isSelected ? `bg-emerald-500 text-white` : `${t.textMain} hover:bg-emerald-500/20`}`}>
+                        {day}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <button disabled={selectedCount === 0} onClick={handleApply}
+                className={`w-full py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40`}>
+                Terapkan ke {selectedCount} Hari
               </button>
             </div>
           </div>
-        ))}
-      </div>
-      </>
+        );
+      })()}
+      {/* MODALS */}
+      {viewing && (
+        <RecipeDetail
+          t={t} theme={theme} user={user} recipe={viewing}
+          domusItems={domusItems} showToast={showToast}
+          shareBusy={shareBusy === viewing.id}
+          onClose={() => setViewingId(null)}
+          onEdit={() => { setViewingId(null); setEditing(viewing); }}
+          onShare={() => doShare(viewing)}
+          onCook={(servings) => { setViewingId(null); startCook(viewing, servings); }}
+        />
       )}
 
-      {activeTab === 'suplemen_obat' && (
-        <div className="space-y-10">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h1 className={`h1 ${t.textMain}`}>Suplemen & Minuman</h1>
-                <p className={`body-md font-medium ${t.textMuted}`}>Template kustom untuk Rak Minuman.</p>
-              </div>
-              <button onClick={() => setEditingSupplement({ id: `ds_${Date.now()}`, name: '', icon: 'CupSoda', color: 'sky', ingredients: [], nutrition: { ...EMPTY_NUTRITION } })} 
-                      className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
-            </div>
-
-            {drinkTemplates.length === 0 && (
-              <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
-                <CupSoda size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
-                <p className={`body-md ${t.textMuted}`}>Belum ada suplemen kustom. Klik + untuk membuat minuman pertamamu.</p>
-              </div>
-            )}
-
-            <div className="space-y-2.5">
-              {drinkTemplates.map(r => {
-                const IconComp = ICONS[r.icon] || CupSoda;
-                const bgClass = COLORS.find(c => c.id === r.color)?.bg || 'bg-zinc-500';
-                return (
-                  <div key={r.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise flex items-center gap-4`}>
-                    <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-white ${bgClass}`}>
-                      <IconComp size={24} />
-                    </div>
-                    <div className="flex-1">
-                      <p className={`h2 ${t.textMain}`}>{r.name}</p>
-                      <p className={`caption mt-0.5 ${t.textMuted}`}>{Math.round(r.nutrition?.kcal || 0)} kkal · {Math.round(r.nutrition?.protein || 0)}g P</p>
-                    </div>
-                    <button onClick={async () => {
-                      if (await showConfirm(`Hapus minuman "${r.name}"?`)) saveProfilePatch({ drinkTemplates: drinkTemplates.filter(x => x.id !== r.id) });
-                    }} className="p-2 text-red-400"><X size={16} /></button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h1 className={`h1 ${t.textMain}`}>Jadwal Obat</h1>
-                <p className={`body-md font-medium ${t.textMuted}`}>Daftar pengobatan rutin harian.</p>
-              </div>
-              <button onClick={() => setEditingMedicine({ id: `med_${Date.now()}`, name: '', icon: 'Pill', color: 'rose', signa: '', note: '' })} 
-                      className={`p-3 rounded-2xl ${t.bgAccent} shadow-glow`}><Plus size={18} /></button>
-            </div>
-
-            {medicines.length === 0 && (
-              <div className={`rounded-3xl border-2 border-dashed ${t.borderDashed} p-8 text-center`}>
-                <Pill size={32} className={`mx-auto mb-2 ${t.textMuted}`} />
-                <p className={`body-md ${t.textMuted}`}>Belum ada resep obat. Klik + untuk membuat jadwal obat pertamamu.</p>
-              </div>
-            )}
-
-            <div className="space-y-2.5">
-              {medicines.map(m => {
-                const IconComp = ICONS[m.icon] || Pill;
-                const bgClass = COLORS.find(c => c.id === m.color)?.bg || 'bg-rose-500';
-                return (
-                  <div key={m.id} className={`rounded-3xl border ${t.border} ${t.bgCard} p-4 anim-rise flex items-center gap-4`}>
-                    <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-white ${bgClass}`}>
-                      <IconComp size={24} />
-                    </div>
-                    <div className="flex-1">
-                      <p className={`h2 ${t.textMain}`}>{m.name}</p>
-                      <p className={`caption font-medium mt-0.5 text-rose-500`}>{m.signa}</p>
-                      {m.note && <p className={`caption mt-0.5 ${t.textMuted}`}>{m.note}</p>}
-                    </div>
-                    <button onClick={async () => {
-                      if (await showConfirm(`Hapus obat "${m.name}"?`)) saveProfilePatch({ medicines: medicines.filter(x => x.id !== m.id) });
-                    }} className="p-2 text-red-400"><X size={16} /></button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== MEAL PREP ASSIGNER MODAL ===== */}
-      {assigning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setAssigning(null)}>
+      {eating && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setEating(null)}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]/80 backdrop-blur-xl' : 'bg-white/80 backdrop-blur-xl'} p-5 anim-rise`}>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className={`h2 ${t.textMain}`}>Jadwalkan "{assigning.name}"</h2>
-              <button onClick={() => setAssigning(null)} className={`p-1.5 rounded-xl ${t.btnBg} ${t.textMuted}`}><X size={16} /></button>
+            className={`w-full max-w-sm rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]/95' : 'bg-white/95'} backdrop-blur-xl p-5 anim-rise`}>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className={`h2 ${t.textMain}`}>Makan sekarang</h2>
+              <button onClick={() => setEating(null)} className={`p-1.5 rounded-xl ${t.btnBg} ${t.textMuted}`}><X size={16} /></button>
             </div>
-            
-            <p className={`caption font-medium ${t.textMuted} mb-4`}>
-              Sistem akan otomatis mengisi jadwal makan Anda hingga sisa stok yang tersedia (<strong>{getAvailableStock(assigning)} porsi</strong>) habis.
+            <p className={`caption font-medium ${t.textMuted}`}>{eating.batch.name}</p>
+            <p className={`caption font-medium mb-4 ${t.textMuted}`}>
+              1 porsi · {Math.round(eating.batch.perPortion?.kcal || 0)} kkal · {macroText(eating.batch.perPortion)}
             </p>
-            
-            <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Pilih Hari:</p>
-            <div className="flex gap-1.5 mb-4">
-              {DAY_NAMES_ID.map((d, i) => (
-                <button key={i} onClick={() => setAssignDays(ds => ds.includes(i) ? ds.filter(x => x !== i) : [...ds, i])}
-                  className={`flex-1 py-2 rounded-xl caption border ${assignDays.includes(i) ? `${t.bgAccent} border-transparent text-white` : `${t.border} ${t.textMuted}`}`}>{d}</button>
-              ))}
-            </div>
-            
-            <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Sesi Makan:</p>
-            <div className="flex gap-1.5 overflow-x-auto hide-scrollbar mb-5">
-              {MEAL_SESSIONS.map(s => (
-                <button key={s.id} onClick={() => setAssignSession(s.id)}
-                  className={`shrink-0 px-3 py-2 rounded-xl border caption ${assignSession === s.id ? `${t.bgAccentSoft} ${t.borderAccentSoft} ${t.textAccent}` : `${t.border} ${t.textMuted}`}`}>
+
+            <p className={`caption font-bold mb-2 ${t.textMuted}`}>Sesi</p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {MEAL_SESSIONS.filter(s => s.id !== 'drink').map(s => (
+                <button key={s.id} onClick={() => setEating({ ...eating, sessionId: s.id })}
+                  className={`px-3 py-2 rounded-xl border caption font-bold ${eating.sessionId === s.id ? `${t.bgAccentSoft} ${t.borderAccentSoft} ${t.textAccent}` : `${t.border} ${t.textMuted}`}`}>
                   {s.emoji} {s.label}
                 </button>
               ))}
             </div>
-            
-            <button disabled={assignDays.length === 0 || getAvailableStock(assigning) <= 0} onClick={runAssign}
-              className={`w-full py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40`}>Terapkan ke Kalender</button>
+
+            <p className={`caption font-bold mb-2 ${t.textMuted}`}>Jam</p>
+            <input type="time" value={eating.time} onChange={(e) => setEating({ ...eating, time: e.target.value })}
+              className={`w-full px-4 py-3 rounded-2xl border ${t.border} ${t.bgSunken} ${t.textMain} body-md outline-none mb-4`} />
+
+            <button onClick={confirmEat} className={`w-full py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow flex items-center justify-center gap-2`}>
+              <Utensils size={16} /> Catat
+            </button>
           </div>
         </div>
+      )}
+
+      {movingBatch && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setMovingBatch(null)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-sm rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0b1f16]/95' : 'bg-white/95'} backdrop-blur-xl p-5 anim-rise`}>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className={`h2 ${t.textMain}`}>Pindahkan ke Domus</h2>
+              <button onClick={() => setMovingBatch(null)} className={`p-1.5 rounded-xl ${t.btnBg} ${t.textMuted}`}><X size={16} /></button>
+            </div>
+            <p className={`caption font-medium ${t.textMuted}`}>{movingBatch.name}</p>
+            <p className={`caption font-medium mb-4 ${t.textMuted}`}>{movingBatch.remainingPortions} porsi</p>
+            <div className="space-y-2">
+              {domusLocations.map(loc => (
+                <button key={loc.id} onClick={() => moveBatchToDomus(movingBatch, loc.id)}
+                  className={`w-full px-4 py-3 rounded-2xl border ${t.border} ${t.bgSunken} ${t.textMain} body-md text-left`}>
+                  {loc.emoji} {loc.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cooking && (
+        <CookingSession
+          t={t} theme={theme} user={user}
+          recipe={cooking.recipe} servings={cooking.servings}
+          domusLocations={domusLocations}
+          showToast={showToast}
+          onClose={() => setCooking(null)}
+          onFinish={finishCook}
+          onShare={({ photoUrl, photoUrls }) => doShare({ ...cooking.recipe, photoUrl, photoUrls })}
+        />
+      )}
+
+      {processingInbox && (
+        <InboxProcessor
+          t={t} theme={theme}
+          item={processingInbox}
+          onClose={() => setProcessingInbox(null)}
+          onNutritionSaved={async (nutrition) => {
+            // Autosave nutrition back to Firestore
+            if (processingInbox.source === 'darka') {
+              await updateInboxNutrition(processingInbox.id, nutrition);
+            }
+          }}
+          onSaveToLog={async (session, entry) => {
+            const ymd = getLocalYMD(new Date());
+            const day = daysMap[ymd] || { meals: {} };
+            const meals = { ...(day.meals || {}) };
+            meals[session] = [...(meals[session] || []), entry];
+            await saveDay(ymd, { ...day, meals });
+            
+            if (processingInbox.source === 'darka') {
+              await markInboxClaimed(processingInbox.id);
+            } else if (processingInbox.source === 'domus') {
+              await markDomusItemConsumed(processingInbox.id);
+            }
+            
+            setProcessingInbox(null);
+            showToast(`Dimasukkan ke jadwal ${session} hari ini! ✅`);
+          }}
+          onSaveToDomus={async (parsedData) => {
+            showToast(`'${parsedData.name}' disimpan ke kulkas Domus!`);
+            await markInboxClaimed(processingInbox.id);
+            setProcessingInbox(null);
+          }}
+        />
       )}
     </div>
   );

@@ -263,7 +263,7 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
               placeholder="Misal: Kacang, Seafood, Laktosa..."
               className={`w-full px-3 py-2.5 rounded-xl font-bold text-sm outline-none ${t.inputBg} ${t.textMain}`}
             />
-            <p className={`caption mt-1 ${t.textMuted}`}>Konteks ini dibagikan ke AI dan disinkron ke Logym.</p>
+            <p className={`caption mt-1 ${t.textMuted}`}>Konteks ini dibagikan ke Lomy dan disinkron ke Logym.</p>
           </div>
         </div>
 

@@ -119,7 +119,7 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
                   <p className={`body-md text-center ${t.textMuted}`}>Tidak ditemukan di database lokal.</p>
                   {term.trim() !== '' && (
                     <button onClick={() => onSearchAi?.(term)} className={`px-5 py-2.5 rounded-2xl ${t.bgAccent} text-white shadow-glow font-bold flex items-center gap-2`}>
-                      <Sparkles size={16} /> Cari "{term}" dengan AI
+                      <Sparkles size={16} /> Cari "{term}" dengan Lomy
                     </button>
                   )}
                 </div>

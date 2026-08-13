@@ -1,5 +1,5 @@
 // ============================================================
-// AI HYBRID LOMEAL (Gemini API) — Fase 4 & 5 blueprint
+// Lomy HYBRID LOMEAL (Gemini API) — Fase 4 & 5 blueprint
 //  1. parseFoodText  : Magic Prompt "Nasi 2 centong, ayam goreng" → entri gizi
 //  2. analyzeFoodPhoto: foto makanan (base64 inline ≤100KB, TANPA Cloud Storage)
 //  3. scanNutritionLabel: OCR tabel Informasi Nilai Gizi kemasan (Tab 5)
@@ -9,7 +9,9 @@
 // ============================================================
 import { functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
-import { reconcileKcal, EMPTY_NUTRITION, addNutrition, scaleNutrition, NUTRIENTS } from '../data/nutrition';
+import { reconcileKcal, EMPTY_NUTRITION, addNutrition, scaleNutrition, NUTRIENTS, DIET_PROFILES, DIET_GOALS, ACTIVITY_LEVELS } from '../data/nutrition';
+import { computeAge } from '../data/constants';
+import { searchFoods, nutritionForAmount, getFoodById } from '../data/foodDatabase';
 
 const MODELS = ['gemini-1.5-flash-8b', 'gemini-1.5-flash', 'gemini-1.5-pro'];
 
@@ -105,14 +107,21 @@ const abortIfCancelled = (signal) => {
   throw e;
 };
 
-async function callGeminiWithKey(apiKey, parts, signal = null) {
+// Default `temperature: 0` cocok untuk EKSTRAKSI (parsing teks/label — jawaban harus sama
+// tiap kali). Untuk tugas KREATIF seperti menyusun resep, temperature 0 bikin model
+// selalu memuntahkan resep yang itu-itu juga dan sering minimalis. Makanya bisa dioverride.
+const EXTRACT_CONFIG = { temperature: 0, topP: 0.1 };
+
+async function callGeminiWithKey(apiKey, parts, signal = null, opts = {}) {
+  const models = opts.models || MODELS;
+  const generationConfig = opts.generationConfig || EXTRACT_CONFIG;
   let lastErr = 'Unknown error';
-  for (const model of MODELS) {
+  for (const model of models) {
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, topP: 0.1 } }),
+        body: JSON.stringify({ contents: [{ parts }], generationConfig }),
         signal,
       });
       if (res.ok) {
@@ -129,14 +138,14 @@ async function callGeminiWithKey(apiKey, parts, signal = null) {
     } catch (err) {
       if (err.name === 'AbortError') throw err;
       if (['RATE_LIMIT_EXCEEDED', 'OUT_OF_SCOPE'].includes(err.message)) throw err;
-      if (err instanceof SyntaxError) { lastErr = 'Respons AI tidak valid'; continue; }
+      if (err instanceof SyntaxError) { lastErr = 'Respons Lomy tidak valid'; continue; }
       lastErr = err.message;
     }
   }
   throw new Error(lastErr);
 }
 
-async function callGemini(apiKeyOrKeys, parts, signal = null) {
+async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
   const envKeys = (import.meta.env.VITE_FALLBACK_AI_KEYS || '').split(',').map(k => k.trim());
   const inputKeys = (Array.isArray(apiKeyOrKeys) ? apiKeyOrKeys : [apiKeyOrKeys]).filter((k) => k && k.trim());
   const keys = [...new Set([...inputKeys, ...envKeys])].filter(Boolean);
@@ -146,7 +155,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null) {
     for (const key of keys) {
       abortIfCancelled(signal);
       try {
-        return await callGeminiWithKey(key, parts, signal);
+        return await callGeminiWithKey(key, parts, signal, opts);
       } catch (err) {
         if (err.name === 'AbortError') throw err;
         if (err.message === 'OUT_OF_SCOPE') throw err;
@@ -155,7 +164,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null) {
           lastErr = err.message;
           continue;
         }
-        if (err instanceof SyntaxError) { lastErr = 'Respons AI tidak valid'; continue; }
+        if (err instanceof SyntaxError) { lastErr = 'Respons Lomy tidak valid'; continue; }
         lastErr = err.message;
       }
     }
@@ -179,7 +188,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null) {
     return parsed;
   } catch (err) {
     if (err.name === 'AbortError' || err.message === 'OUT_OF_SCOPE') throw err;
-    throw new Error('Backend AI Error: ' + err.message);
+    throw new Error('Backend Lomy Error: ' + err.message);
   }
 }
 
@@ -187,7 +196,17 @@ export const parseFoodText = async (apiKey, text, signal = null, customFoods = [
   const knownFoods = customFoods.slice(0, 40).map(f => `- ${f.name}: per 100${f.unit || 'g'} = ${JSON.stringify(f.nutrition)}`).join('\n');
   const knownFoodsBlock = knownFoods ? `\n\nDATABASE CUSTOM MILIK USER (pakai nilai ini kalau nama makanan cocok/mirip, jangan nebak ulang):\n${knownFoods}` : '';
   const res = await callGemini(apiKey, [{ text: `${SAFETY_PREFIX}\n\nTUGAS: Uraikan deskripsi makanan berikut menjadi daftar item dengan estimasi gizi. Pahami ukuran rumah tangga Indonesia (centong≈100g nasi, sdm, potong, tusuk, gelas≈250ml).\n${FOOD_SCHEMA}${knownFoodsBlock}\n\nINPUT PENGGUNA:\n"""${text}"""` }], signal);
-  return { ...res, foods: clampFoods(res.foods) };
+  
+  // Single Source of Truth Mapping
+  const mappedFoods = res.foods.map(f => {
+    const match = searchFoods(f.name, customFoods)[0];
+    if (match) {
+      return { ...f, name: match.name, foodId: match.id, nutrition: nutritionForAmount(match, f.grams || 100) };
+    }
+    return f;
+  });
+  
+  return { ...res, foods: clampFoods(mappedFoods) };
 };
 
 // --- 2. Smart Photo Analyzer (Piring & Label) ---
@@ -232,25 +251,122 @@ export const generateWeeklyEvaluation = async (apiKey, weekSummary, signal = nul
   return res.evaluation || '';
 };
 
-// --- 5. Generate Diet Recipe (AI cerdas berdasarkan kuesioner) ---
+// --- 5. Generate Diet Recipe (Lomy cerdas berdasarkan kuesioner) ---
+
+// SATU tempat yang menerjemahkan profil user → masukan buat Lomy. Dulu dua pemanggil
+// (ProgramTab & auto-generate sesudah onboarding) masing-masing cuma mengoper
+// dietProfile+medicalHistory+allergies, jadi jawaban kuesioner selebihnya — target kalori,
+// makro, berat badan, fase diet, dan terutama isi kulkas — tidak pernah sampai ke model.
+// Itu sebabnya resep yang keluar bisa cuma "ayam + minyak zaitun": modelnya memang tidak
+// dikasih batasan apa-apa.
+export const buildRecipeProfileInput = (profile) => {
+  const diet = DIET_PROFILES.find((d) => d.id === profile?.dietProfile) || DIET_PROFILES[0];
+  const goal = DIET_GOALS.find((g) => g.id === profile?.dietGoal);
+  const activity = ACTIVITY_LEVELS.find((a) => a.id === profile?.activityLevel);
+  const targets = profile?.targets || {};
+  const physical = profile?.physical || {};
+
+  return {
+    dietProfile: diet.id,
+    dietName: diet.label,
+    dietDesc: diet.desc,
+    fase: goal ? `${goal.label} — ${goal.desc}` : null,
+    aktivitas: activity?.label || null,
+    gender: profile?.gender || physical.gender || null,
+    usia: computeAge(profile?.dob || physical.dob),
+    beratKg: Number(profile?.weight || physical.weight) || null,
+    tinggiCm: Number(profile?.height || physical.height) || null,
+    targetBeratKg: Number(profile?.targetWeight) || null,
+    targetHarian: {
+      kcal: targets.kcal || null,
+      protein: targets.protein || null,
+      carbs: targets.carbs || null,
+      fat: targets.fat || null,
+      sodiumMaxMg: targets.sodium || null,
+      sugarMaxG: targets.sugar || null,
+    },
+    riwayatMedis: profile?.medicalHistory || [],
+    alergi: (profile?.allergies || '').trim(),
+    // Isi kulkas dari kuesioner — bahan yang BENAR-BENAR dipunya user.
+    bahanTersedia: (profile?.kulkas || []).map((k) => (typeof k === 'string' ? k : k?.name)).filter(Boolean),
+    // Bahan yang di-Love oleh user (bisa jadi preferensi).
+    bahanFavorit: (profile?.favoriteFoods || []).map(id => {
+      const dbMatch = getFoodById(id, []);
+      return dbMatch ? dbMatch.name : null;
+    }).filter(Boolean),
+  };
+};
+
 export const generateDietRecipe = async (apiKey, profileInfo) => {
-  const res = await callGemini(apiKey, [{ text: `${SAFETY_PREFIX}\n\nTUGAS: Buatkan 1 resep masakan Nusantara sehat, praktis (10-20 menit) yang sesuai dengan target diet berikut. Pastikan bahan mudah dicari di Indonesia.
-Profil: ${JSON.stringify(profileInfo)}
+  const res = await callGemini(apiKey, [{ text: `${SAFETY_PREFIX}\n\nTUGAS: Buatkan 1 resep masakan rumahan Indonesia yang sehat dan praktis, DIPERSONALISASI untuk profil di bawah. Pastikan bahan mudah dicari di Indonesia. PENTING: Berikan variasi ide masakan yang unik dan berbeda setiap kali (Seed variasi acak: ${Math.random().toString(36).substring(2, 9)}).
+
+PROFIL PENGGUNA (semua field wajib kamu pertimbangkan):
+${JSON.stringify(profileInfo, null, 1)}
+
+Cara memakai profil di atas:
+- "targetHarian" itu jatah SEHARI. Resep ini untuk SATU kali makan, jadi bidik sekitar sepertiga dari kcal & protein harian per porsi, dan JANGAN melewati batas sodiumMaxMg / sugarMaxG per porsi.
+- "dietName"/"dietDesc" menentukan gaya makan — patuhi betul (vegan = nol produk hewani; keto = karbo sangat rendah; DASH = natrium ditekan; rendah purin = hindari jeroan/emping/sarden; carnivore = nyaris tanpa nabati).
+- "riwayatMedis" dan "alergi" bersifat MUTLAK. Bahan yang memicu kondisi itu tidak boleh muncul sama sekali.
+- "bahanTersedia" adalah isi kulkas/dapur user sekarang. Utamakan memakai bahan dari daftar itu. Kalau daftarnya kosong, bebas pilih bahan warung biasa.
+- "fase" (cutting/maintenance/bulk) dan "aktivitas" menentukan porsi dan kepadatan kalorinya.
+- "bahanFavorit" adalah makanan yang disukai user. Jadikan sebagai salah satu ide pertimbangan resep agar user senang, tapi jangan memaksakan jika tidak cocok dan tetap berikan variasi agar tidak monoton.
+
+Aturan bahan:
+- Minimal 6 bahan, dan harus jadi satu piring utuh: sumber protein + sumber karbo (kecuali keto/carnivore) + sayur + bumbu dasar. Resep yang cuma protein + minyak DITOLAK.
+- Bumbu (bawang, cabai, garam, kecap, rempah) tetap ditulis sebagai bahan dengan gram dan gizinya.
+- Beri nama masakan yang spesifik dan menggugah, bukan "Ayam Sehat".
+
 Format balasan (JSON murni):
-{"name":"nama resep","portions":2,"ingredients":[{"name":"nama bahan","grams":number,"nutrition":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number}}],"note":"catatan singkat (1 kalimat) mengapa ini cocok"}
-Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang diberikan. Harus presisi.` }]);
+{"name":"nama resep","portions":2,"durationMin":number,"ingredients":[{"name":"nama bahan","rawName":"nama bahan mentah dasar (misal: 'Dada ayam', 'Bawang merah') tanpa cara potong","grams":number,"nutrition":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number}}],"components":[{"name":"nama komponen","steps":[{"text":"instruksi 1 kalimat","timerSec":number}]}],"note":"catatan singkat (1 kalimat) mengapa ini cocok"}
+
+Aturan langkah memasak:
+- "components" = bagian masakan yang bisa dikerjakan BARENGAN, bukan urutan kaku. Contoh: ["Nasi","Ayam","Sambal"]. Kalau masakannya memang satu panci saja, cukup 1 komponen.
+- Urutkan komponen dari yang paling lama menunggu (mis. menanak nasi, marinasi) supaya bisa ditinggal sambil mengerjakan komponen lain.
+- "timerSec" HANYA diisi untuk langkah yang butuh menunggu (menanak, merebus, memanggang, mengukus, marinasi, mendiamkan). Langkah aktif seperti memotong atau mengaduk diisi 0.
+- "durationMin" = perkiraan total waktu dari mulai sampai matang kalau komponennya dikerjakan paralel.
+Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang diberikan. Harus presisi.` }],
+    null,
+    // Menyusun resep itu tugas kreatif dengan banyak batasan: model 8b terlalu lemah, dan
+    // temperature 0 bikin tiap generate menghasilkan resep yang sama persis.
+    { models: ['gemini-1.5-flash', 'gemini-1.5-pro'], generationConfig: { temperature: 0.9, topP: 0.95 } },
+  );
   return { ...res, ingredients: (res.ingredients || []).map(i => ({ ...i, nutrition: clampNutrition(i.nutrition) })) };
 };
 
 // Bentuk hasil generateDietRecipe jadi objek resep siap-simpan (id, total gizi, per porsi).
 // Dipakai baik dari "Ubah Program" (ProgramTab) maupun auto-generate sesudah onboarding.
 export const buildAiRecipe = (generated, dietName) => {
+  const stamp = Date.now();
   const aiRecipe = {
-    id: `r_ai_${Date.now()}`,
-    name: generated.name || `Resep AI ${dietName}`,
+    id: `r_ai_${stamp}`,
+    name: generated.name || `Resep Lomy ${dietName}`,
     portions: generated.portions || 2,
-    ingredients: generated.ingredients || [],
-    note: generated.note || 'Resep otomatis hasil generate AI.',
+    durationMin: Math.max(0, Number(generated.durationMin) || 0),
+    ingredients: (generated.ingredients || []).map(ing => {
+      // Single Source of Truth Mapping
+      const match = searchFoods(ing.name, [])[0];
+      if (match) {
+        return { ...ing, name: match.name, foodId: match.id, nutrition: nutritionForAmount(match, ing.grams || 100) };
+      }
+      return ing;
+    }),
+    // id komponen/langkah dibikin di sini (bukan dari Lomy) karena dipakai sebagai kunci
+    // centang di mode masak — harus unik dan stabil, tidak boleh hasil karangan model.
+    components: (generated.components || [])
+      .map((c, ci) => ({
+        id: `c_${stamp}_${ci}`,
+        name: String(c.name || `Komponen ${ci + 1}`),
+        steps: (c.steps || [])
+          .filter((s) => s?.text)
+          .map((s, si) => ({
+            id: `s_${stamp}_${ci}_${si}`,
+            text: String(s.text),
+            timerSec: Math.max(0, Math.round(Number(s.timerSec) || 0)),
+          })),
+      }))
+      .filter((c) => c.steps.length > 0),
+    authorName: 'Coach Lomy',
+    note: generated.note || 'Resep otomatis hasil generate Lomy.',
     createdAt: new Date().toISOString(),
   };
   let tGrams = 0;

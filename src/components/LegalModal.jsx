@@ -18,7 +18,7 @@ const sharedTerms = (t) => (
     <p className={`text-sm mb-3 ${t.textMuted}`}>Kami memiliki hak mutlak untuk memblokir, menangguhkan, atau menghapus akun Anda secara sepihak kapan saja, dengan atau tanpa alasan, dan tanpa pemberitahuan sebelumnya. Pihak Pengembang tidak bertanggung jawab atas hilangnya data Anda akibat pemblokiran akun.</p>
 
     <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>3. Layanan Pihak Ketiga & Keadaan Kahar (Force Majeure)</h4>
-    <p className={`text-sm mb-3 ${t.textMuted}`}>Aplikasi kami mengandalkan infrastruktur pihak ketiga (seperti server Google Firebase, API Health Connect, dan pemrosesan AI Gemini). Pihak Pengembang tidak bertanggung jawab atas kebocoran data, pemadaman server (downtime), atau kegagalan sistem yang diakibatkan oleh hacker, bencana alam, maupun kelalaian dari vendor pihak ketiga tersebut.</p>
+    <p className={`text-sm mb-3 ${t.textMuted}`}>Aplikasi kami mengandalkan infrastruktur pihak ketiga (seperti server Google Firebase, API Health Connect, dan pemrosesan Lomy Gemini). Pihak Pengembang tidak bertanggung jawab atas kebocoran data, pemadaman server (downtime), atau kegagalan sistem yang diakibatkan oleh hacker, bencana alam, maupun kelalaian dari vendor pihak ketiga tersebut.</p>
 
     <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>4. Batasan Usia (Age Restriction)</h4>
     <p className={`text-sm mb-3 ${t.textMuted}`}>Aplikasi ini hanya boleh digunakan oleh individu yang telah memenuhi batas usia persetujuan digital di yurisdiksinya (umumnya 13 tahun ke atas). Jika Anda mendapati anak di bawah umur menggunakan aplikasi ini tanpa pengawasan orang tua, segala risiko kesehatan dan pemrosesan data adalah tanggung jawab orang tua/wali sah.</p>
@@ -30,7 +30,7 @@ const sharedTerms = (t) => (
     <p className={`text-sm mb-3 ${t.textMuted}`}>Kami tidak memiliki kewajiban hukum untuk memulihkan, mengembalikan, atau menyelamatkan data Anda (termasuk riwayat log makanan) yang terhapus akibat glitch sistem, penghapusan akun oleh Anda sendiri, maupun pemblokiran oleh sistem kami.</p>
 
     <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>7. Tautan dan Entitas Pihak Ketiga</h4>
-    <p className={`text-sm mb-3 ${t.textMuted}`}>Tautan ke situs web pihak ketiga, produk, atau merek makanan yang mungkin muncul di komunitas atau dari bot AI, sepenuhnya berada di luar kendali kami. Kami tidak mendukung atau menjamin produk pihak ketiga tersebut.</p>
+    <p className={`text-sm mb-3 ${t.textMuted}`}>Tautan ke situs web pihak ketiga, produk, atau merek makanan yang mungkin muncul di komunitas atau dari bot Lomy, sepenuhnya berada di luar kendali kami. Kami tidak mendukung atau menjamin produk pihak ketiga tersebut.</p>
 
     <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>8. Transfer Data Internasional</h4>
     <p className={`text-sm mb-3 ${t.textMuted}`}>Dengan menggunakan aplikasi ini, Anda memberikan persetujuan tanpa batas agar data Anda diproses, ditransfer, dan disimpan di server yang mungkin berlokasi di luar negara asal Anda (misalnya server Google di Amerika Serikat).</p>
@@ -69,13 +69,13 @@ const TosContent = ({ t }) => (
     <p className={`text-sm mb-3 ${t.textMuted}`}>Lomeal adalah alat pencatat kalori (food tracker). <strong>Aplikasi ini bukan pengganti ahli gizi, dokter spesialis gizi klinik (Sp.GK), maupun profesional medis lainnya.</strong> Target makronutrisi dan kalori yang disajikan hanyalah estimasi umum.</p>
 
     <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>2. Kondisi Medis & Alergi</h4>
-    <p className={`text-sm mb-3 ${t.textMuted}`}><strong>PERINGATAN KERAS:</strong> Pihak Pengembang <strong>tidak bertanggung jawab</strong> atas reaksi alergi, keracunan makanan, malnutrisi, maupun komplikasi kondisi medis (seperti diabetes atau gangguan pencernaan) akibat Anda mengonsumsi resep atau mengikuti rekomendasi kalori dari aplikasi atau AI di dalamnya. Anda diwajibkan untuk memeriksa silang keamanan bahan makanan secara mandiri.</p>
+    <p className={`text-sm mb-3 ${t.textMuted}`}><strong>PERINGATAN KERAS:</strong> Pihak Pengembang <strong>tidak bertanggung jawab</strong> atas reaksi alergi, keracunan makanan, malnutrisi, maupun komplikasi kondisi medis (seperti diabetes atau gangguan pencernaan) akibat Anda mengonsumsi resep atau mengikuti rekomendasi kalori dari aplikasi atau Lomy di dalamnya. Anda diwajibkan untuk memeriksa silang keamanan bahan makanan secara mandiri.</p>
 
     <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>3. Pembatasan Tanggung Jawab Mutlak</h4>
     <p className={`text-sm mb-3 ${t.textMuted}`}><strong>SEJAUH DIIZINKAN OLEH HUKUM</strong>, pengembang dan afiliasi dari Lomeal dibebaskan dari segala bentuk tuntutan hukum yang berkaitan dengan kerugian kesehatan, cedera fatal, penyakit, atau kematian yang timbul secara langsung maupun tidak langsung akibat ketergantungan Anda pada informasi dari aplikasi ini.</p>
 
-    <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>4. Ketidakakuratan Database Makanan & AI Pendeteksi</h4>
-    <p className={`text-sm mb-6 ${t.textMuted}`}>Database makanan, barcode, serta fitur pengenalan makanan berbasis gambar (AI Camera) bersifat eksperimental dan sangat mungkin mengandung <strong>informasi nutrisi yang sepenuhnya salah atau usang</strong>. Anda menyadari sepenuhnya batasan teknologi ini dan tidak dapat menuntut Pihak Pengembang atas kesalahan kalkulasi kalori maupun kandungan bahan tersembunyi.</p>
+    <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>4. Ketidakakuratan Database Makanan & Lomy Pendeteksi</h4>
+    <p className={`text-sm mb-6 ${t.textMuted}`}>Database makanan, barcode, serta fitur pengenalan makanan berbasis gambar (Lomy Camera) bersifat eksperimental dan sangat mungkin mengandung <strong>informasi nutrisi yang sepenuhnya salah atau usang</strong>. Anda menyadari sepenuhnya batasan teknologi ini dan tidak dapat menuntut Pihak Pengembang atas kesalahan kalkulasi kalori maupun kandungan bahan tersembunyi.</p>
 
     {sharedTerms(t)}
   </div>
@@ -92,8 +92,8 @@ const PrivacyContent = ({ t }) => (
     <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>2. Integrasi Data Kesehatan (Health Connect/Apple Health)</h4>
     <p className={`text-sm mb-3 ${t.textMuted}`}>Lomeal dapat membaca data aktivitas/olahraga dari OS, atau menarik kalori yang terbakar dari aplikasi Logym untuk menyesuaikan keseimbangan kalori harian Anda secara otomatis. Data ini dijaga privasinya dan tidak akan dieksploitasi untuk periklanan pihak ketiga.</p>
 
-    <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>3. Transmisi Data ke Pihak Ketiga (Cloud AI)</h4>
-    <p className={`text-sm mb-3 ${t.textMuted}`}>Anda memahami bahwa foto makanan yang Anda unggah untuk keperluan pemindaian (scan) akan ditransmisikan ke server Google Gemini AI. Anda diwajibkan untuk tidak memotret hal-hal terlarang, ilegal, wajah orang, atau dokumen rahasia menggunakan fitur kamera Lomeal. Pihak Pengembang dibebaskan dari tuntutan kebocoran data jika Anda menyalahgunakan fungsi kamera tersebut di luar konteks foto makanan.</p>
+    <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>3. Transmisi Data ke Pihak Ketiga (Cloud Lomy)</h4>
+    <p className={`text-sm mb-3 ${t.textMuted}`}>Anda memahami bahwa foto makanan yang Anda unggah untuk keperluan pemindaian (scan) akan ditransmisikan ke server Google Gemini Lomy. Anda diwajibkan untuk tidak memotret hal-hal terlarang, ilegal, wajah orang, atau dokumen rahasia menggunakan fitur kamera Lomeal. Pihak Pengembang dibebaskan dari tuntutan kebocoran data jika Anda menyalahgunakan fungsi kamera tersebut di luar konteks foto makanan.</p>
 
     <h4 className={`text-sm font-bold mt-4 mb-1 ${t.textMain}`}>4. Penelitian Medis & Analisis Data Anonim</h4>
     <p className={`text-sm mb-8 ${t.textMuted}`}>Pihak Pengembang memegang hak eksklusif untuk menghapus identitas pribadi (menganonimkan) dan menggabungkan data diet, tren konsumsi kalori, serta log nutrisi Anda. Data yang sudah dianonimkan ini sepenuhnya menjadi milik Pihak Pengembang dan dapat dipublikasikan untuk studi kesehatan/dietetik global maupun riset komersial tanpa pemberitahuan atau pembagian keuntungan kepada Anda.</p>

@@ -7,9 +7,21 @@ import ScrollPicker from './ScrollPicker';
 import SwipeInput from './SwipeInput';
 import OptionCard from './OptionCard';
 import LegalModal from './LegalModal';
+import { hcCheckStatus } from '../utils/healthConnect';
 import { computeAge } from '../data/constants';
 
 // Removed static KULKAS_ITEMS as we will rely on Domus sync and searchFoods.
+
+// Naikkan tanggal ini SETIAP teks consent di bawah direvisi — user yang sudah setuju
+// versi lama akan diminta menyetujui ulang, dan itu memang yang seharusnya terjadi
+// secara hukum. Tinggal di sini (bukan di OnboardingFlow) karena teks yang diatur
+// versinya ada di file ini, dan dua pemakainya sama-sama perlu membacanya.
+export const CONSENT_VERSION = '2026-08-03';
+
+// Sudah pernah setuju versi yang berlaku sekarang? Kalau ya, langkah persetujuan
+// dilewati — itu urusan sekali di awal, bukan sesuatu yang muncul lagi tiap kali user
+// membuka kuesioner ulang dari tab Program.
+export const hasValidConsent = (profile) => profile?.consents?.version === CONSENT_VERSION;
 
 // PENTING: step di sini key-nya 'dietGoal' (bukan 'pace') — sebelumnya key-nya salah
 // ketik 'pace' padahal isinya milih DIET_GOALS (cutting/maintenance/bulk), sementara
@@ -29,7 +41,7 @@ export const getSharedDietSteps = (t) => [
   { title: "Target Diet Medis", key: 'diet', icon: <Target className={`${t.textAccent} mb-4`} size={40} /> },
   { title: "Fase Diet", key: 'dietGoal', icon: <Clock className={`${t.textAccent} mb-4`} size={40} /> },
   { title: "Kecepatan & Komitmen", key: 'pace', icon: <Gauge className={`${t.textAccent} mb-4`} size={40} /> },
-  { title: "Bahan Makanan (Kulkas)", key: 'kulkas', icon: <Refrigerator className={`${t.textAccent} mb-4`} size={40} /> }
+  { title: "Bahan Makanan (opsional)", key: 'kulkas', icon: <Refrigerator className={`${t.textAccent} mb-4`} size={40} /> }
 ];
 
 export const isValidAge = (dob) => {
@@ -54,7 +66,8 @@ export const SharedDietStepRenderer = ({
   onSyncDomus,
   onHealthConnect,
   onAppleHealth,
-  fromLogym
+  fromLogym,
+  onSyncDarka
 }) => {
   // Dipanggil TANPA SYARAT (bukan di dalam if (stepKey === 'consent')) — hook gak boleh
   // bersyarat. Aman dipanggil buat semua step (cuma dipakai kalau stepKey === 'consent'),
@@ -76,6 +89,15 @@ export const SharedDietStepRenderer = ({
     // Sengaja cuma sekali per mount (stepKey tetap seumur hidup instance ini, lihat
     // komentar showLegalModal) — onSyncDomus dari parent bikin fungsi baru tiap render,
     // kalau dimasukkan ke deps bakal fetch ulang ke Firestore tiap kali parent re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [darkaItems, setDarkaItems] = useState(null);
+  useEffect(() => {
+    if (stepKey !== 'kulkas' || !onSyncDarka) return;
+    let cancelled = false;
+    onSyncDarka().then((items) => { if (!cancelled) setDarkaItems(items || []); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -104,8 +126,8 @@ export const SharedDietStepRenderer = ({
           <label className={`flex items-start gap-4 p-4 rounded-2xl border transition-colors ${consents.ai ? `border-[var(--color-accent)] ${t.bgAccentSoft}` : (isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5')}`}>
             <input type="checkbox" className="mt-1 w-5 h-5 accent-[var(--color-accent)] shrink-0" checked={consents.ai} onChange={(e) => setConsents({ ...consents, ai: e.target.checked })} />
             <div className="flex-1">
-              <p className={`text-sm font-bold leading-tight mb-1 ${t.textMain}`}>Persetujuan Fitur AI (Cloud)</p>
-              <p className={`text-xs leading-relaxed ${t.textMuted}`}>Saya setuju foto & teks makanan yang saya kirim ke fitur pembuatan resep/scan otomatis diproses lewat layanan AI cloud (Google Gemini). Saya tidak akan memasukkan data identitas spesifik di luar profil.</p>
+              <p className={`text-sm font-bold leading-tight mb-1 ${t.textMain}`}>Persetujuan Fitur Lomy (Cloud)</p>
+              <p className={`text-xs leading-relaxed ${t.textMuted}`}>Saya setuju foto & teks makanan yang saya kirim ke fitur pembuatan resep/scan otomatis diproses lewat layanan Lomy cloud (Google Gemini). Saya tidak akan memasukkan data identitas spesifik di luar profil.</p>
             </div>
           </label>
 
@@ -128,6 +150,15 @@ export const SharedDietStepRenderer = ({
   }
 
   if (stepKey === 'connect') {
+    const [hcConnected, setHcConnected] = useState(false);
+    useEffect(() => {
+      hcCheckStatus().then(res => {
+        if (res?.readAuthorized?.length || res?.writeAuthorized?.length) {
+          setHcConnected(true);
+        }
+      });
+    }, []);
+
     return (
       <div className="flex-1 flex flex-col gap-4 overflow-y-auto hide-scrollbar pb-6">
         {fromLogym ? (
@@ -137,9 +168,6 @@ export const SharedDietStepRenderer = ({
             </div>
             <p className={`body-md font-bold ${t.textMain}`}>Data Profil Terhubung!</p>
             <p className={`caption font-medium mt-1 ${t.textMuted}`}>Semua data yang tersedia di ekosistem Hexa-Life sudah ditarik otomatis — cek di langkah berikutnya.</p>
-            <div className={`w-full h-px ${isDark ? 'bg-white/10' : 'bg-black/10'} my-3`} />
-            <p className={`caption mt-1 ${t.textMuted}`}>Lengkapi perjalanan fitness kamu dengan Logym.</p>
-            <a href="https://logym.web.app" target="_blank" rel="noopener noreferrer" className={`mt-2 inline-block px-4 py-1.5 rounded-lg text-xs font-bold bg-black text-white active:scale-95 transition-transform`}>Install Logym</a>
           </div>
         ) : (
           <div className={`p-4 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5'} text-center`}>
@@ -157,14 +185,15 @@ export const SharedDietStepRenderer = ({
         <p className={`caption font-bold text-center ${t.textMuted}`}>Atau hubungkan dengan sumber lain:</p>
         
         <div className="flex flex-col gap-2">
-          <button onClick={onHealthConnect} className={`flex items-center gap-3 p-4 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-black/5 bg-white hover:bg-black/5'} transition-colors text-left active:scale-[0.98]`}>
+          <button onClick={hcConnected ? null : onHealthConnect} className={`flex items-center gap-3 p-4 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-black/5 bg-white hover:bg-black/5'} transition-colors text-left ${hcConnected ? 'opacity-80' : 'active:scale-[0.98]'}`}>
             <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shrink-0 border border-black/5 shadow-sm">
               <img src="/health-connect.webp" alt="Health Connect" className="w-6 h-6 object-contain" />
             </div>
-            <div>
+            <div className="flex-1">
               <p className={`body-md font-bold ${t.textMain}`}>Health Connect</p>
               <p className={`caption ${t.textMuted}`}>Android (Google Fit, Samsung Health)</p>
             </div>
+            {hcConnected && <span className={`text-xs font-bold px-2 py-1 rounded-md ${t.bgAccentSoft} ${t.textAccent}`}>Terhubung</span>}
           </button>
           
           <button onClick={onAppleHealth} className={`flex items-center gap-3 p-4 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-black/5 bg-white hover:bg-black/5'} transition-colors text-left active:scale-[0.98]`}>
@@ -214,7 +243,13 @@ export const SharedDietStepRenderer = ({
           </div>
         </div>
         <div className="mt-4">
-          <label className={`text-sm font-bold ${!isDark ? 'text-black' : t.textMain} mb-2 block`}>Tanggal Lahir</label>
+          {/* Syarat umur ditaruh SEBARIS dengan labelnya. Sebelumnya menggantung di bawah
+              input, dan di layar HP baris itu jatuh persis di balik indikator langkah —
+              jadi tidak pernah terbaca justru saat user mengisi tanggalnya. */}
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <label className={`text-sm font-bold ${!isDark ? 'text-black' : t.textMain}`}>Tanggal Lahir</label>
+            <span className={`caption font-medium shrink-0 ${t.textMuted}`}>min. 13 tahun</span>
+          </div>
           <input 
             type="date"
             max={new Date(new Date().setFullYear(new Date().getFullYear() - 13)).toISOString().split('T')[0]}
@@ -224,10 +259,8 @@ export const SharedDietStepRenderer = ({
             style={{ colorScheme: isDark ? 'dark' : 'light' }}
             className={`w-full p-4 rounded-xl border-2 font-bold ${answers.dob ? (isValidAge(answers.dob) ? t.borderAccent : 'border-rose-500 text-rose-500') : 'border-transparent'} ${t.inputBg} ${answers.dob && !isValidAge(answers.dob) ? '' : t.textMain} outline-none transition-all`}
           />
-          {answers.dob && !isValidAge(answers.dob) ? (
-            <p className={`text-[11px] mt-2 text-center font-bold text-rose-500 animate-in fade-in slide-in-from-top-1`}>Usia kamu harus di atas 13 tahun untuk menggunakan LOMEAL.</p>
-          ) : (
-            <p className={`text-[11px] mt-2 text-center font-bold ${t.textMuted}`}>Minimal usia 13 tahun.</p>
+          {answers.dob && !isValidAge(answers.dob) && (
+            <p className="caption mt-2 text-center text-rose-500 animate-in fade-in slide-in-from-top-1">Usia kamu harus di atas 13 tahun untuk menggunakan LOMEAL.</p>
           )}
         </div>
       </div>
@@ -361,7 +394,7 @@ export const SharedDietStepRenderer = ({
           const rowHasHiProtein = row.some(dp => dp.id === 'muscle_gain');
           return (
             <React.Fragment key={rowIdx}>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 p-2">
                 {row.map(dp => (
                   <button key={dp.id} onClick={() => setAnswers(prev => ({ ...prev, dietProfile: dp.id }))}
                     className={`p-3 rounded-2xl border-2 text-left transition-all ${answers.dietProfile === dp.id ? `${t.borderAccent} ${t.bgAccentSoft} scale-[1.02]` : `${isDark ? 'border-transparent bg-white/5' : 'border-white/50 bg-white/60'}`}`}>
@@ -448,9 +481,7 @@ export const SharedDietStepRenderer = ({
   }
 
   if (stepKey === 'kulkas') {
-    const searchResults = answers.kulkasSearch?.trim()
-      ? (searchFoods?.(answers.kulkasSearch) || []).slice(0, 8)
-      : [];
+
     const kulkasList = answers.kulkas || [];
 
     const toggleKulkas = (item) => setAnswers(prev => {
@@ -461,17 +492,57 @@ export const SharedDietStepRenderer = ({
 
     return (
       <div className="w-full flex flex-col gap-3">
-        {/* Bahan dipilih — di atas biar keliatan langsung tanpa scroll turun */}
+        {/* Manual Input (persis kek pas ketik input bar) */}
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Ketik apa saja isi kulkasmu..."
+            value={answers.kulkasSearch || ''}
+            onChange={e => setAnswers(prev => ({ ...prev, kulkasSearch: e.target.value }))}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && answers.kulkasSearch?.trim()) {
+                const text = answers.kulkasSearch.trim();
+                setAnswers(prev => {
+                  const arr = prev.kulkas || [];
+                  if (arr.some(item => item.id === text)) return { ...prev, kulkasSearch: '' };
+                  if (arr.length >= 10) return prev;
+                  return { ...prev, kulkas: [...arr, { id: text, name: text }], kulkasSearch: '' };
+                });
+              }
+            }}
+            className={`w-full pl-4 pr-12 py-3 rounded-[1.25rem] border ${t.border} ${t.inputBg} ${t.textMain} outline-none text-sm font-medium`}
+          />
+          <button 
+            disabled={!answers.kulkasSearch?.trim()}
+            onClick={() => {
+              if (answers.kulkasSearch?.trim()) {
+                const text = answers.kulkasSearch.trim();
+                setAnswers(prev => {
+                  const arr = prev.kulkas || [];
+                  if (arr.some(item => item.id === text)) return { ...prev, kulkasSearch: '' };
+                  if (arr.length >= 10) return prev;
+                  return { ...prev, kulkas: [...arr, { id: text, name: text }], kulkasSearch: '' };
+                });
+              }
+            }}
+            className={`absolute right-1.5 top-1.5 p-1.5 rounded-full ${answers.kulkasSearch?.trim() ? `${t.bgAccent} text-white shadow-md active:scale-95` : `bg-black/5 dark:bg-white/5 ${t.textMuted}`} transition-all`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          </button>
+          <p className={`text-[10px] mt-1.5 px-1 font-bold ${t.textMuted}`}>Maksimal isi manual 10 bahan</p>
+        </div>
+
+        {/* Bahan dipilih */}
         {kulkasList.length > 0 && (
-          <div>
+          <div className="mt-2">
             <p className={`text-[10px] font-bold ${t.textMuted} mb-2`}>Bahan dipilih ({kulkasList.length}):</p>
             <div className="flex flex-wrap gap-2 max-h-[150px] overflow-y-auto hide-scrollbar">
               {kulkasList.map((item, idx) => (
-                <button key={`${item.id}-${idx}`}
+                <button key={`${item.id || item}-${idx}`}
                   onClick={() => setAnswers(prev => ({ ...prev, kulkas: prev.kulkas.filter((_, i) => i !== idx) }))}
                   className={`px-3 py-1.5 rounded-full border text-sm ${t.bgAccent} ${t.borderAccent} text-white flex items-center gap-1`}
                 >
-                  {item.name} <X size={10} />
+                  {typeof item === 'string' ? item : item.name} <X size={10} />
                 </button>
               ))}
             </div>
@@ -480,15 +551,15 @@ export const SharedDietStepRenderer = ({
 
         {/* Domus: kalau ada isinya langsung muncul buat dicentang, kalau kosong tawarin install */}
         {domusItems === null ? null : domusItems.length === 0 ? (
-          <div className={`p-4 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5'} text-center`}>
+          <div className={`p-4 mt-2 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5'} text-center`}>
             <Refrigerator size={28} className={`${t.textAccent} mx-auto mb-2`} />
             <p className={`body-md font-bold ${t.textMain}`}>Belum punya Domus?</p>
             <p className={`caption mt-1 ${t.textMuted}`}>Domus mencatat isi kulkas & bahan makananmu — kalau sudah dipakai, bahannya bakal langsung muncul di sini tiap kali isi kuesioner diet.</p>
             <a href="https://domus-id.web.app" target="_blank" rel="noopener noreferrer" className={`mt-3 inline-block px-4 py-2 rounded-xl text-sm font-bold bg-black text-white active:scale-95 transition-transform`}>Install Domus</a>
           </div>
         ) : (
-          <div>
-            <p className={`text-[10px] font-bold ${t.textMuted} mb-2`}>Dari Domus — centang yang mau dipakai:</p>
+          <div className="mt-2">
+            <p className={`text-[10px] font-bold ${t.textMuted} mb-2`}>Domus</p>
             <div className="flex flex-wrap gap-2">
               {domusItems.map(f => {
                 const isSelected = kulkasList.some(item => item.id === f.id);
@@ -505,40 +576,23 @@ export const SharedDietStepRenderer = ({
           </div>
         )}
 
-        {/* Search input with max 10 limit info */}
-        <div className="relative mt-2">
-          <input
-            type="text"
-            placeholder="Ketik untuk mencari bahan..."
-            value={answers.kulkasSearch || ''}
-            onChange={e => setAnswers(prev => ({ ...prev, kulkasSearch: e.target.value }))}
-            className={`w-full px-4 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} outline-none text-sm`}
-          />
-          <p className={`text-[10px] mt-1 ${t.textMuted}`}>Maksimal pilih manual 10 bahan agar AI lebih fokus.</p>
-        </div>
-
-        {/* Search results */}
-        {searchResults.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {searchResults.map(f => {
-              const isSelected = kulkasList.some(item => item.id === f.id);
-              // Max 10 items for manual selection, disable non-selected if hit 10
-              const isMaxedOut = kulkasList.length >= 10 && !isSelected;
-              return (
-                <button key={f.id}
-                  disabled={isMaxedOut}
-                  onClick={() => setAnswers(prev => {
-                    const arr = prev.kulkas || [];
-                    if (arr.some(item => item.id === f.id)) return { ...prev, kulkas: arr.filter(x => x.id !== f.id) };
-                    if (arr.length >= 10) return prev; // extra safety
-                    return { ...prev, kulkas: [...arr, { id: f.id, name: f.name }] };
-                  })}
-                  className={`px-3 py-1.5 rounded-full border text-sm transition-all ${isSelected ? `${t.bgAccent} ${t.borderAccent} text-white` : `${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'} ${t.textMuted}`} ${isMaxedOut ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  {f.name}
-                </button>
-              );
-            })}
+        {/* Darka Inbox */}
+        {darkaItems && darkaItems.length > 0 && (
+          <div className="mt-2">
+            <p className={`text-[10px] font-bold ${t.textMuted} mb-2`}>Darka</p>
+            <div className="flex flex-wrap gap-2">
+              {darkaItems.map(f => {
+                const isSelected = kulkasList.some(item => item.id === f.id);
+                return (
+                  <button key={f.id}
+                    onClick={() => toggleKulkas(f)}
+                    className={`px-3 py-1.5 rounded-full border text-sm transition-all ${isSelected ? `${t.bgAccent} ${t.borderAccent} text-white` : `${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'} ${t.textMuted}`}`}
+                  >
+                    {f.name}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

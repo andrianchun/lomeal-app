@@ -7,21 +7,31 @@ import useSwipeStep from '../hooks/useSwipeStep';
 import { fetchDomusItems } from '../utils/domusSync';
 import { auth } from '../firebase';
 import { hcAvailable, hcRequestPermissions } from '../utils/healthConnect';
-import { getSharedDietSteps, SharedDietStepRenderer, isValidAge } from './SharedDietSteps';
+import { getSharedDietSteps, SharedDietStepRenderer, isValidAge, hasValidConsent, CONSENT_VERSION } from './SharedDietSteps';
 
-const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert, generateTrueAIRecipes }) => {
+const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, onSave, showAlert, generateTrueAIRecipes }) => {
   const [step, setStep] = useState(0);
   const isDark = theme === 'dark';
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // Biometrik disimpan di DUA tempat: `profile.physical` (ditulis Pengaturan Biometrik,
+  // sinkronisasi Logym, dan Health Connect) dan field datar di akar profil (ditulis
+  // onboarding & kuesioner ini). Yang hidup dan paling sering diperbarui adalah
+  // `physical`, jadi itu yang dibaca duluan — kalau tidak, membuka kuesioner ulang
+  // menampilkan berat/tinggi basi dari terakhir kali kuesioner diisi.
+  const bio = (key, fallback) => profile?.physical?.[key] ?? profile?.[key] ?? fallback;
+
   const [answers, setAnswers] = useState(() => ({
-    name: profile?.name || '',
-    dob: profile?.dob || '',
-    height: profile?.height || 165,
-    weight: profile?.weight || 60,
+    // Nama tidak pernah punya cadangan, jadi profil lama (atau yang dibuat lewat jalur
+    // Logym/Domus/Darka tanpa mengisi nama di Lomeal) selalu tampil kosong. Akun Google
+    // sudah membawa nama — pakai kata pertamanya sebagai nama panggilan, user bebas ganti.
+    name: profile?.name || (logymUser?.displayName || user?.displayName || '').trim().split(/\s+/)[0] || '',
+    dob: bio('dob', ''),
+    height: bio('height', 165),
+    weight: bio('weight', 60),
     targetWeight: profile?.targetWeight || 55,
     activityLevel: profile?.activityLevel || null,
-    gender: profile?.gender || 'male',
+    gender: bio('gender', 'male'),
     dietProfile: profile?.dietProfile || 'balanced',
     dietGoal: profile?.dietGoal || null,
     customDeltaKcal: profile?.customDeltaKcal || '',
@@ -29,7 +39,12 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert,
     pace: profile?.pace || 'normal',
     medicalHistory: profile?.medicalHistory || [],
     allergies: profile?.allergies || '',
-    kulkas: profile?.kulkas || [],
+    kulkas: (profile?.kulkas || []).filter(k => {
+      if (typeof k === 'string') return false;
+      const dummy = ['ayam', 'telur', 'bayam', 'beras', 'brokoli'];
+      if (k.name && dummy.includes(k.name.toLowerCase()) && k.id === k.name) return false;
+      return true;
+    }),
     kulkasSearch: '',
     consents: profile?.consents || { tos: false, data: false, ai: false, research: false }
   }));
@@ -37,7 +52,14 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert,
   // 'pace' (Santai/Normal/Agresif) cuma ngaruh ke kalori kalau dietGoal cutting/bulk —
   // calcTargets nggak pernah pakai paceFactor buat maintenance, jadi nanya "seberapa
   // agresif" pas user pilih maintenance itu pertanyaan basi, gak ada efeknya sama sekali.
-  const steps = getSharedDietSteps(t).filter((s) => s.key !== 'pace' || answers.dietGoal !== 'maintenance');
+  // Persetujuan pengguna itu urusan sekali di awal (onboarding). Kalau user sudah setuju
+  // versi teks yang berlaku, langkahnya dibuang di sini — bukan disodorkan lagi tiap kali
+  // dia buka "Ubah Program" dari tab Program. S&K & Kebijakan Privasi lengkapnya tetap
+  // bisa dibaca kapan saja lewat Pengaturan → FAQ.
+  const consentDone = hasValidConsent(profile);
+  const steps = getSharedDietSteps(t)
+    .filter((s) => s.key !== 'consent' || !consentDone)
+    .filter((s) => s.key !== 'pace' || answers.dietGoal !== 'maintenance');
 
   const canProceed = () => {
     const s = steps[step];
@@ -108,6 +130,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert,
         ...profile,
         dob: answers.dob, gender: answers.gender, age, 
         height: Number(answers.height), weight: Number(answers.weight), 
+        activityLevel: answers.activityLevel,
         dietProfile: answers.dietProfile, 
         dietGoal: answers.dietGoal,
         pace: answers.pace,
@@ -117,10 +140,23 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert,
     const targets = calcTargets(profileForTargets);
     const finalProfile = {
       ...profileForTargets,
+      // Ditulis ke DUA-DUANYA (datar + physical) supaya tidak makin melenceng dari
+      // Pengaturan Biometrik / sinkronisasi Logym yang cuma menyentuh `physical`.
+      physical: {
+        ...(profile?.physical || {}),
+        dob: answers.dob, gender: answers.gender,
+        height: Number(answers.height), weight: Number(answers.weight),
+      },
       targets,
       medicalHistory: answers.medicalHistory,
       allergies: answers.allergies.trim(),
       kulkas: answers.kulkas,
+      // Kalau langkah persetujuan sampai tampil di sini (teks S&K direvisi, atau profil
+      // lama belum punya consent sama sekali), hasil centangnya HARUS ikut tersimpan —
+      // kalau tidak, langkah itu bakal muncul lagi terus tiap buka kuesioner.
+      ...(consentDone ? {} : {
+        consents: { ...(answers.consents || {}), version: CONSENT_VERSION, agreedAt: new Date().toISOString() },
+      }),
     };
     
     try {
@@ -140,20 +176,31 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert,
 
   return (
     <div className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in`} role="dialog" onClick={onClose}>
-      <div 
-        className={`w-full h-full ${t.bgCard} overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 fade-in duration-300 relative`} 
+      {/* t.bgApp, BUKAN t.bgCard: ini layar penuh, bukan kartu. bgCard cuma putih
+          transparan tipis, jadi warnanya ikut apa pun yang ada di belakangnya — hasilnya
+          abu kebiruan. bgApp punya gradien hijau ambient khas Lomeal. */}
+      <div
+        className={`w-full h-full ${t.bgApp} overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 fade-in duration-300 relative`}
         onClick={e => e.stopPropagation()}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
         {/* --- Background Image Layer --- */}
-        <div 
+        {/* Framing Coach Lomy diatur dua angka di bawah.
+            backgroundSize 'auto N%' → N dihitung terhadap TINGGI layar, jadi hasilnya sama
+              di HP mana pun. 100% = pas setinggi layar (setara 'cover' untuk gambar persegi);
+              di atas 100% berarti zoom in. Naikkan N kalau mau lebih dekat.
+            backgroundPosition X → 50% = subjek rata tengah; makin KECIL makin ke KANAN.
+            Catatan: persentase pada `backgroundSize: '150%'` dihitung terhadap LEBAR, dan di
+            layar HP yang jauh lebih tinggi daripada lebar itu justru lebih kecil daripada
+            'cover' — makanya dipakai bentuk 'auto N%' yang berpatokan tinggi. */}
+        <div
           className={`absolute inset-0 z-0 pointer-events-none transition-opacity duration-500 opacity-100`}
           style={{
             backgroundImage: "url('/bg-program.webp')",
-            backgroundSize: 'cover',
-            backgroundPosition: 'center 40px',
+            backgroundSize: 'auto 120%',
+            backgroundPosition: '46% 0px',
             maskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 35%, rgba(0,0,0,0) 75%)',
             WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 35%, rgba(0,0,0,0) 75%)'
           }}
@@ -161,7 +208,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert,
         {/* ------------------------------ */}
 
         {/* HEADER */}
-        <div className="flex justify-between items-center p-5 pb-2 shrink-0 relative z-10 max-w-lg mx-auto w-full">
+        <div className="flex justify-between items-center p-5 pb-2 pt-safe shrink-0 relative z-10 max-w-lg mx-auto w-full">
           <div className="w-10"></div>
           
           <div className="flex-1 text-center">
@@ -225,7 +272,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, onClose, onSave, showAlert,
                                         <Sparkles className="absolute inset-0 m-auto text-emerald-500" size={24} />
                                     </div>
                                     <p className={`h3 text-white`}>Meracik Menu Diet...</p>
-                                    <p className={`caption text-white/70 mt-2 px-8 text-center`}>Mohon tunggu sebentar, AI sedang menyusun resep presisi untuk Anda.</p>
+                                    <p className={`caption text-white/70 mt-2 px-8 text-center`}>Mohon tunggu sebentar, Lomy sedang menyusun resep presisi untuk Anda.</p>
                                 </div>
                             )}
                             {/* STEPS CONTENT */}

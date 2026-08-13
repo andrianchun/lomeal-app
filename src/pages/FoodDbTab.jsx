@@ -2,10 +2,12 @@ import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, setDoc, increment } from 'firebase/firestore';
-import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star, AlertTriangle, Heart, Filter, ChevronDown, Home } from 'lucide-react';
+import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star, AlertTriangle, Heart, Filter, ChevronDown, Home, Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus } from 'lucide-react';
 import { searchFoods, FOOD_CATEGORIES, getDefaultImageForFood, nutritionForAmount } from '../data/foodDatabase';
 import { AI_DAILY_LIMIT } from '../data/constants';
-import { NUTRIENTS } from '../data/nutrition';
+import { NUTRIENTS, EMPTY_NUTRITION } from '../data/nutrition';
+import SupplementBuilder from '../components/SupplementBuilder';
+import MedicineBuilder from '../components/MedicineBuilder';
 import { compressImageForAI, analyzeSmartPhoto } from '../utils/aiFood';
 import { playSoundEffect } from '../utils/audio';
 import { checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
@@ -15,11 +17,25 @@ import ImageCropperModal from '../components/ImageCropperModal';
 import AttachmentMenu from '../components/AttachmentMenu';
 import useBackClose from '../hooks/useBackClose';
 
+const SHELF_ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus };
+const SHELF_COLORS = [
+  { id: 'sky', bg: 'bg-sky-500' }, { id: 'blue', bg: 'bg-blue-500' }, { id: 'indigo', bg: 'bg-indigo-500' },
+  { id: 'purple', bg: 'bg-purple-500' }, { id: 'pink', bg: 'bg-pink-500' }, { id: 'rose', bg: 'bg-rose-500' },
+  { id: 'orange', bg: 'bg-orange-500' }, { id: 'amber', bg: 'bg-amber-600' }, { id: 'emerald', bg: 'bg-emerald-500' },
+  { id: 'zinc', bg: 'bg-zinc-600' },
+];
+
+// Badge angka kecil di samping label tab — bukan "(123)" yang bikin labelnya kepanjangan.
+const CountBadge = ({ n, active }) => (
+  <span className={`ml-1.5 px-1.5 py-px rounded-full text-[10px] font-black tabular-nums ${
+    active ? 'bg-white/25 text-white' : 'bg-black/10 dark:bg-white/10'}`}>{n}</span>
+);
+
 const NUTRIENT_FIELDS = NUTRIENTS.filter(n => n.key !== 'kcal').map(n => [n.key, `${n.label} (${n.unit})`]);
 const EXTRA_NUTRIENT_FIELDS = NUTRIENTS.filter(n => !n.macro).map(n => [n.key, `${n.label} (${n.unit})`]);
 
 const emptyForm = () => {
-  const obj = { name: '', grams: 100, kcal: '', portionLabel: '', portionGrams: 100, isDrink: false };
+  const obj = { name: '', grams: 100, kcal: '', portionLabel: '', portionGrams: 100, isDrink: false, type: 'raw_ingredient' };
   NUTRIENT_FIELDS.forEach(([k]) => obj[k] = '');
   return obj;
 };
@@ -110,7 +126,12 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   const [viewMode, setViewMode] = useState(location.state?.swipeDir === 'right' ? 'custom' : 'all'); // 'all' | 'custom'
 
   const swipeXRef = useRef({ start: 0, end: 0 });
-  const handleSubTabTouchStart = (e) => { swipeXRef.current.start = e.touches[0].clientX; };
+  // `end` di-reset tiap sentuhan baru — tap tanpa touchmove kalau tidak begini bakal
+  // dihitung pakai sisa swipe sebelumnya dan malah ganti sub-tab. Lihat ProgramTab.jsx.
+  const handleSubTabTouchStart = (e) => {
+    swipeXRef.current.start = e.touches[0].clientX;
+    swipeXRef.current.end = e.touches[0].clientX;
+  };
   const handleSubTabTouchMove = (e) => { swipeXRef.current.end = e.touches[0].clientX; };
   const handleSubTabTouchEnd = (e) => {
     const dist = swipeXRef.current.start - swipeXRef.current.end;
@@ -118,6 +139,13 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     if (dist > 0 && viewMode === 'all') { setViewMode('custom'); e.stopPropagation(); }
     else if (dist < 0 && viewMode === 'custom') { setViewMode('all'); e.stopPropagation(); }
   };
+
+  // Rak suplemen & obat — inventori non-makanan, satu tempat dengan database bahan.
+  const [shelfTab, setShelfTab] = useState('suplemen'); // 'suplemen' | 'obat'
+  const [editingSupplement, setEditingSupplement] = useState(null);
+  const [editingMedicine, setEditingMedicine] = useState(null);
+  const drinkTemplates = profile?.drinkTemplates || [];
+  const medicines = profile?.medicines || [];
 
   const [term, setTerm] = useState('');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -181,6 +209,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   // Pencarian online (OpenFoodFacts) sudah dimatikan sejak lama karena lambat dan data
   // mikronya kosong — state, debounce 800ms, dan spinner-nya ikut dibuang. Database bawaan
   // (TKPI) + custom milik user semuanya offline, jadi hasilnya langsung keluar.
+  const dbCount = useMemo(() => searchFoods('', customFoods).length, [customFoods]);
+
   const results = useMemo(() => {
     let list = searchFoods(term, customFoods);
     if (viewMode === 'custom') list = list.filter((f) => f.isCustom);
@@ -209,7 +239,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
 
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
 
-  // Sebelum ini, tiap catatan AI selalu bikin entri custom baru tanpa cek nama, jadi satu
+  // Sebelum ini, tiap catatan Lomy selalu bikin entri custom baru tanpa cek nama, jadi satu
   // "Matcha Latte" bisa numpuk puluhan kali. Pembuatannya sudah dicegah di LogTab; ini
   // buat beresin yang terlanjur numpuk.
   const duplicateNames = useMemo(() => {
@@ -297,7 +327,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     scanAbortRef.current = controller;
     try {
       const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
-      if (!quota.allowed) { await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
+      if (!quota.allowed) { await showAlert(`Kuota Lomy harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
 
       const { base64, mimeType } = await compressImageForAI(file);
       const res = await analyzeSmartPhoto(aiKey, base64, mimeType, controller.signal);
@@ -334,8 +364,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
       setForm(parsed);
       setEditing('new');
       await showAlert(res.type === 'label' 
-        ? 'Tabel nutrisi berhasil dipindai oleh AI! Silakan cek & koreksi angkanya.' 
-        : 'Makanan di piring berhasil ditebak AI! Silakan simpan ke database.');
+        ? 'Tabel nutrisi berhasil dipindai oleh Lomy! Silakan cek & koreksi angkanya.' 
+        : 'Makanan di piring berhasil ditebak Lomy! Silakan simpan ke database.');
     } catch (err) {
       if (err.name === 'AbortError') return refundAiUsage(user.uid); // dibatalin user — kuota dibalikin
       await showAlert(err.message === 'OUT_OF_SCOPE' ? 'Foto ini tidak terbaca sebagai tabel gizi atau makanan.' : `Gagal scan: ${err.message}`);
@@ -434,6 +464,14 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
              </div>
           </div>
           <input ref={editGalleryRef} type="file" accept="image/*" onChange={handleEditImage} className="hidden" />
+          
+          <div className="mb-2">
+            <p className={`caption font-medium mb-0.5 ${t.textMuted}`}>Jenis Makanan</p>
+            <div className={`flex rounded-xl p-1 border ${t.border} ${t.inputBg}`}>
+              <button type="button" onClick={() => setForm(f => ({ ...f, type: 'raw_ingredient' }))} className={`flex-1 py-1.5 rounded-lg caption font-bold ${form.type !== 'ready_to_eat' ? `${t.bgCard} shadow-sm text-white` : t.textMuted}`}>Bahan Mentah</button>
+              <button type="button" onClick={() => setForm(f => ({ ...f, type: 'ready_to_eat' }))} className={`flex-1 py-1.5 rounded-lg caption font-bold ${form.type === 'ready_to_eat' ? `${t.bgCard} shadow-sm text-white` : t.textMuted}`}>Siap Santap</button>
+            </div>
+          </div>
           
           <div className="grid grid-cols-2 gap-3 mb-2">
             <div>
@@ -583,8 +621,80 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     );
   }
 
+  if (editingSupplement) return (
+    <SupplementBuilder t={t} theme={theme} editing={editingSupplement} setEditing={setEditingSupplement}
+      customFoods={customFoods}
+      onSave={(item) => {
+        saveProfilePatch({ drinkTemplates: [item, ...drinkTemplates.filter(d => d.id !== item.id)] });
+        setEditingSupplement(null);
+      }} />
+  );
+
+  if (editingMedicine) return (
+    <MedicineBuilder t={t} editing={editingMedicine} setEditing={setEditingMedicine}
+      onSave={(item) => {
+        saveProfilePatch({ medicines: [item, ...medicines.filter(m => m.id !== item.id)] });
+        setEditingMedicine(null);
+      }} />
+  );
+
+  const shelfItems = shelfTab === 'suplemen' ? drinkTemplates : medicines;
+
   return (
     <div className="p-4 pb-24 h-full flex flex-col">
+      {/* ===== RAK SUPLEMEN & OBAT ===== */}
+      <div className={`relative flex p-1.5 rounded-full ${t.btnBg} w-full shrink-0 border ${t.border} mb-3`}>
+        <div className={`absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-full transition-transform duration-300 ease-out ${t.bgAccent} shadow-sm`} style={{ transform: shelfTab === 'suplemen' ? 'translateX(0)' : 'translateX(100%)', left: '6px' }}></div>
+        {[['suplemen', 'Suplemen'], ['obat', 'Obat']].map(([id, label]) => (
+          <button key={id} onClick={() => { setShelfTab(id); playSoundEffect('click', soundEnabled); }}
+            className={`flex-1 flex items-center justify-center py-2.5 rounded-full relative z-10 body-md font-black transition-colors duration-300 ${shelfTab === id ? 'text-white' : t.textMuted}`}>
+            {label} <CountBadge n={id === 'suplemen' ? drinkTemplates.length : medicines.length} active={shelfTab === id} />
+          </button>
+        ))}
+      </div>
+
+      <div className="shrink-0 mb-3">
+        <button
+          onClick={() => shelfTab === 'suplemen'
+            ? setEditingSupplement({ id: `ds_${Date.now()}`, name: '', icon: 'CupSoda', color: 'sky', ingredients: [], nutrition: { ...EMPTY_NUTRITION } })
+            : setEditingMedicine({ id: `med_${Date.now()}`, name: '', icon: 'Pill', color: 'rose', signa: '', note: '' })}
+          className={`w-full py-2.5 rounded-2xl border-2 border-dashed ${t.borderDashed} ${t.textMuted} caption font-bold flex items-center justify-center gap-1.5`}>
+          <Plus size={14} /> Tambah {shelfTab === 'suplemen' ? 'suplemen' : 'obat'}
+        </button>
+      </div>
+
+      {/* Maks 3 rak kelihatan; sisanya di-scroll biar database bahan tetap dapat ruang. */}
+      <div className="shrink-0 max-h-[216px] overflow-y-auto mb-4 space-y-2">
+        {shelfItems.map(item => {
+          const IconComp = SHELF_ICONS[item.icon] || (shelfTab === 'suplemen' ? CupSoda : Pill);
+          const bgClass = SHELF_COLORS.find(c => c.id === item.color)?.bg || 'bg-zinc-500';
+          return (
+            <div key={item.id} className={`rounded-2xl border ${t.border} ${t.bgCard} p-3 flex items-center gap-3`}>
+              <button onClick={() => shelfTab === 'suplemen' ? setEditingSupplement(item) : setEditingMedicine(item)}
+                className="flex-1 flex items-center gap-3 text-left min-w-0">
+                <span className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center text-white ${bgClass}`}>
+                  <IconComp size={18} />
+                </span>
+                <span className="flex-1 min-w-0">
+                  <p className={`body-md font-bold truncate ${t.textMain}`}>{item.name}</p>
+                  <p className={`caption font-medium truncate ${shelfTab === 'obat' ? 'text-rose-500' : t.textMuted}`}>
+                    {shelfTab === 'suplemen'
+                      ? `${Math.round(item.nutrition?.kcal || 0)} kkal · P ${Math.round(item.nutrition?.protein || 0)}g`
+                      : item.signa}
+                  </p>
+                </span>
+              </button>
+              <button onClick={async () => {
+                if (!(await showConfirm(`Hapus "${item.name}"?`))) return;
+                shelfTab === 'suplemen'
+                  ? saveProfilePatch({ drinkTemplates: drinkTemplates.filter(x => x.id !== item.id) })
+                  : saveProfilePatch({ medicines: medicines.filter(x => x.id !== item.id) });
+              }} className="p-2 text-red-400 shrink-0"><X size={15} /></button>
+            </div>
+          );
+        })}
+      </div>
+
       <div className={`relative flex p-1.5 rounded-full ${t.btnBg} w-full shrink-0 border ${t.border} mb-4`}>
         <div className={`absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-full transition-transform duration-300 ease-out ${t.bgAccent} shadow-sm`} style={{ transform: viewMode === 'all' ? 'translateX(0)' : 'translateX(100%)', left: '6px' }}></div>
         <button
@@ -593,7 +703,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
             viewMode === 'all' ? 'text-white' : t.textMuted
           }`}
         >
-          Semua
+          Semua <CountBadge n={dbCount} active={viewMode === 'all'} />
         </button>
         <button
           onClick={() => { setViewMode('custom'); playSoundEffect('click', soundEnabled); }}
@@ -601,7 +711,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
             viewMode === 'custom' ? 'text-white' : t.textMuted
           }`}
         >
-          Custom
+          Custom <CountBadge n={customFoods.length} active={viewMode === 'custom'} />
         </button>
       </div>
 

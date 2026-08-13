@@ -194,7 +194,7 @@ const AuthPage = ({ t, theme, soundEnabled, onLogin }) => {
           {/* Logo */}
           <div className="absolute top-0 left-0 right-0 p-6 flex items-center gap-2" style={{ paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}>
             <img 
-              src={theme === 'dark' ? '/banner-dark.png?v=3' : '/banner-light.png?v=3'} 
+              src={theme === 'dark' ? '/banner-dark.webp?v=3' : '/banner-light.webp?v=3'} 
               alt="Lomeal" 
               className="h-10 w-auto object-contain drop-shadow-sm"
               onError={(e) => {

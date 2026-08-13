@@ -26,6 +26,18 @@ export function subscribeDomusLocations(uid, cb) {
     (err) => console.error('[domus_locations] error:', err));
 }
 
+// Cocokkan nama bahan resep ke item inventaris Domus. Sengaja longgar (saling-mengandung)
+// karena penamaan di Domus bebas: "Dada Ayam Fillet" vs bahan "dada ayam".
+// ponytail: belum ada kamus sinonim ("santan" ≠ "kelapa parut"); tambahkan kalau sering meleset.
+export function matchDomusItem(domusItems, name) {
+  if (!domusItems?.length || !name) return null;
+  const n = name.toLowerCase().trim();
+  return domusItems.find((di) => {
+    const dn = (di.name || '').toLowerCase().trim();
+    return dn && (dn.includes(n) || n.includes(dn));
+  }) || null;
+}
+
 export async function markDomusItemConsumed(id) {
   await updateDoc(doc(db, 'domus_items', id), { consumedAt: serverTimestamp() });
 }

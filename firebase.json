@@ -7,6 +7,9 @@
       "predeploy": ["node ../copy-env.cjs"]
     }
   ],
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": {
     "target": "lomeal",
     "public": "dist",

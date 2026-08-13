@@ -6,7 +6,7 @@
 // Prefix `lomeal_` biar gak tabrakan sama collection Darka/Domus/Logym di project bareng ini.
 // ============================================================
 import { db } from '../firebase';
-import { doc, setDoc, updateDoc, onSnapshot, getDoc, collection, getDocs, writeBatch, deleteField, increment } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, onSnapshot, getDoc, collection, getDocs, writeBatch, deleteField, increment, query, where } from 'firebase/firestore';
 import { getMonthKey } from '../data/constants';
 import { uploadImageToFirebase } from './storageLogym';
 
@@ -60,6 +60,13 @@ export const saveDay = async (uid, ymd, { photos, ...dayData }) => {
 export const uploadMealPhoto = async (uid, ymd, sessionId, dataUrl) => {
   const blob = await (await fetch(dataUrl)).blob();
   return uploadImageToFirebase(blob, `lomeal_users/${uid}/meal_photos/${ymd}_${sessionId}_${Date.now()}.webp`);
+};
+
+// Foto resep (hero + tiap langkah) — sama alasannya seperti foto sesi: dokumen `recipes`
+// isinya satu array untuk SEMUA resep, jadi base64 di sana pasti nembus limit 1 MiB.
+export const uploadRecipePhoto = async (uid, recipeId, dataUrl) => {
+  const blob = await (await fetch(dataUrl)).blob();
+  return uploadImageToFirebase(blob, `lomeal_users/${uid}/recipe_photos/${recipeId}_${Date.now()}.webp`);
 };
 
 export const subscribeDayPhotos = (uid, ymd, cb) =>
@@ -136,6 +143,47 @@ export const subscribeCustomFoods = (uid, cb) =>
 
 export const saveCustomFoods = (uid, items) =>
   setDoc(flDoc(uid, 'custom_foods'), { items }, { merge: false });
+
+export const subscribeInbox = (uid, cb) => {
+  const q = query(
+    collection(db, 'darka_shared_items'),
+    where('uid', '==', uid),
+    where('destinationApp', '==', 'lomeal'),
+    where('status', '==', 'pending')
+  );
+  return onSnapshot(q, (snap) => {
+    const items = snap.docs.map(doc => {
+      const data = doc.data();
+      const qty = Number(data.quantity) || 1;
+      return {
+        id: doc.id,
+        text: data.itemName || 'Tanpa nama',
+        quantity: qty,
+        createdAt: data.purchasedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+        source: 'darka',
+        nutrition: data.nutrition || null,
+        autoParseFailed: data.autoParseFailed || false,
+        imageUrl: data.imageUrl || data.image || null,
+      };
+    });
+    cb(items);
+  });
+};
+
+export const markInboxClaimed = (id) => {
+  return updateDoc(doc(db, 'darka_shared_items', id), { status: 'claimed' });
+};
+
+/**
+ * Save parsed nutrition data back to a darka_shared_items document.
+ * Called by auto-parse and manual InboxProcessor parse.
+ */
+export const updateInboxNutrition = (id, nutrition, parseFailed = false) => {
+  const payload = parseFailed
+    ? { autoParseFailed: true }
+    : { nutrition, autoParseFailed: false };
+  return updateDoc(doc(db, 'darka_shared_items', id), payload);
+};
 
 // ---------- HAPUS AKUN: bersihkan seluruh sub-koleksi food_logs milik user ----------
 // Dipanggil dari SettingsPage "Zona Berbahaya" sebelum deleteUser(auth.currentUser).

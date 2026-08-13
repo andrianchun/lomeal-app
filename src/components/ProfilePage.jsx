@@ -267,7 +267,7 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
             placeholder="Misal: Kacang, Seafood, Laktosa..."
             className={`w-full px-3 py-2.5 rounded-xl border-2 font-bold text-sm border-transparent outline-none ${t.inputBg} ${t.textMain}`}
           />
-          <p className={`text-[9px] mt-1 font-medium ${t.textMuted}`}>Konteks ini akan dibagikan ke AI Logym.</p>
+          <p className={`text-[9px] mt-1 font-medium ${t.textMuted}`}>Konteks ini akan dibagikan ke Lomy.</p>
         </div>
       </div>
 
@@ -290,7 +290,7 @@ const ProfilePage = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, 
 
       {cropSourceUrl && (
         <div className="fixed inset-0 z-[2000] bg-black flex flex-col no-swipe">
-          <div className="flex items-center justify-between p-4 text-white">
+          <div className="flex items-center justify-between p-4 pt-safe text-white">
             <button onClick={closeCropper} disabled={isUploading} className="p-2 disabled:opacity-40"><X size={22} /></button>
             <h3 className="font-black text-sm">Atur Foto Profil</h3>
             <button onClick={confirmPhotoUpload} disabled={isUploading || !croppedAreaPixels} className="p-2 disabled:opacity-40">

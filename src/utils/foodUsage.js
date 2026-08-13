@@ -1,7 +1,7 @@
 // Statistik pemakaian makanan (lokal per-device) — dipakai buat urutkan hasil
 // search: paling sering ditambahkan & paling baru dipakai naik ke atas. Bukan
 // data penting (beda dari favorit), aman kalau hilang pas cache di-clear,
-// makanya cukup localStorage aja (pola sama kayak pattern-cache AI di nlpParser.js).
+// makanya cukup localStorage aja (pola sama kayak pattern-cache Lomy di nlpParser.js).
 const KEY = 'lomeal_food_usage';
 
 const readMap = () => {

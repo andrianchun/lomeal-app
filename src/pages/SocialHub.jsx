@@ -41,7 +41,7 @@ const SocialHub = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, on
       >
         <div className="flex items-center gap-2">
           <img 
-            src={theme === 'dark' ? '/banner-dark.png?v=3' : '/banner-light.png?v=3'} 
+            src={theme === 'dark' ? '/banner-dark.webp?v=3' : '/banner-light.webp?v=3'} 
             alt="Lomeal" 
             className="h-10 w-auto object-contain drop-shadow-sm"
             onError={(e) => {

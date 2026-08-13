@@ -86,8 +86,10 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
     const meals = { ...(day.meals || {}) };
     meals[sessionId] = (meals[sessionId] || []).map(e => {
       if (e.id !== entryId) return e;
-      const factor = e.grams > 0 ? grams / e.grams : 0;
-      return { ...e, grams, nutrition: Object.fromEntries(Object.entries(e.nutrition || {}).map(([k, v]) => [k, Math.round(v * factor * 10) / 10])) };
+      const bg = e.baseGrams || (e.grams > 0 ? e.grams : 100);
+      const bn = e.baseNutrition || e.nutrition || {};
+      const factor = bg > 0 ? grams / bg : 0;
+      return { ...e, grams, baseGrams: bg, baseNutrition: bn, nutrition: Object.fromEntries(Object.entries(bn).map(([k, v]) => [k, Math.round(v * factor * 10) / 10])) };
     });
     saveDay(ymd, { ...day, meals });
   };
@@ -120,7 +122,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
   const runEvaluation = async () => {
     if (evalBusy) return;
     const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
-    if (!quota.allowed) { await showAlert(`Kuota AI harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
+    if (!quota.allowed) { await showAlert(`Kuota Lomy harian habis (${AI_DAILY_LIMIT}/hari). Coba lagi besok ya.`); return; }
     setEvalBusy(true);
     const controller = new AbortController();
     evalAbortRef.current = controller;
@@ -237,7 +239,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
                             {e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500"><ChefHat size={12} strokeWidth={2.5} /></span>}
                             {e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500"><Box size={12} strokeWidth={2.5} /></span>}
                           </p>
-                          <input type="number" inputMode="numeric" defaultValue={e.grams} key={`${e.id}_${e.grams}`}
+                          <input type="number" inputMode="numeric" value={e.grams || ''} placeholder="0"
                             onBlur={(ev) => { const g = Number(ev.target.value) || 0; if (g !== e.grams) editEntryGrams(expandedYmd, s.id, e.id, g); }}
                             className={`w-12 text-right caption bg-transparent border-b ${t.border} outline-none no-spinners ${t.textMain}`} />
                           <span className={`caption ${t.textMuted} ml-0.5 mr-1`}>g</span>
@@ -266,7 +268,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
         <div className={`rounded-3xl border ${t.borderAccentSoft} ${t.bgAccentSoft} p-4 anim-rise`}>
           <div className="flex items-center gap-2 mb-2">
             <Sparkles size={15} className={t.textAccent} />
-            <span className={`h2 ${t.textMain}`}>Rapor Mingguan AI</span>
+            <span className={`h2 ${t.textMain}`}>Rapor Mingguan Lomy</span>
             <button onClick={() => setEvaluation(null)} className="ml-auto"><X size={14} className={t.textMuted} /></button>
           </div>
           <p className={`body-md font-medium leading-relaxed ${t.textMain}`}>{evaluation}</p>
@@ -274,7 +276,7 @@ const HistoryTab = ({ t, theme, user, profile, daysMap, saveDay, ensureMonth, cu
       )}
       <div className="flex gap-2.5">
         {/* Selagi jalan tombolnya berubah jadi Batal — biar request yang gak jadi dipakai
-            bisa distop dan kuota AI-nya balik, bukan cuma di-disable sampai selesai. */}
+            bisa distop dan kuota Lomy-nya balik, bukan cuma di-disable sampai selesai. */}
         <button onClick={evalBusy ? cancelEvaluation : runEvaluation}
           className={`flex-1 py-3.5 rounded-2xl ${evalBusy ? 'bg-red-500 text-white' : t.bgAccent} body-lg shadow-glow flex items-center justify-center gap-2`}>
           {evalBusy ? <X size={16} /> : <Sparkles size={16} />}

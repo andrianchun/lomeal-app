@@ -4,13 +4,10 @@ import { fetchLyfitProfile } from '../utils/lyfitSync';
 import { computeAge } from '../data/constants';
 import { calcTargets } from '../data/nutrition';
 import useSwipeStep from '../hooks/useSwipeStep';
-import { getSharedDietSteps, SharedDietStepRenderer, isValidAge } from '../components/SharedDietSteps';
+import { getSharedDietSteps, SharedDietStepRenderer, isValidAge, CONSENT_VERSION } from '../components/SharedDietSteps';
 import { hcAvailable, hcRequestPermissions } from '../utils/healthConnect';
 import { fetchDomusItems } from '../utils/domusSync';
 import { auth } from '../firebase';
-
-// Naikkan tanggal ini tiap teks consent (step 'consent' di SharedDietSteps.jsx) direvisi.
-const CONSENT_VERSION = '2026-08-03';
 
 const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
   const [step, setStep] = useState(0);
@@ -161,7 +158,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
   };
 
   return (
-    <div className={`fixed inset-0 z-[100] flex flex-col bg-[url('/bg-program.webp')] bg-cover bg-center`}>
+    <div className={`fixed inset-0 z-[100] flex flex-col bg-[url('/bg-program.webp')]`} style={{ backgroundSize: 'auto 120%', backgroundPosition: '46% 0px' }}>
       <div className={`absolute inset-0 ${isDark ? 'bg-gradient-to-t from-black via-black/40 to-transparent' : 'bg-gradient-to-t from-black/80 via-black/20 to-transparent'}`}></div>
       <div className="relative z-10 flex flex-col h-full">
       <div className="flex justify-center items-center p-5 pb-2 shrink-0 pt-[max(env(safe-area-inset-top),2rem)]">

@@ -4,13 +4,14 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from
 import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth';
 import { auth } from './firebase';
 import { buildTheme } from './theme';
-import { getLocalYMD, getMonthKey, computeAge, MEAL_SESSIONS, DEFAULT_SESSION_TIMES } from './data/constants';
+import { getLocalYMD, getMonthKey, computeAge, MEAL_SESSIONS, DEFAULT_SESSION_TIMES, macroText } from './data/constants';
 import {
   subscribeLomealProfile, saveLomealProfile,
   subscribeMonth, getMonth, saveDay as saveDayFs,
   subscribeRecipes, saveRecipes,
   subscribeMealPreps, saveMealPreps,
   subscribeCustomFoods, saveCustomFoods,
+  subscribeInbox, markInboxClaimed,
   deleteAllUserData,
 } from './utils/foodLog';
 import { subscribeDomusItems, subscribeDomusLocations } from './utils/domusSync';
@@ -20,11 +21,12 @@ import {
   pushNutritionBatchToLogym,
 } from './utils/biometricSync';
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
-import { computeDayTotals, calcTargets, DIET_PROFILES } from './data/nutrition';
-import { generateDietRecipe, buildAiRecipe } from './utils/aiFood';
+import { computeDayTotals, calcTargets } from './data/nutrition';
+import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from './utils/aiFood';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { COOK_NOTIF_ONGOING } from './hooks/useCookTimers';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import useDialog from './hooks/useDialog';
 import useToast from './hooks/useToast';
@@ -208,7 +210,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
 
 
-  // Draft Smart Input AI Lomeal (LogTab) diangkat ke sini (bukan state lokal LogTab) supaya
+  // Draft Smart Input Lomy Lomeal (LogTab) diangkat ke sini (bukan state lokal LogTab) supaya
   // tetap ada kalau user pindah tab lain lalu balik lagi — react-router unmount komponen tab
   // yang tidak aktif, jadi state lokal bakal hilang kalau disimpan di LogTab.
   const [chatText, setChatText] = useState('');
@@ -442,6 +444,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [recipes, setRecipes] = useState([]);
   const [mealPreps, setMealPreps] = useState([]);
   const [customFoods, setCustomFoods] = useState([]);
+  const [inboxItems, setInboxItems] = useState([]);
 
   // --- Domus Inventory ---
   const [domusItems, setDomusItems] = useState([]);
@@ -462,6 +465,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     try { await saveCustomFoods(user.uid, items); } catch (e) { await showAlert(`Gagal menyimpan custom food: ${e.message}`); }
   }, [user, showAlert]);
 
+
   useEffect(() => {
     if (!user) return;
     const unsub1 = subscribeRecipes(user.uid, setRecipes);
@@ -469,20 +473,28 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     const unsub3 = subscribeMealPreps(user.uid, setMealPreps);
     const unsub4 = subscribeDomusItems(user.uid, setDomusItems);
     const unsub5 = subscribeDomusLocations(user.uid, setDomusLocations);
+    const unsub6 = subscribeInbox(user.uid, setInboxItems);
     unsubsRef.current.recipes = unsub1;
     unsubsRef.current.customFoods = unsub2;
     unsubsRef.current.mealPreps = unsub3;
     unsubsRef.current.domusItems = unsub4;
     unsubsRef.current.domusLocations = unsub5;
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
+    unsubsRef.current.inboxItems = unsub6;
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
   }, [user]);
 
   // Share resep ke Social Feed (post type:'recipe').
   const shareRecipe = useCallback(async (recipe) => {
     if (!logymUser) throw new Error('Login dengan Google untuk pakai Social Hub');
+    const photos = recipe.photoUrls?.length ? recipe.photoUrls : (recipe.photoUrl ? [recipe.photoUrl] : []);
+    const p = recipe.perPortion || {};
+    const gizi = p.kcal
+      ? `\n${Math.round(p.kcal)} kkal · ${macroText(p)} per porsi`
+      : '';
     await createCommunityPost(logymUser.uid, logymUser.displayName, logymUser.photoURL, {
       type: 'recipe',
-      text: `Bagikan resep: ${recipe.name}`,
+      text: `${recipe.name}${gizi}`,
+      imageUrls: photos,
       recipeName: recipe.name,
       recipeData: recipe,
     });
@@ -612,7 +624,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     pushTargetsToLogym(logymUser.uid, profile.targets);
   }, [logymUser, profile?.targets]);
 
-  // Kunci AI efektif: milik Lomeal sendiri (prioritas) + cadangan dari Logym.
+  // Kunci Lomy efektif: milik Lomeal sendiri (prioritas) + cadangan dari Logym.
   // Jangan pernah array kosong (truthy!) — pass null biar guard `!aiKey` di tab lain tetap benar.
   const effectiveAiKeys = useMemo(() => {
     const own = (settings.userApiKeys || []).filter((k) => k && k.trim());
@@ -710,8 +722,10 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     if (!Capacitor.isNativePlatform()) return;
     
     let listener = null;
-    LocalNotifications.addListener('localNotificationActionPerformed', () => {
-      navigate('/log');
+    // id ≥ 3000 = notifikasi sesi masak (timer/ongoing) — balikin user ke tab Program,
+    // ProgramTab yang nyambung lagi ke sesi masak terakhir dari localStorage.
+    LocalNotifications.addListener('localNotificationActionPerformed', (ev) => {
+      navigate((ev?.notification?.id ?? 0) >= COOK_NOTIF_ONGOING ? '/program' : '/log');
     }).then(l => listener = l);
 
     (async () => {
@@ -818,6 +832,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     saveDay, ensureMonth, saveProfilePatch,
     recipes, saveRecipesFn,
     mealPreps, saveMealPrepsFn,
+    inboxItems,
     customFoods, saveCustomFoodsFn,
     domusItems, domusLocations,
     shareRecipe,
@@ -1013,19 +1028,14 @@ function App() {
 
     // Kasih menu pertama otomatis pakai jawaban kuesioner yang baru diisi — sebelumnya
     // user kelar onboarding tapi tab Program kosong sampai mereka nemu & isi ULANG
-    // kuesioner terpisah "Ubah Program". Best-effort & senyap: kalau gagal (limit AI
+    // kuesioner terpisah "Ubah Program". Best-effort & senyap: kalau gagal (limit Lomy
     // harian, dsb), user masih bisa generate manual dari Program tab kayak biasa.
     // aiKey null = pakai fallback server (lomealAiChat) — user baru belum sempat
     // set API key pribadi di Settings pas titik ini, jadi effectiveAiKeys bakal null juga.
     try {
-      const dietProfile = DIET_PROFILES.find((d) => d.id === profileData.dietProfile) || DIET_PROFILES[0];
-      const generated = await generateDietRecipe(null, {
-        dietProfile: dietProfile.id,
-        dietName: dietProfile.label,
-        medicalHistory: profileData.medicalHistory || [],
-        allergies: (profileData.allergies || '').trim(),
-      });
-      await saveRecipes(authState.user.uid, [buildAiRecipe(generated, dietProfile.label)]);
+      const input = buildRecipeProfileInput(profileData);
+      const generated = await generateDietRecipe(null, input);
+      await saveRecipes(authState.user.uid, [buildAiRecipe(generated, input.dietName)]);
     } catch (e) {
       console.error('Gagal bikin menu pertama otomatis:', e);
     }
@@ -1049,7 +1059,7 @@ function App() {
             </button>
           </>
         ) : (
-          <img src="/logo-dark.png" alt="LOMEAL Logo" className="w-40 h-40 object-contain animate-pulse drop-shadow-2xl" />
+          <img src="/logo-dark.webp" alt="LOMEAL Logo" className="w-40 h-40 object-contain animate-pulse drop-shadow-2xl" />
         )}
       </div>
     );

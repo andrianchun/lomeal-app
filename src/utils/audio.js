@@ -31,6 +31,22 @@ export const playSoundEffect = (type, enabled) => {
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
         osc.start(now);
         osc.stop(now + 0.05);
+    } else if (type === 'timer') {
+        // Tiga beep naik — harus kedengeran dari dapur sebelah, jadi lebih panjang
+        // dan lebih keras dari 'click'. Dipakai saat timer masak habis.
+        [0, 0.28, 0.56].forEach((offset, i) => {
+          const o = audioCtx.createOscillator();
+          const g = audioCtx.createGain();
+          o.connect(g); g.connect(audioCtx.destination);
+          o.type = 'sine';
+          o.frequency.setValueAtTime(880 + i * 220, now + offset);
+          g.gain.setValueAtTime(0.0001, now + offset);
+          g.gain.exponentialRampToValueAtTime(0.35, now + offset + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.22);
+          o.start(now + offset);
+          o.stop(now + offset + 0.24);
+        });
+        osc.disconnect(); gain.disconnect();
     } else if (type === 'swipe') {
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(400, now);

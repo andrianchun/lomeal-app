@@ -3,16 +3,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/* TIGA tingkat ukuran — 16 / 21 / 33 px, didefinisikan dalam rem di tailwind.config.js.
+   Pakai kelas di bawah ini, JANGAN text-[10px] dan kawan-kawannya: ukuran karangan
+   sendiri tidak ikut membesar saat user menaikkan ukuran font di HP. */
 @layer components {
-  /* Headings - 3 tingkat Golden Ratio */
-  .h1 { @apply font-heading text-2xl font-bold tracking-tight leading-tight; } /* 31px */
-  .h2 { @apply font-heading text-md font-bold leading-snug; } /* 19px */
-  .h3 { @apply font-heading text-sm font-bold uppercase tracking-wider; } /* 12px */
+  /* Judul */
+  .h1 { @apply font-heading text-2xl font-bold tracking-tight leading-tight; } /* 33px */
+  .h2 { @apply font-heading text-md font-bold leading-snug; }                  /* 21px */
+  .h3 { @apply font-heading text-sm font-bold uppercase tracking-wider; }      /* 16px */
 
-  /* Body & Text - Golden Ratio */
-  .body-lg { @apply text-md font-bold leading-relaxed; } /* 19px */
-  .body-md { @apply text-sm font-bold leading-relaxed; } /* 12px */
-  .caption { @apply text-sm font-bold leading-tight; } /* 12px */
+  /* Isi */
+  .body-lg { @apply text-md font-bold leading-relaxed; } /* 21px */
+  .body-md { @apply text-sm font-bold leading-relaxed; } /* 16px */
+  .caption { @apply text-sm font-bold leading-tight; }   /* 16px */
 }
 html, body {
   overscroll-behavior: none;
@@ -77,6 +80,14 @@ input, textarea {
 .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
 .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+
+/* WAJIB dipakai setiap layar penuh (fixed inset-0) yang isinya menempel ke atas.
+   Di APK, `viewport-fit=cover` bikin WebView memakai seluruh layar TERMASUK area status
+   bar — tanpa padding ini judul dan tombol tutup ketimbun jam/baterai. `max()` menjaga
+   jarak tetap 1rem di perangkat tanpa notch dan di browser desktop.
+   Kelas ini sempat dipakai LegalModal padahal belum pernah didefinisikan di mana pun,
+   jadi selama ini tidak melakukan apa-apa. */
+.pt-safe { padding-top: max(1rem, env(safe-area-inset-top, 0px)); }
 
 .no-spinners::-webkit-inner-spin-button, 
 .no-spinners::-webkit-outer-spin-button { 

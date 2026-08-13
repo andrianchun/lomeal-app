@@ -31,6 +31,6 @@ export const db = initializeFirestore(app, {
 
 export const storage = getStorage(app);
 
-// Backend proxy AI (Cloud Functions region Jakarta) — aktif setelah aiChat/aiVision (dari
+// Backend proxy Lomy (Cloud Functions region Jakarta) — aktif setelah aiChat/aiVision (dari
 // lomeal-id/functions) ikut dipindah & di-deploy ke hexa-life.
 export const functions = getFunctions(app, "asia-southeast2");

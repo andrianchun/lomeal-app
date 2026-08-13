@@ -103,7 +103,7 @@ export default function ImageCropperModal({
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-black/90 backdrop-blur-sm anim-fade-in no-swipe">
-      <div className="flex items-center justify-between p-4 bg-black/50">
+      <div className="flex items-center justify-between p-4 pt-safe bg-black/50">
         <button onClick={onClose} className="p-2 text-white/70 hover:text-white rounded-full bg-white/10 active:scale-95">
           <X size={20} />
         </button>

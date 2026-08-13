@@ -31,18 +31,28 @@ export default {
         background: '#f8fafc',
         surface: '#ffffff',
       },
+      // TIGA tingkat ukuran, titik. Semua kelas Tailwind sengaja dipetakan ke salah satu
+      // dari tiga nilai ini supaya tidak ada ukuran keempat yang menyelinap masuk lewat
+      // `text-lg`, `text-3xl`, dsb.
+      //
+      // Satuan rem (bukan px) supaya teks ikut membesar mengikuti setelan ukuran font
+      // browser/HP. 1rem = 16px selama root font-size tidak dipatok — jangan pernah
+      // menulis `html { font-size: ...px }`, itu mematikan seluruh mekanisme ini.
+      //
+      // Body 16px = default browser & Material 3 bodyLarge. Sebelumnya 12px, yaitu ukuran
+      // caption Material — terlalu kecil untuk teks isi, apalagi di layar HP.
       fontSize: {
-        'xs': ['12px', '1.3'],
-        'sm': ['12px', '1.3'],
-        'base': ['12px', '1.3'], // Base is now 12px for smaller UI elements 
-        'md': ['19px', '1.5'],
-        'lg': ['19px', '1.5'], // Large maps to 19px
-        'xl': ['19px', '1.5'],
-        '2xl': ['31px', '1.2'], // 2xl+ maps to 31px (headings)
-        '3xl': ['31px', '1.2'],
-        '4xl': ['31px', '1.2'],
-        '5xl': ['31px', '1.2'],
-        '6xl': ['31px', '1.2'],
+        'xs': ['1rem', '1.4'],        // 16px — teks isi, label, meta
+        'sm': ['1rem', '1.4'],
+        'base': ['1rem', '1.4'],
+        'md': ['1.3125rem', '1.4'],   // 21px — judul kartu, angka, tombol utama
+        'lg': ['1.3125rem', '1.4'],
+        'xl': ['1.3125rem', '1.4'],
+        '2xl': ['2.0625rem', '1.2'],  // 33px — judul layar
+        '3xl': ['2.0625rem', '1.2'],
+        '4xl': ['2.0625rem', '1.2'],
+        '5xl': ['2.0625rem', '1.2'],
+        '6xl': ['2.0625rem', '1.2'],
       },
       fontFamily: {
         sans: ['"Inter"', 'ui-sans-serif', 'system-ui', 'sans-serif'],

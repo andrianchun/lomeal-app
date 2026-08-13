@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { X, Search, Check, Beaker, Coffee, CupSoda, GlassWater, Pill } from 'lucide-react';
+import { X, Search, Check, ChevronDown, Beaker, Coffee, CupSoda, GlassWater, Pill } from 'lucide-react';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
-import { EMPTY_NUTRITION, addNutrition } from '../data/nutrition';
+import { EMPTY_NUTRITION, addNutrition, NUTRIENTS } from '../data/nutrition';
 import useBackClose from '../hooks/useBackClose';
 
 const ICONS = { Beaker, Coffee, CupSoda, GlassWater, Pill };
@@ -21,6 +21,7 @@ const COLORS = [
 const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods }) => {
   useBackClose(true, () => setEditing(null)); // cuma di-render selagi kebuka — mount = buka, unmount = tutup
   const [ingSearch, setIngSearch] = useState('');
+  const [showMicros, setShowMicros] = useState(false);
 
   const ingResults = useMemo(() => ingSearch ? searchFoods(ingSearch, customFoods).slice(0, 8) : [], [ingSearch, customFoods]);
 
@@ -75,7 +76,7 @@ const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods 
 
       <div>
         <p className={`caption font-bold mb-2 ${t.textMuted}`}>Pilih Warna</p>
-        <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-2">
+        <div className="flex flex-wrap gap-3 px-1 py-1">
           {COLORS.map(c => {
             const active = editing.color === c.id;
             return (
@@ -110,15 +111,17 @@ const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods 
         {editing.ingredients.map((ing, i) => (
           <div key={i} className={`flex items-center gap-2 p-3 rounded-2xl border ${t.border} ${t.bgCard}`}>
             <p className={`body-md flex-1 ${t.textMain}`}>{ing.name}</p>
-            <input type="number" inputMode="numeric" value={ing.grams}
+            <input type="number" inputMode="numeric" value={ing.grams || ''} placeholder="0"
               onChange={(e) => {
                 const grams = Number(e.target.value) || 0;
                 setEditing(r => ({
                   ...r,
                   ingredients: r.ingredients.map((x, j) => {
                     if (j !== i) return x;
-                    const factor = x.grams > 0 ? grams / x.grams : 0;
-                    return { ...x, grams, nutrition: Object.fromEntries(Object.entries(x.nutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])) };
+                    const bg = x.baseGrams || (x.grams > 0 ? x.grams : 100);
+                    const bn = x.baseNutrition || x.nutrition;
+                    const factor = bg > 0 ? grams / bg : 0;
+                    return { ...x, grams, baseGrams: bg, baseNutrition: bn, nutrition: Object.fromEntries(Object.entries(bn).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])) };
                   }),
                 }));
               }}
@@ -152,6 +155,26 @@ const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods 
             <p className={`caption ${t.textMuted}`}>Lemak</p>
           </div>
         </div>
+
+        <button onClick={() => setShowMicros(!showMicros)}
+          className={`w-full flex items-center justify-center gap-1 mt-4 py-2 caption font-bold rounded-xl ${t.bgCard} ${t.textMuted} active:scale-[0.98] transition-transform`}>
+          {showMicros ? 'Sembunyikan Mikronutrien' : 'Lihat Mikronutrien'}
+          <ChevronDown size={14} className={`transition-transform duration-300 ${showMicros ? 'rotate-180' : ''}`} />
+        </button>
+
+        {showMicros && (
+          <div className={`mt-2 rounded-xl border ${t.border} ${theme === 'dark' ? 'bg-black/20' : 'bg-white/50'} divide-y ${t.border}`}>
+            {NUTRIENTS.filter(n => !n.macro && draftTotals[n.key]).map(n => (
+              <div key={n.key} className="flex justify-between px-3 py-2.5">
+                <span className={`caption ${t.textMuted}`}>{n.label}</span>
+                <span className={`caption font-bold ${t.textMain}`}>{Math.round(draftTotals[n.key] * 10) / 10} {n.unit}</span>
+              </div>
+            ))}
+            {!NUTRIENTS.some(n => !n.macro && draftTotals[n.key]) && (
+              <div className={`px-4 py-3 caption text-center ${t.textMuted}`}>Tidak ada data nutrisi mikro.</div>
+            )}
+          </div>
+        )}
       </div>
 
       <button disabled={!editing.name} onClick={handleSave}

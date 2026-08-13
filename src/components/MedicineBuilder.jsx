@@ -62,7 +62,7 @@ const MedicineBuilder = ({ t, editing, setEditing, onSave }) => {
 
       <div>
         <p className={`caption font-bold mb-2 ${t.textMuted}`}>Pilih Warna Penanda</p>
-        <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-2">
+        <div className="flex flex-wrap gap-3 px-1 py-1">
           {COLORS.map(c => {
             const active = editing.color === c.id;
             return (
