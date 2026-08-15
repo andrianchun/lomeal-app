@@ -11,6 +11,11 @@ export const buildTheme = (theme) => ({
   bgApp: theme === 'dark' ? 'app-bg-dark' : 'app-bg-light',
   bgCard: theme === 'dark' ? 'bg-white/[0.045] glass-card' : 'bg-white/60 glass-card',
   bgCardSoft: theme === 'dark' ? 'bg-white/[0.02] glass-card' : 'bg-black/[0.02] glass-card',
+  // Permukaan legap, TANPA backdrop-filter. Wajib dipakai untuk apa pun yang punya animasi
+  // masuk: `opacity`/`transform` pada ancestor menjadikannya backdrop root di Chromium, jadi
+  // elemen `glass-card` di dalamnya kehilangan sampel latarnya selama animasi berjalan lalu
+  // blur-nya menyala mendadak begitu animasi selesai — itu yang terlihat sebagai kedipan layer.
+  bgCardSolid: theme === 'dark' ? 'bg-[#0f1d16]' : 'bg-white',
   bgSunken: theme === 'dark' ? 'bg-black/25' : 'bg-black/5',
   textMain: theme === 'dark' ? 'text-slate-100' : 'text-slate-900',
   textMuted: theme === 'dark' ? 'text-slate-400' : 'text-slate-500',

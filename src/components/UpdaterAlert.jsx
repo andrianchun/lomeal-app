@@ -41,9 +41,11 @@ export default function UpdaterAlert({
     : newVersion ? `v${newVersion}` : null;
 
   if (force) {
+    // Scrim sengaja TIDAK ikut di-fade: elemen ber-backdrop-filter yang animasi opacity-nya
+    // sendiri bikin blur baru menyala setelah animasi selesai (kedipan layer).
     return (
-      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-        <div className={`w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl ${t.bgCard} ${t.border} ${t.textMain} flex flex-col items-center text-center scale-in-center animate-in zoom-in-95 duration-500 backdrop-blur-xl`}>
+      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 bg-black/80 backdrop-blur-md">
+        <div className={`w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl ${t.bgCardSolid} border ${t.border} ${t.textMain} flex flex-col items-center text-center animate-in zoom-in-95 duration-500`}>
           <div className="pt-8 pb-4">
             <img src="/maskable-icon-512x512.png" alt="Lomeal Logo" className="w-24 h-24 mx-auto rounded-2xl shadow-lg mb-4 bg-white/5 border border-white/10 p-2" />
             <h2 className={`text-2xl font-bold tracking-tight mb-2 bg-clip-text text-transparent bg-gradient-to-br ${t.gradientText}`}>Update Penting!</h2>
@@ -83,7 +85,7 @@ export default function UpdaterAlert({
   // Update opsional — kartu di dasbor, bisa ditutup
   return (
     <div className="fixed bottom-24 inset-x-4 z-[100] flex justify-center pointer-events-none animate-in slide-in-from-bottom-8 fade-in duration-500">
-      <div className={`pointer-events-auto ${t.bgCard} ${t.textMain} rounded-2xl p-4 shadow-2xl ${t.shadowAccent} w-full max-w-sm border ${t.borderAccentSoft} flex flex-col gap-3 relative overflow-hidden backdrop-blur-xl`}>
+      <div className={`pointer-events-auto ${t.bgCardSolid} ${t.textMain} rounded-2xl p-4 shadow-2xl ${t.shadowAccent} w-full max-w-sm border ${t.borderAccentSoft} flex flex-col gap-3 relative overflow-hidden`}>
         {/* Tombol tutup disembunyikan saat mengunduh supaya kartu (dan progresnya) tidak hilang di tengah jalan */}
         {!downloading && (
           <div className="absolute top-0 right-0 p-2">

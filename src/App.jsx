@@ -1099,8 +1099,8 @@ function App() {
 
         {/* CUSTOM PWA INSTALL PROMPT (Rendered at top-level) */}
         {showInstallPrompt && (
-          <div className="fixed inset-0 z-[200] flex items-end justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-            <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center animate-in slide-in-from-bottom-8 duration-300 ${darkTheme.bgCard} ${darkTheme.border} border`}>
+          <div className="fixed inset-0 z-[200] flex items-end justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center animate-in slide-in-from-bottom-8 duration-300 ${darkTheme.bgCardSolid} ${darkTheme.border} border`}>
               <img src="/pwa-192x192.png" className="w-20 h-20 rounded-2xl mb-4 shadow-xl border border-white/10" alt="Lomeal Logo" />
               <h3 className={`text-xl font-black ${darkTheme.textMain} mb-2`}>Install Lomeal App</h3>
               <p className={`text-sm ${darkTheme.textMuted} mb-6`}>Install aplikasi Lomeal di perangkatmu untuk akses lebih cepat, fitur asisten harian, dan pengalaman yang lebih mulus.</p>
