@@ -39,13 +39,40 @@ export const NUTRIENTS = [
   { key: 'vitE', label: 'Vitamin E', macro: false, unit: 'mg' },
   { key: 'vitK', label: 'Vitamin K', macro: false, unit: 'mcg' },
   { key: 'omega3', label: 'Omega-3', macro: false, unit: 'mg' },
+  // Zat ergogenik/stimulan. Jarang ada di tabel gizi makanan biasa, tapi ini yang dipantau
+  // orang dari suplemen dan minuman berenergi — dan yang paling terasa efeknya ke latihan.
+  { key: 'caffeine',  label: 'Kafein',      macro: false, unit: 'mg', supplement: true },
+  { key: 'theanine',  label: 'L-Theanine',  macro: false, unit: 'mg', supplement: true },
+  { key: 'carnitine', label: 'L-Carnitine', macro: false, unit: 'mg', supplement: true },
+  { key: 'creatine',  label: 'Kreatin',     macro: false, unit: 'mg', supplement: true },
+  { key: 'bcaa',      label: 'BCAA',        macro: false, unit: 'mg', supplement: true },
+  { key: 'taurine',   label: 'Taurin',      macro: false, unit: 'mg', supplement: true },
 ];
 
-export const EMPTY_NUTRITION = { kcal: 0, protein: 0, carbs: 0, fat: 0, sodium: 0, sugar: 0, cholesterol: 0, satFat: 0, transFat: 0, polyFat: 0, monoFat: 0, iron: 0, calcium: 0, purine: 0, fiber: 0, kalium: 0, fosfor: 0, zinc: 0, tembaga: 0, magnesium: 0, vitA: 0, vitB1: 0, vitB2: 0, vitB3: 0, vitB6: 0, vitB9: 0, vitB12: 0, vitC: 0, vitD: 0, vitE: 0, vitK: 0, omega3: 0 };
+export const EMPTY_NUTRITION = Object.fromEntries(NUTRIENTS.map((n) => [n.key, 0]));
+
+/**
+ * Nutrien di luar daftar resmi, hasil AI membaca label yang tidak standar
+ * (mis. ashwagandha, elektrolit merek tertentu). Bentuknya { key: { value, unit, label } }.
+ * Sengaja dipisah dari objek nutrisi utama supaya tidak ada key liar yang bocor ke
+ * perhitungan target, chart, dan filter — semua itu mengandalkan daftar NUTRIENTS.
+ */
+export const addExtraNutrients = (a = {}, b = {}, factor = 1) => {
+  const out = { ...a };
+  for (const [key, v] of Object.entries(b)) {
+    const value = (Number(v?.value) || 0) * factor;
+    if (!value) continue;
+    out[key] = out[key]
+      ? { ...out[key], value: out[key].value + value }
+      : { value, unit: v.unit || '', label: v.label || key };
+  }
+  return out;
+};
 
 export const addNutrition = (a, b, factor = 1) => {
   const out = { ...a };
   NUTRIENTS.forEach(({ key }) => { out[key] = (out[key] || 0) + (Number(b?.[key]) || 0) * factor; });
+  if (b?.extraNutrients) out.extraNutrients = addExtraNutrients(a?.extraNutrients, b.extraNutrients, factor);
   return out;
 };
 
@@ -86,6 +113,7 @@ export const nutritionForAmount = (food, grams) => {
 export const scaleNutrition = (n, factor) => {
   const out = {};
   NUTRIENTS.forEach(({ key }) => { out[key] = (Number(n?.[key]) || 0) * factor; });
+  if (n?.extraNutrients) out.extraNutrients = addExtraNutrients({}, n.extraNutrients, factor);
   return out;
 };
 

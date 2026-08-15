@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { db } from '../firebase';
-import { doc, setDoc, increment } from 'firebase/firestore';
+import { doc, setDoc, increment, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { Search, Plus, Camera, Image, X, Pencil, Loader2, ChevronLeft, Database, Globe, Star, AlertTriangle, Heart, Filter, ChevronDown, Home, Beaker, Coffee, CupSoda, GlassWater, Pill, Syringe, Tablets, ShieldPlus } from 'lucide-react';
 import { searchFoods, FOOD_CATEGORIES, getDefaultImageForFood, nutritionForAmount } from '../data/foodDatabase';
 import { AI_DAILY_LIMIT } from '../data/constants';
@@ -12,7 +12,9 @@ import { compressImageForAI, analyzeSmartPhoto } from '../utils/aiFood';
 import { playSoundEffect } from '../utils/audio';
 import { checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
 import { isNativeApp, captureToFile } from '../utils/nativeCamera';
-import { sortFoodsByUsage } from '../utils/foodUsage';
+import { sortFoodsByUsage, sortFoodsByPopularity, sortFoodsByNewest, hydrateFoodUsage } from '../utils/foodUsage';
+import { matchDomusItem } from '../utils/domusSync';
+import { itemStock, formatStock } from '../utils/stockConverter';
 import ImageCropperModal from '../components/ImageCropperModal';
 import AttachmentMenu from '../components/AttachmentMenu';
 import useBackClose from '../hooks/useBackClose';
@@ -40,9 +42,19 @@ const emptyForm = () => {
   return obj;
 };
 
+const SORT_OPTIONS = [
+  { id: 'favorit', label: 'Terfavorit', hint: 'Paling sering kamu catat' },
+  { id: 'populer', label: 'Terpopuler', hint: 'Paling sering dicatat semua pengguna Lomeal' },
+  { id: 'baru', label: 'Terbaru', hint: 'Paling baru kamu tambahkan' },
+  { id: 'az', label: 'A - Z' },
+  { id: 'za', label: 'Z - A' },
+  { id: 'nutrisi_desc', label: 'Nutrisi (Tinggi -> Rendah)' },
+  { id: 'nutrisi_asc', label: 'Nutrisi (Rendah -> Tinggi)' },
+];
+
 const UnifiedFoodCard = ({ f, t, favoriteFoods, toggleFavorite, setDetail, openEditForm, soundEnabled, domusItems }) => {
   const isFavorite = favoriteFoods.includes(f.id);
-  const domusMatch = domusItems.find(d => d.name.toLowerCase() === f.name.toLowerCase());
+  const domusMatch = matchDomusItem(domusItems, f.name);
   
   // Purin dikecualikan: hampir semua lauk punya nilai purin besar, jadi badge "Tinggi" selalu
   // dimenangkannya dan tidak pernah menunjukkan keunggulan gizi apa pun.
@@ -93,7 +105,7 @@ const UnifiedFoodCard = ({ f, t, favoriteFoods, toggleFavorite, setDetail, openE
           {f.isCustom && <span className={`px-1.5 py-0.5 rounded text-[8px] ${t.bgAccentSoft} ${t.textAccent} uppercase tracking-widest font-bold`}>Custom</span>}
           {domusMatch && (
             <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] bg-orange-500/10 text-orange-500 uppercase tracking-widest font-bold`}>
-              <Home size={8} /> {domusMatch.quantity} {domusMatch.unit || ''}
+              <Home size={8} /> {formatStock(itemStock(domusMatch)) || 'ada'}
             </span>
           )}
           {highestMicroStr && <span className={`text-[9px] ${t.textMuted} italic`}>{highestMicroStr}</span>}
@@ -152,11 +164,23 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
   const [term, setTerm] = useState('');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const [sortOrder, setSortOrder] = useState('popular');
+  const [sortOrder, setSortOrder] = useState('favorit');
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [popularity, setPopularity] = useState({});
   const [macroFilter, setMacroFilter] = useState([]);
   const [detail, setDetail] = useState(null);
   const [detailViewMode, setDetailViewMode] = useState('100g'); // '100g' | 'portion'
+
+  // Peringkat global cukup diambil sekali saat tabnya dibuka — angkanya berubah lambat dan
+  // ini bacaan lintas-user, bukan data pribadi yang perlu realtime.
+  useEffect(() => {
+    if (sortOrder !== 'populer' || Object.keys(popularity).length) return;
+    getDocs(query(collection(db, 'lomeal_food_popularity'), orderBy('count', 'desc'), limit(300)))
+      .then((snap) => setPopularity(Object.fromEntries(snap.docs.map((d) => [d.id, d.data().count || 0]))))
+      .catch((e) => console.error('[food_popularity] gagal baca:', e));
+  }, [sortOrder, popularity]);
+
+  useEffect(() => { hydrateFoodUsage(profile?.foodUsage); }, [profile?.foodUsage]);
 
   const MACRO_FILTERS = useMemo(() => {
     return [
@@ -221,8 +245,12 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     // jadi memilih "Vitamin C" tetap menampilkan makanan tanpa vitamin C sama sekali.
     if (macroFilter.length > 0) list = list.filter((f) => macroFilter.every(k => (f.nutrition[k] || 0) > 0));
 
-    if (sortOrder === 'popular') {
+    if (sortOrder === 'favorit') {
       list = sortFoodsByUsage(list, favoriteFoods);
+    } else if (sortOrder === 'populer') {
+      list = sortFoodsByPopularity(list, popularity);
+    } else if (sortOrder === 'baru') {
+      list = sortFoodsByNewest(list);
     } else if (sortOrder === 'az') {
       list.sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortOrder === 'za') {
@@ -239,7 +267,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     }
 
     return list.slice(0, viewMode === 'custom' ? 80 : 150);
-  }, [term, customFoods, viewMode, favoriteFoods, showFavoritesOnly, sortOrder, macroFilter]);
+  }, [term, customFoods, viewMode, favoriteFoods, showFavoritesOnly, sortOrder, macroFilter, popularity]);
 
   const inputCls = `w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`;
 
@@ -434,6 +462,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
       nutrition: per100,
       source: 'Custom',
       isCustom: true,
+      createdAt: isNew ? Date.now() : (editing.createdAt || null),
     };
 
     const next = isNew ? [...customFoods, item] : customFoods.map((f) => (f.id === item.id ? item : f));
@@ -590,7 +619,15 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
                       <span className={`body-md font-bold ${t.textMain}`}>{Math.round((detail.nutrition[k] || 0) * factor * 10) / 10}</span>
                     </div>
                   ))}
-                  {EXTRA_NUTRIENT_FIELDS.filter(([k]) => detail.nutrition[k] && detail.nutrition[k] !== 0).length === 0 && (
+                  {/* Zat di luar daftar resmi, hasil AI membaca label suplemen. */}
+                  {Object.entries(detail.nutrition.extraNutrients || {}).map(([k, e]) => (
+                    <div key={k} className="flex justify-between px-4 py-2.5">
+                      <span className={`body-md ${t.textMuted}`}>{e.label} ({e.unit})</span>
+                      <span className={`body-md font-bold ${t.textMain}`}>{Math.round((e.value || 0) * factor * 10) / 10}</span>
+                    </div>
+                  ))}
+                  {EXTRA_NUTRIENT_FIELDS.filter(([k]) => detail.nutrition[k] && detail.nutrition[k] !== 0).length === 0
+                    && Object.keys(detail.nutrition.extraNutrients || {}).length === 0 && (
                     <div className={`px-4 py-3 caption text-center ${t.textMuted}`}>Tidak ada data nutrisi mikro.</div>
                   )}
                 </div>
@@ -599,12 +636,12 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
           })()}
           
           {(() => {
-            const domusMatch = domusItems.find(d => d.name.toLowerCase() === detail.name.toLowerCase());
+            const domusMatch = matchDomusItem(domusItems, detail.name);
             if (!domusMatch) return null;
             return (
               <div className={`mt-4 p-4 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex flex-col items-center justify-center text-center space-y-1`}>
                 <Home size={24} className="text-orange-500 mb-1" />
-                <p className="text-orange-500 font-bold body-lg">Stok Domus: {domusMatch.quantity} {domusMatch.unit || ''}</p>
+                <p className="text-orange-500 font-bold body-lg">Sisa di Domus: {formatStock(itemStock(domusMatch)) || 'tidak tercatat'}</p>
                 <p className="text-orange-500/70 caption">Bahan ini tersedia di inventori rumah.</p>
               </div>
             );
@@ -791,11 +828,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
                   className={`px-3 py-1.5 rounded-lg ${t.inputBg} ${t.textMain} body-md outline-none cursor-pointer flex items-center justify-between min-w-[120px] gap-2`}
                 >
                   <span className="truncate whitespace-nowrap">
-                    {sortOrder === 'popular' ? 'Terpopuler' 
-                    : sortOrder === 'az' ? 'A - Z' 
-                    : sortOrder === 'za' ? 'Z - A'
-                    : sortOrder === 'nutrisi_desc' ? 'Nutrisi (Tinggi -> Rendah)'
-                    : 'Nutrisi (Rendah -> Tinggi)'}
+                    {SORT_OPTIONS.find(o => o.id === sortOrder)?.label || 'Urutkan'}
                   </span>
                   <ChevronDown size={12} className={`${t.textMuted} shrink-0`} />
                 </div>
@@ -803,14 +836,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setShowSortMenu(false)}></div>
                     <div className={`absolute top-full left-0 mt-1 min-w-[160px] z-50 bg-white dark:bg-[#1a1a1a] border ${t.border} rounded-xl shadow-lg overflow-hidden py-1`}>
-                      {[
-                        { id: 'popular', label: 'Terpopuler' },
-                        { id: 'az', label: 'A - Z' },
-                        { id: 'za', label: 'Z - A' },
-                        { id: 'nutrisi_desc', label: 'Nutrisi (Tinggi -> Rendah)' },
-                        { id: 'nutrisi_asc', label: 'Nutrisi (Rendah -> Tinggi)' },
-                      ].map(opt => (
-                        <div key={opt.id} onClick={() => { setSortOrder(opt.id); setShowSortMenu(false); }} className={`px-3 py-2 text-sm cursor-pointer whitespace-nowrap hover:${t.bgAccentSoft} ${sortOrder === opt.id ? t.textAccent : t.textMain}`}>
+                      {SORT_OPTIONS.map(opt => (
+                        <div key={opt.id} onClick={() => { setSortOrder(opt.id); setShowSortMenu(false); }} title={opt.hint} className={`px-3 py-2 text-sm cursor-pointer whitespace-nowrap hover:${t.bgAccentSoft} ${sortOrder === opt.id ? t.textAccent : t.textMain}`}>
                           {opt.label}
                         </div>
                       ))}

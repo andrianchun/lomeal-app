@@ -84,6 +84,16 @@ const MedicineBuilder = ({ t, editing, setEditing, onSave }) => {
         </div>
         
         <div>
+          <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Sisa Stok (Opsional)</p>
+          <div className="flex gap-2">
+            <input type="number" inputMode="numeric" min="0" placeholder="30" value={editing.stock ?? ''}
+              onChange={(e) => setEditing(r => ({ ...r, stock: e.target.value === '' ? null : Number(e.target.value) }))}
+              className={`w-24 px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} font-bold text-center outline-none`} />
+            <p className={`caption ${t.textMuted} flex-1 self-center`}>Sisa pil/tablet. Berkurang otomatis tiap dicentang; kalau habis, langsung masuk list belanja Domus.</p>
+          </div>
+        </div>
+
+        <div>
           <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Catatan Tambahan (Opsional)</p>
           <input type="text" placeholder="Sesudah makan..." value={editing.note} onChange={(e) => setEditing(r => ({ ...r, note: e.target.value }))}
             className={`w-full px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} outline-none text-sm`} />

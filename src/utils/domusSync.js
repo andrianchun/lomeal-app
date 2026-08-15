@@ -12,7 +12,7 @@ export async function fetchDomusItems(uid) {
 export function subscribeDomusItems(uid, cb) {
   const q = query(collection(db, 'domus_items'), where('uid', '==', uid));
   return onSnapshot(q, (snap) => {
-    // Only return active food items
+    // `isFood` = flag "kebaca Lomeal", dicentang di Domus (defaultnya ikut jenis lokasi).
     const items = snap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((i) => i.isFood && !i.consumedAt);
@@ -26,15 +26,28 @@ export function subscribeDomusLocations(uid, cb) {
     (err) => console.error('[domus_locations] error:', err));
 }
 
-// Cocokkan nama bahan resep ke item inventaris Domus. Sengaja longgar (saling-mengandung)
-// karena penamaan di Domus bebas: "Dada Ayam Fillet" vs bahan "dada ayam".
-// ponytail: belum ada kamus sinonim ("santan" ≠ "kelapa parut"); tambahkan kalau sering meleset.
+const norm = (s) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+
+/**
+ * Cocokkan nama bahan resep ke item inventaris Domus.
+ *
+ * Bertingkat: nama sama persis dulu, baru semua kata bahan harus ada di nama item.
+ * Saling-mengandung (versi lama) bikin item "Ayam" mencocoki bahan "Kaldu Ayam", lalu bahan itu
+ * ditandai tersedia dan hilang dari daftar belanja padahal kaldunya tidak pernah ada.
+ * ponytail: belum ada kamus sinonim ("santan" ≠ "kelapa parut"); tambahkan kalau sering meleset.
+ */
 export function matchDomusItem(domusItems, name) {
   if (!domusItems?.length || !name) return null;
-  const n = name.toLowerCase().trim();
+  const n = norm(name);
+  if (!n) return null;
+
+  const exact = domusItems.find((di) => norm(di.name) === n);
+  if (exact) return exact;
+
+  const words = n.split(' ');
   return domusItems.find((di) => {
-    const dn = (di.name || '').toLowerCase().trim();
-    return dn && (dn.includes(n) || n.includes(dn));
+    const dn = norm(di.name);
+    return dn && words.every((w) => dn.split(' ').includes(w));
   }) || null;
 }
 
@@ -42,21 +55,28 @@ export async function markDomusItemConsumed(id) {
   await updateDoc(doc(db, 'domus_items', id), { consumedAt: serverTimestamp() });
 }
 
-export async function updateDomusItemQuantity(id, newQuantity) {
-  await updateDoc(doc(db, 'domus_items', id), { quantity: newQuantity });
+const formatQty = (qtyValue, qtyUnit) =>
+  qtyValue == null || qtyValue === '' ? '' : `${qtyValue} ${qtyUnit || ''}`.trim();
+
+export async function updateDomusItemQuantity(id, qtyValue, qtyUnit = '') {
+  // `quantity` string ikut ditulis: bundle APK Lomeal lama dan Domus lama masih membacanya.
+  await updateDoc(doc(db, 'domus_items', id), { qtyValue, qtyUnit, quantity: formatQty(qtyValue, qtyUnit) });
 }
 
-export async function createDomusItem(uid, { name, locationId, quantity = '', isFood = true, sourceApp = 'lomeal' }) {
+export async function createDomusItem(uid, { name, locationId, qtyValue = null, qtyUnit = '', isFood = true, sourceApp = 'lomeal', ...rest }) {
   const id = crypto.randomUUID();
   await setDoc(doc(db, 'domus_items', id), {
     uid,
     name: name.trim(),
     locationId,
-    quantity,
+    qtyValue,
+    qtyUnit,
+    quantity: formatQty(qtyValue, qtyUnit),
     isFood,
     sourceApp,
     consumedAt: null,
     addedAt: serverTimestamp(),
+    ...rest,
   });
   return id;
 }

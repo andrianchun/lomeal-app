@@ -4,6 +4,7 @@ import { NUTRIENTS } from '../data/nutrition';
 import { heroForRecipe, formatDuration, formatClock } from '../data/constants';
 import { STATUS } from '../theme';
 import { matchDomusItem, requestShoppingListDomus } from '../utils/domusSync';
+import { stockInGrams, itemStock, formatStock } from '../utils/stockConverter';
 import { PillTabs, CheckBox } from './RecipeBits';
 import useBackClose from '../hooks/useBackClose';
 
@@ -16,7 +17,10 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
   const [servings, setServings] = useState(Math.max(1, Number(recipe.portions) || 1));
   const [tab, setTab] = useState('bahan');
   const [showMicros, setShowMicros] = useState(false);
-  const [checked, setChecked] = useState(() => new Set());
+  // Centang bahan = niat user, TERPISAH dari ketersediaan stok. Dulu bahan yang ke-match
+  // inventaris dipaksa tercentang dan klik-nya diblokir, jadi salah match tidak bisa dibatalkan
+  // dan bahan itu ikut hilang dari daftar belanja. Di sini stok cuma jadi nilai awal.
+  const [overrides, setOverrides] = useState(() => new Map());
   const [cartBusy, setCartBusy] = useState(false);
   const [cartDone, setCartDone] = useState(false);
   const isDark = theme === 'dark';
@@ -28,23 +32,33 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
   const perPortion = recipe.perPortion || {};
   const components = recipe.components || [];
 
-  const toggle = (key) => setChecked((s) => {
-    const next = new Set(s);
-    next.has(key) ? next.delete(key) : next.add(key);
-    return next;
-  });
+  const toggle = (key, current) => setOverrides((m) => new Map(m).set(key, !current));
 
   const totalSteps = useMemo(() => components.reduce((n, c) => n + c.steps.length, 0), [components]);
 
   // Cek bahan ke inventaris Domus — biar user tahu apa yang harus dibeli SEBELUM mulai masak,
-  // bukan pas wajan sudah panas. Dedupe pakai Set: satu bahan cuma sekali masuk keranjang.
-  const missing = useMemo(
-    () => [...new Set(recipe.ingredients.filter((ing, i) => {
-      const inStock = !!matchDomusItem(domusItems, ing.rawName || ing.name);
-      return !inStock && !checked.has(`i${i}`);
-    }).map((ing) => ing.rawName || ing.name))],
-    [recipe.ingredients, domusItems, checked]
-  );
+  // bukan pas wajan sudah panas.
+  const rows = useMemo(() => recipe.ingredients.map((ing, i) => {
+    const key = `i${i}`;
+    const name = ing.rawName || ing.name;
+    const needed = Math.round((ing.grams || 0) * factor);
+    const match = matchDomusItem(domusItems, name);
+    const have = match ? stockInGrams(match) : null;
+    // Stok tak terukur (satuan aneh / kosong) dianggap cukup — user yang tahu isi dapurnya.
+    const enough = !!match && (have == null || have >= needed);
+    const on = overrides.has(key) ? overrides.get(key) : enough;
+    return { key, name, needed, match, have, enough, on, shortfall: have != null ? Math.max(0, needed - have) : 0 };
+  }), [recipe.ingredients, domusItems, factor, overrides]);
+
+  // Bahan yang belum dicentang perlu dibeli. Kalau stoknya ada tapi kurang, cukup beli selisihnya.
+  const missing = useMemo(() => {
+    const seen = new Map();
+    for (const r of rows) {
+      if (r.on || seen.has(r.name)) continue;
+      seen.set(r.name, r.shortfall > 0 ? `${r.name} (${r.shortfall} g lagi)` : r.name);
+    }
+    return [...seen.values()];
+  }, [rows]);
 
   const addMissingToCart = async () => {
     setCartBusy(true);
@@ -162,19 +176,23 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
                 <p className={`caption italic opacity-70 ${t.textMuted}`}>Gramasi untuk {servings} porsi (resep asli {basePortions} porsi)</p>
               )}
               <div className="space-y-0.5">
-                {recipe.ingredients.map((ing, i) => {
-                  const key = `i${i}`;
-                  const inStock = !!matchDomusItem(domusItems, ing.rawName || ing.name);
-                  const on = inStock || checked.has(key);
-                  return (
-                    <button key={key} onClick={() => !inStock && toggle(key)} className={`w-full flex items-start gap-3 py-2.5 text-left ${inStock ? 'cursor-default opacity-80' : 'active:scale-[0.98] transition-transform'}`}>
-                      <span className={`w-1.5 h-1.5 shrink-0 rounded-full mt-2 ${inStock ? (isDark ? 'bg-white' : 'bg-black') : (isDark ? 'bg-white/20' : 'bg-black/20')}`} />
-                      <span className={`flex-1 body-md ${on ? `line-through ${t.textMuted}` : t.textMain}`}>{ing.rawName || ing.name}</span>
-                      <span className={`caption font-medium tabular-nums ${t.textMuted} pt-0.5`}>{Math.round((ing.grams || 0) * factor)} g</span>
-                      <CheckBox t={t} checked={on} />
-                    </button>
-                  );
-                })}
+                {rows.map((r) => (
+                  <button key={r.key} onClick={() => toggle(r.key, r.on)} className="w-full flex items-start gap-3 py-2.5 text-left active:scale-[0.98] transition-transform">
+                    <span className={`w-1.5 h-1.5 shrink-0 rounded-full mt-2 ${r.match ? (isDark ? 'bg-white' : 'bg-black') : (isDark ? 'bg-white/20' : 'bg-black/20')}`} />
+                    <span className="flex-1 min-w-0">
+                      <span className={`block body-md ${r.on ? `line-through ${t.textMuted}` : t.textMain}`}>{r.name}</span>
+                      {r.match && (
+                        <span className={`block caption ${r.enough ? t.textMuted : 'text-amber-500'}`}>
+                          {r.have == null
+                            ? `ada di ${r.match.name}`
+                            : `sisa ${formatStock(itemStock(r.match))}${r.shortfall > 0 ? ` · kurang ${r.shortfall} g` : ''}`}
+                        </span>
+                      )}
+                    </span>
+                    <span className={`caption font-medium tabular-nums ${t.textMuted} pt-0.5`}>{r.needed} g</span>
+                    <CheckBox t={t} checked={r.on} />
+                  </button>
+                ))}
               </div>
 
               {missing.length > 0 && (

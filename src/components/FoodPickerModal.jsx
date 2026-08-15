@@ -3,7 +3,8 @@ import { X, Search, ChefHat, Plus, Star, Box, Sparkles, PenLine } from 'lucide-r
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { scaleNutrition, EMPTY_NUTRITION } from '../data/nutrition';
 import { makeEntry } from '../utils/foodLog';
-import { recordFoodUsage, sortFoodsByUsage } from '../utils/foodUsage';
+import { sortFoodsByUsage } from '../utils/foodUsage';
+import { itemStock, formatStock } from '../utils/stockConverter';
 import useBackClose from '../hooks/useBackClose';
 
 
@@ -30,7 +31,6 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
 
   const addFood = (food) => {
     const grams = food.portion?.grams || 100;
-    recordFoodUsage(food.id);
     onAdd(makeEntry({
       name: food.name, foodId: food.id, grams, unit: food.unit,
       nutrition: nutritionForAmount(food, grams), source: 'db',
@@ -154,7 +154,7 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
                     <p className={`body-md ${t.textMain} truncate flex items-center gap-1`}>
                       {item.name}
                     </p>
-                    <p className={`caption font-medium ${t.textMuted}`}>Stok: {item.quantity || '?'}</p>
+                    <p className={`caption font-medium ${t.textMuted}`}>Sisa: {formatStock(itemStock(item)) || '?'}</p>
                   </div>
                   <span className={`shrink-0 ml-2 p-2 rounded-full ${t.bgAccentSoft} ${t.textAccent}`}><Plus size={18} /></span>
                 </button>

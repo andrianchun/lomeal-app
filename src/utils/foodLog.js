@@ -107,14 +107,23 @@ const migrateInlinePhotos = async (uid, monthKey, days) => {
 };
 
 // Entry makanan: { id, name, grams, unit, nutrition, foodId?, photoUrl?, time, source, baseNutrition?, baseGrams? }
-export const makeEntry = (data) => ({
-  id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-  time: new Date().toTimeString().slice(0, 5),
-  source: 'db',
-  baseNutrition: data.baseNutrition || data.nutrition,
-  baseGrams: data.baseGrams || (data.grams > 0 ? data.grams : 1),
-  ...data,
-});
+// Hitungan pemakaian dicatat DI SINI, bukan di tiap pemanggil. Dulu cuma FoodPickerModal yang
+// memanggilnya, jadi makanan yang dicatat lewat parser teks, foto, resep, atau inbox tidak
+// pernah terhitung — dan "Terpopuler" praktis kosong. Satu titik lewat = tidak ada yang lolos.
+let usageRecorder = null;
+export const setUsageRecorder = (fn) => { usageRecorder = fn; };
+
+export const makeEntry = (data) => {
+  if (data.foodId) usageRecorder?.(data.foodId);
+  return {
+    id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    time: new Date().toTimeString().slice(0, 5),
+    source: 'db',
+    baseNutrition: data.baseNutrition || data.nutrition,
+    baseGrams: data.baseGrams || (data.grams > 0 ? data.grams : 1),
+    ...data,
+  };
+};
 
 // ---------- RESEP & CUSTOM FOODS (dokumen tunggal berisi array) ----------
 export const subscribeRecipes = (uid, cb) =>
@@ -143,6 +152,18 @@ export const subscribeCustomFoods = (uid, cb) =>
 
 export const saveCustomFoods = (uid, items) =>
   setDoc(flDoc(uid, 'custom_foods'), { items }, { merge: false });
+
+// Hasil lab ikut menumpang koleksi food_logs (satu dokumen berisi array, pola sama seperti
+// recipes/custom_foods) supaya tidak perlu rules Firestore baru. Volumenya beberapa entri
+// per tahun, jauh dari limit 1 MiB per dokumen.
+export const subscribeLabResults = (uid, cb) =>
+  onSnapshot(flDoc(uid, 'lab_results'), (snap) => {
+    if (!snap.exists() && snap.metadata.fromCache) return;
+    cb(snap.exists() ? (snap.data().items || []) : []);
+  });
+
+export const saveLabResults = (uid, items) =>
+  setDoc(flDoc(uid, 'lab_results'), { items }, { merge: false });
 
 export const subscribeInbox = (uid, cb) => {
   const q = query(

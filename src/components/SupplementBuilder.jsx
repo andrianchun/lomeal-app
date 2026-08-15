@@ -177,6 +177,16 @@ const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods 
         )}
       </div>
 
+      <div className={`p-4 rounded-2xl border ${t.border} ${t.bgCard}`}>
+        <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Sisa Stok (Opsional)</p>
+        <div className="flex gap-2">
+          <input type="number" inputMode="numeric" min="0" placeholder="30" value={editing.stock ?? ''}
+            onChange={(e) => setEditing(r => ({ ...r, stock: e.target.value === '' ? null : Number(e.target.value) }))}
+            className={`w-24 px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} font-bold text-center outline-none`} />
+          <p className={`caption ${t.textMuted} flex-1 self-center`}>Sisa sachet/takaran. Berkurang tiap dicatat; kalau habis, masuk list belanja Domus.</p>
+        </div>
+      </div>
+
       <button disabled={!editing.name} onClick={handleSave}
         className={`w-full py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40 flex items-center justify-center gap-2`}>
         <Check size={18} /> Simpan ke Rak

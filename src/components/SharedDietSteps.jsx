@@ -67,7 +67,6 @@ export const SharedDietStepRenderer = ({
   onHealthConnect,
   onAppleHealth,
   fromLogym,
-  onSyncDarka
 }) => {
   // Dipanggil TANPA SYARAT (bukan di dalam if (stepKey === 'consent')) — hook gak boleh
   // bersyarat. Aman dipanggil buat semua step (cuma dipakai kalau stepKey === 'consent'),
@@ -89,15 +88,6 @@ export const SharedDietStepRenderer = ({
     // Sengaja cuma sekali per mount (stepKey tetap seumur hidup instance ini, lihat
     // komentar showLegalModal) — onSyncDomus dari parent bikin fungsi baru tiap render,
     // kalau dimasukkan ke deps bakal fetch ulang ke Firestore tiap kali parent re-render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const [darkaItems, setDarkaItems] = useState(null);
-  useEffect(() => {
-    if (stepKey !== 'kulkas' || !onSyncDarka) return;
-    let cancelled = false;
-    onSyncDarka().then((items) => { if (!cancelled) setDarkaItems(items || []); });
-    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -576,25 +566,6 @@ export const SharedDietStepRenderer = ({
           </div>
         )}
 
-        {/* Darka Inbox */}
-        {darkaItems && darkaItems.length > 0 && (
-          <div className="mt-2">
-            <p className={`text-[10px] font-bold ${t.textMuted} mb-2`}>Darka</p>
-            <div className="flex flex-wrap gap-2">
-              {darkaItems.map(f => {
-                const isSelected = kulkasList.some(item => item.id === f.id);
-                return (
-                  <button key={f.id}
-                    onClick={() => toggleKulkas(f)}
-                    className={`px-3 py-1.5 rounded-full border text-sm transition-all ${isSelected ? `${t.bgAccent} ${t.borderAccent} text-white` : `${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'} ${t.textMuted}`}`}
-                  >
-                    {f.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
     );
   }

@@ -7,7 +7,7 @@ import { STATUS } from '../theme';
 import { makeEntry } from '../utils/foodLog';
 import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from '../utils/aiFood';
 import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, markDomusItemConsumed, matchDomusItem } from '../utils/domusSync';
-import { deductStock } from '../utils/stockConverter';
+import { deductStock, stockInGrams, itemStock, formatStock } from '../utils/stockConverter';
 import { db } from '../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import RecipeBuilder from '../components/RecipeBuilder';
@@ -165,12 +165,18 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
       const match = matchDomusItem(domusItems, ing.name);
       if (!match) { missing.add(ing.name); continue; }
       try {
-        const newQtyStr = deductStock(match.quantity, Number(ing.grams || 0) * factor);
-        if (newQtyStr === '0' || newQtyStr === null) {
+        const needed = Number(ing.grams || 0) * factor;
+        const res = deductStock(match, needed);
+        // `ok: false` = jumlahnya tidak bisa dihitung (kosong / "secukupnya"), BUKAN habis.
+        // Dulu keduanya sama-sama null dan itemnya ikut ditandai habis lalu lenyap dari Domus.
+        if (!res.ok) continue;
+        if (res.depleted) {
           await markDomusItemConsumed(match.id);
-          missing.add(ing.name);
+          const have = stockInGrams(match);
+          // Belanja cuma kekurangannya, bukan seluruh kebutuhan resep.
+          missing.add(have != null && have > 0 ? `${ing.name} (${Math.ceil(needed - have)} g lagi)` : ing.name);
         } else {
-          await updateDomusItemQuantity(match.id, newQtyStr);
+          await updateDomusItemQuantity(match.id, res.value, res.unit);
         }
       } catch (e) {
         console.error(`Gagal potong stok untuk ${ing.name}`, e);
@@ -252,7 +258,8 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
           const domusItemId = await createDomusItem(user.uid, {
             name: `${r.name} (Meal Prep)`,
             locationId,
-            quantity: `${stockPortions} porsi`,
+            qtyValue: stockPortions,
+            qtyUnit: 'porsi',
             isFood: true,
             sourceApp: 'lomeal',
             kind: 'mealprep',
@@ -693,7 +700,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                               <div className="flex-1 min-w-0">
                                 <p className={`font-bold ${t.textMain} line-clamp-3`}>{i.name}</p>
                                 <p className={`caption mt-0.5 ${t.textMuted}`}>
-                                  Sisa: {i.quantity || '?'}
+                                  Sisa: {formatStock(itemStock(i)) || '?'}
                                   {i.nutrition?.kcal ? ` · ${Math.round(i.nutrition.kcal)}Kcal · ${macroText(i.nutrition)}` : ''}
                                 </p>
                               </div>
@@ -709,12 +716,15 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                                 <CalendarPlus size={12} /> Jadwal
                               </button>
                               <button onClick={() => {
-                                const newQty = window.prompt(`Ubah sisa stok menjadi berapa? (Kosongkan/0 untuk buang semua)\nSaat ini: ${i.quantity || '-'}`, i.quantity || '');
-                                if (newQty === null) return;
-                                if (!newQty || newQty.trim() === '0') {
+                                const cur = itemStock(i);
+                                const input = window.prompt(`Sisa stok tinggal berapa? (0 untuk buang semua)\nSaat ini: ${formatStock(cur) || '-'}`, cur ? String(cur.value) : '');
+                                if (input === null) return;
+                                const val = Number(input);
+                                if (!Number.isFinite(val)) return showToast('Isi dengan angka ya.');
+                                if (val <= 0) {
                                   markDomusItemConsumed(i.id).then(() => showToast('Dibuang dari Domus!'));
                                 } else {
-                                  updateDomusItemQuantity(i.id, newQty.trim()).then(() => showToast('Sisa stok diupdate!'));
+                                  updateDomusItemQuantity(i.id, val, cur?.unit || i.qtyUnit || '').then(() => showToast('Sisa stok diupdate!'));
                                 }
                               }} className={`px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 caption font-bold flex items-center gap-1`}>
                                 <Trash2 size={12} /> Buang

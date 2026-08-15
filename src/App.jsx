@@ -12,8 +12,9 @@ import {
   subscribeMealPreps, saveMealPreps,
   subscribeCustomFoods, saveCustomFoods,
   subscribeInbox, markInboxClaimed,
-  deleteAllUserData,
+  deleteAllUserData, setUsageRecorder,
 } from './utils/foodLog';
+import { recordFoodUsage } from './utils/foodUsage';
 import { subscribeDomusItems, subscribeDomusLocations } from './utils/domusSync';
 import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitProfile, fetchLyfitYear } from './utils/lyfitSync';
 import {
@@ -284,6 +285,19 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     return saveLomealProfile(user.uid, { ...patch, targets });
   }, [user, profile]);
   const updateSetting = useCallback((key, value) => saveProfilePatch({ settings: { [key]: value } }), [saveProfilePatch]);
+
+  // Dipasang sekali; makeEntry memanggilnya dari SEMUA jalur pencatatan (picker, parser teks,
+  // foto, resep, inbox) supaya hitungan "Terfavorit"/"Terpopuler" tidak bocor lagi.
+  useEffect(() => {
+    if (!user?.uid) return setUsageRecorder(null);
+    setUsageRecorder((foodId) => {
+      const prev = profile?.foodUsage?.[foodId] || { count: 0, lastUsed: 0 };
+      const entry = { count: prev.count + 1, lastUsed: Date.now() };
+      recordFoodUsage(foodId, { uid: user.uid });
+      saveProfilePatch({ foodUsage: { ...(profile?.foodUsage || {}), [foodId]: entry } });
+    });
+    return () => setUsageRecorder(null);
+  }, [user?.uid, profile?.foodUsage, saveProfilePatch]);
 
   // --- Log harian: subscribe per-bulan, digabung jadi satu daysMap ---
   const [monthsData, setMonthsData] = useState({});

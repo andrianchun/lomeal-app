@@ -5,6 +5,8 @@ import RingChart from '../components/RingChart';
 import NutritionChart from '../components/NutritionChart';
 import TargetSettingsModal from '../components/TargetSettingsModal';
 import BiometricSettingsModal from '../components/BiometricSettingsModal';
+import LabResultsCard from '../components/LabResultsCard';
+import { nutrientSources } from '../utils/nutrientSources';
 import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS } from '../data/nutrition';
 import { STATUS, statusFor, MACRO_COLORS } from '../theme';
 import { MEAL_SESSIONS, getLocalYMD, getMonthKey } from '../data/constants';
@@ -18,7 +20,7 @@ import useBackClose from '../hooks/useBackClose';
  */
 const DashboardTab = ({ 
   t, theme, user, logymUser, profile, daysMap, lyfitToday, lyfitYearData, saveProfilePatch, todayYmd = getLocalYMD(),
-  showAlert, showToast, ensureMonth
+  showAlert, showToast, showConfirm, aiKey, ensureMonth
 }) => {
   const [showAiModal, setShowAiModal] = useState(false);
   const [showProfileInfo, setShowProfileInfo] = useState(false);
@@ -374,6 +376,10 @@ const DashboardTab = ({
       </div>
       </div>
 
+      <LabResultsCard
+        t={t} theme={theme} user={user} aiKey={aiKey} profile={profile}
+        saveProfilePatch={saveProfilePatch} showAlert={showAlert} showToast={showToast} showConfirm={showConfirm}
+      />
 
       {showTargetSettings && (
         <TargetSettingsModal t={t} theme={theme} profile={profile} saveProfilePatch={saveProfilePatch} onClose={() => setShowTargetSettings(false)} />
@@ -420,24 +426,7 @@ const DashboardTab = ({
             ) : (
               (() => {
                 const nut = NUTRIENTS.find(n => n.key === selectedNutrientForBreakdown);
-                const contributors = [];
-                if (today?.meals) {
-                  Object.values(today.meals).forEach(mealArr => {
-                    mealArr.forEach(item => {
-                      const amt = item.nutrition?.[selectedNutrientForBreakdown] || 0;
-                      if (amt > 0) {
-                        // Gabungkan porsi jika ada nama yang sama
-                        const existing = contributors.find(c => c.name === item.name);
-                        if (existing) {
-                          existing.amount += amt;
-                        } else {
-                          contributors.push({ name: item.name, amount: amt });
-                        }
-                      }
-                    });
-                  });
-                }
-                contributors.sort((a, b) => b.amount - a.amount);
+                const contributors = nutrientSources(today, selectedNutrientForBreakdown);
 
                 return (
                   <>

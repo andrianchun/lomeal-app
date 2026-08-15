@@ -14,8 +14,9 @@ import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, sav
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
 import { isNativeApp, captureToFile } from '../utils/nativeCamera';
-import { markDomusItemConsumed, updateDomusItemQuantity } from '../utils/domusSync';
-import { deductStock } from '../utils/stockConverter';
+import { markDomusItemConsumed, updateDomusItemQuantity, requestShoppingListDomus } from '../utils/domusSync';
+import { deductStock, formatStock, itemStock } from '../utils/stockConverter';
+import { nutrientSources } from '../utils/nutrientSources';
 import AttachmentMenu from '../components/AttachmentMenu';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
@@ -65,7 +66,7 @@ const COLORS = [
  * Date strip → quick stats + water tracker → Meal Grid 2 kolom (piring + ring
  * makro) → Smart Input Bar (chat NL / kamera / voice / manual presisi).
  */
-const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, domusItems, domusLocations, aiKey, showAlert, showConfirm, showToast, waterGoal,
+const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, domusItems, domusLocations, aiKey, showAlert, showConfirm, showToast, waterGoal,
   chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession, ensureMonth }) => {
 
   const todayYmd = getLocalYMD();
@@ -94,6 +95,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
   const [copySelectedItems, setCopySelectedItems] = useState([]);
   const [copySourcePhoto, setCopySourcePhoto] = useState(null);
   const [showDayStatsModal, setShowDayStatsModal] = useState(false);
+  const [expandedNutrient, setExpandedNutrient] = useState(null);
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
   const [editingPhotoObj, setEditingPhotoObj] = useState(null);
   const [waterEdit, setWaterEdit] = useState(false);
@@ -148,6 +150,18 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
 
   const drinkTemplates = profile?.drinkTemplates || [];
   const medicines = profile?.medicines || [];
+
+  // Rak suplemen & obat punya stok sendiri (bukan di Domus — barangnya per-orang, bukan per-rumah).
+  // `delta` negatif = terpakai. Item tanpa `stock` diabaikan supaya rak lama tetap jalan.
+  const consumeShelfStock = (field, entry, delta) => {
+    if (typeof entry.stock !== 'number') return;
+    const next = Math.max(0, entry.stock + delta);
+    saveProfilePatch({ [field]: (profile?.[field] || []).map(x => (x.id === entry.id ? { ...x, stock: next } : x)) });
+    if (next === 0 && delta < 0) {
+      requestShoppingListDomus(user.uid, entry.name).catch(console.error);
+      showToast(`${entry.name} habis — sudah masuk list belanja Domus 🛒`);
+    }
+  };
 
   const day = daysMap[selectedYmd] || { meals: {}, water: 0 };
   // Foto sesi hidup di dokumen terpisah (photos_YYYY-MM-DD) supaya dokumen log bulanan
@@ -382,7 +396,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           if (newRemaining <= 0) {
             markDomusItemConsumed(batch.domusItemId).catch(console.error);
           } else {
-            updateDomusItemQuantity(batch.domusItemId, newRemaining).catch(console.error);
+            updateDomusItemQuantity(batch.domusItemId, newRemaining, 'porsi').catch(console.error);
           }
         }
 
@@ -438,13 +452,13 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       // (in reality we might want a mechanism to un-eat and add back stock, but this is simple for now)
       if (domusItem && checked) {
         // e.grams is the amount consumed in Lomeal
-        const newQty = deductStock(domusItem.quantity, e.grams || 100);
-        if (newQty === '0') {
+        const res = deductStock(domusItem, e.grams || 100);
+        if (res.ok && res.depleted) {
           markDomusItemConsumed(e.domusItemId).catch(console.error);
           showToast(`Stok ${domusItem.name} di kulkas (Domus) habis.`);
-        } else if (newQty !== null && newQty !== domusItem.quantity) {
-          updateDomusItemQuantity(e.domusItemId, newQty).catch(console.error);
-          showToast(`Stok ${domusItem.name} di kulkas diupdate: ${newQty}`);
+        } else if (res.ok) {
+          updateDomusItemQuantity(e.domusItemId, res.value, res.unit).catch(console.error);
+          showToast(`Sisa ${domusItem.name} di kulkas: ${formatStock(res)}`);
         }
       }
     }
@@ -1061,14 +1075,16 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
     return nearest?.id || 'lunch';
   };
 
-  const MacroBar = ({ mkey }) => {
+  const MacroBar = ({ mkey, showSources = false }) => {
     const target = targets[mkey] || 1;
     const value = totals[mkey] || 0;
     const pct = Math.min(100, (value / target) * 100);
     const mc = mkey === 'kcal' ? { label: 'Kalori', hex: value > (target || Infinity) ? '#cd4a4a' : '#3daa5c' } : MACRO_COLORS[mkey];
+    const sources = showSources && expandedNutrient === mkey ? nutrientSources(day, mkey) : null;
     return (
         <div>
-          <div className="flex justify-between items-baseline mb-1">
+          <div onClick={() => showSources && setExpandedNutrient(expandedNutrient === mkey ? null : mkey)}
+            className={`flex justify-between items-baseline mb-1 ${showSources ? 'cursor-pointer' : ''}`}>
             {mkey === 'kcal' ? (
               <div className="flex items-center gap-2">
                 <span className={`caption ${t.textMuted}`}>Kalori</span>
@@ -1089,6 +1105,19 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
           <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: mc.hex }} />
           </div>
+          {sources && (
+            <div className={`rounded-xl ${t.bgSunken} p-2.5 mt-1 space-y-1`}>
+              {sources.length === 0 && <p className={`caption ${t.textMuted}`}>Tidak ada sumber tercatat.</p>}
+              {sources.map((c) => (
+                <div key={c.name} className="flex justify-between gap-2">
+                  <span className={`caption ${t.textMuted} truncate`}>{c.name}</span>
+                  <span className={`caption font-bold ${t.textMain} tabular-nums shrink-0`}>
+                    {Math.round(c.amount)}{mkey === 'kcal' ? ' kkal' : ' g'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
     );
   };
@@ -1232,9 +1261,13 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                              <button key={med.id} onClick={() => {
                                const medChecks = { ...(day.medChecks || {}), [med.id]: !isChecked };
                                persistDay({ ...day, medChecks });
+                               consumeShelfStock('medicines', med, isChecked ? 1 : -1);
                              }} className={`shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border shadow-md transition-all ${isChecked ? `${t.bgAccent} border-transparent text-white` : `${t.bgCard} ${t.border} ${t.textMuted}`}`}>
                                {isChecked ? <Check size={18} className="mb-0.5" /> : <IconComp size={18} className={`mb-0.5 ${textClass}`} />}
                                <span className="text-[8px] font-bold px-1 text-center line-clamp-2 leading-tight w-full whitespace-normal">{med.name}</span>
+                               {typeof med.stock === 'number' && (
+                                 <span className={`text-[7px] font-bold ${med.stock === 0 ? 'text-red-500' : 'opacity-60'}`}>sisa {med.stock}</span>
+                               )}
                              </button>
                            )
                          })}
@@ -1247,6 +1280,7 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                                const meals = { ...(day.meals || {}) };
                                meals['drink'] = [...(meals['drink'] || []), makeEntry({ name: drink.name, grams: 1, unit: 'porsi', nutrition: drink.nutrition, source: 'manual' })];
                                persistDay({ ...day, meals });
+                               consumeShelfStock('drinkTemplates', drink, -1);
                                showAlert(`${drink.name} ditambahkan ke sesi Minuman!`);
                              }} className={`shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border border-transparent shadow-md text-white active:scale-95 transition-all ${bgClass}`}>
                                <IconComp size={18} className="mb-0.5" />
@@ -1797,11 +1831,11 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
             className={`w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510] border-white/10' : 'bg-white border-black/10'} shadow-2xl p-6 anim-rise`}>
             
             <div className="space-y-4 mb-6 mt-1">
-               <h3 className={`caption ${t.textMuted} uppercase tracking-wider`}>Makro</h3>
-               <MacroBar mkey="kcal" />
-               <MacroBar mkey="protein" />
-               <MacroBar mkey="carbs" />
-               <MacroBar mkey="fat" />
+               <h3 className={`caption ${t.textMuted} uppercase tracking-wider`}>Makro <span className="normal-case font-normal opacity-60">— ketuk buat lihat sumbernya</span></h3>
+               <MacroBar mkey="kcal" showSources />
+               <MacroBar mkey="protein" showSources />
+               <MacroBar mkey="carbs" showSources />
+               <MacroBar mkey="fat" showSources />
             </div>
 
             <div className="space-y-4 mb-4">
@@ -1820,23 +1854,60 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
                    const ratio = (totals[n.key] || 0) / target;
                    const s = statusFor(ratio, { invert: MINIMUM_TARGETS.has(n.key) });
                    const pct = Math.min(100, ratio * 100);
+                   const sources = expandedNutrient === n.key ? nutrientSources(day, n.key) : null;
                    return (
                      <div key={n.key} className="flex flex-col gap-1">
-                       <div className="flex justify-between items-baseline">
+                       <button onClick={() => setExpandedNutrient(expandedNutrient === n.key ? null : n.key)} className="flex justify-between items-baseline text-left">
                          <span className={`caption ${t.textMuted}`}>{n.label}</span>
                          <div className="flex items-center gap-2">
                             <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(pct)}%</span>
                             <span className={`caption ${t.textMain} tabular-nums`}>{(totals[n.key] || 0) < 10 ? Number((totals[n.key] || 0).toFixed(2)) : Math.round(totals[n.key] || 0)}<span className={t.textMuted}>/{target}{n.unit || 'mg'}</span></span>
                          </div>
-                       </div>
+                       </button>
                        <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
                          <div className={`h-full rounded-full transition-all duration-500 ${s.bg}`} style={{ width: `${pct}%` }} />
                        </div>
+                       {/* Dari mana angkanya datang — pertanyaan pertama tiap kali ada nutrisi berlebih. */}
+                       {sources && (
+                         <div className={`rounded-xl ${t.bgSunken} p-2.5 mt-1 space-y-1`}>
+                           {sources.length === 0 && <p className={`caption ${t.textMuted}`}>Tidak ada sumber tercatat.</p>}
+                           {sources.map((c) => (
+                             <div key={c.name} className="flex justify-between gap-2">
+                               <span className={`caption ${t.textMuted} truncate`}>{c.name}</span>
+                               <span className={`caption font-bold ${t.textMain} tabular-nums shrink-0`}>
+                                 {c.amount < 10 ? Number(c.amount.toFixed(2)) : Math.round(c.amount)} {n.unit || 'mg'}
+                               </span>
+                             </div>
+                           ))}
+                         </div>
+                       )}
                      </div>
                    );
                  });
                })()}
             </div>
+
+            {/* Zat ergogenik & nutrien non-standar: tidak punya target harian, jadi cuma
+                ditampilkan jumlahnya — bukan bar persentase yang menyesatkan. */}
+            {(() => {
+              const supplements = NUTRIENTS.filter(n => n.supplement && (totals[n.key] || 0) > 0)
+                .map(n => [n.label, `${Math.round(totals[n.key])} ${n.unit}`]);
+              const extras = Object.values(totals.extraNutrients || {})
+                .map(e => [e.label, `${Math.round(e.value * 100) / 100} ${e.unit}`]);
+              const rows = [...supplements, ...extras];
+              if (rows.length === 0) return null;
+              return (
+                <div className="space-y-2 mb-2">
+                  <h3 className={`caption ${t.textMuted} uppercase tracking-wider`}>Suplemen &amp; Zat Lain</h3>
+                  {rows.map(([label, value]) => (
+                    <div key={label} className="flex justify-between items-baseline">
+                      <span className={`caption ${t.textMuted}`}>{label}</span>
+                      <span className={`caption font-bold ${t.textMain} tabular-nums`}>{value}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
