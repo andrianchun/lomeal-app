@@ -49,6 +49,7 @@ import SocialHub from './pages/SocialHub';
 import SettingsPage from './pages/SettingsPage';
 import NotificationPanel from './components/NotificationPanel';
 import UpdaterAlert from './components/UpdaterAlert';
+import LomyChat from './components/LomyChat';
 import { createCommunityPost } from './utils/communityApi';
 
 const AppContent = ({ user, profile, logymUser, onLogout }) => {
@@ -881,6 +882,11 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       </Routes>
 
       <BottomNav t={t} activeTab={path} setActiveTab={setActiveTab} />
+
+      <LomyChat
+        t={t} theme={theme} user={user} aiKey={effectiveAiKeys} profile={profile}
+        daysMap={daysMap} ensureMonth={ensureMonth} todayYmd={getLocalYMD()} showAlert={showAlert}
+      />
 
       {/* Overlays / Modals */}
       <UpdaterAlert
