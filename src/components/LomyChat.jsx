@@ -29,6 +29,13 @@ const shiftYmd = (ymd, days) => {
   return getLocalYMD(new Date(y, m - 1, d + days));
 };
 
+// Profil menyimpan `allergies` sebagai STRING dipisah koma tapi `medicalHistory` sebagai ARRAY.
+// Menyamakan keduanya sebagai array bikin `.join` meledak dan seluruh app blank — terima dua-duanya.
+const asList = (v) =>
+  (Array.isArray(v) ? v : String(v ?? '').split(','))
+    .map((s) => (s == null ? '' : String(s).trim()))
+    .filter(Boolean);
+
 /**
  * Lomy — chat gizi mengambang. Tombolnya bisa digeser dan menempel ke tepi layar,
  * posisinya diingat. Jawabannya streaming supaya balasan panjang tidak terasa menggantung.
@@ -105,8 +112,8 @@ export default function LomyChat({ t, user, aiKey, profile, daysMap, ensureMonth
     return [
       `Tanggal hari ini: ${todayYmd}`,
       profile?.dietProfile ? `Program diet: ${profile.dietProfile}` : null,
-      profile?.medicalHistory?.length ? `Riwayat medis: ${profile.medicalHistory.join(', ')}` : null,
-      profile?.allergies?.length ? `Alergi: ${profile.allergies.join(', ')}` : null,
+      asList(profile?.medicalHistory).length ? `Riwayat medis: ${asList(profile.medicalHistory).join(', ')}` : null,
+      asList(profile?.allergies).length ? `Alergi: ${asList(profile.allergies).join(', ')}` : null,
       targets.kcal ? `Target harian: ${KEYS.filter((k) => targets[k]).map((k) => `${labelOf(k)} ${Math.round(targets[k])}`).join(', ')}` : null,
       `Asupan hari ini — ${todayLine}`,
       eaten.length ? `Yang dimakan hari ini: ${eaten.join(', ')}` : 'Belum ada yang dicatat hari ini.',
