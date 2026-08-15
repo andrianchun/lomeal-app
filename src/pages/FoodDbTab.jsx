@@ -44,11 +44,13 @@ const UnifiedFoodCard = ({ f, t, favoriteFoods, toggleFavorite, setDetail, openE
   const isFavorite = favoriteFoods.includes(f.id);
   const domusMatch = domusItems.find(d => d.name.toLowerCase() === f.name.toLowerCase());
   
+  // Purin dikecualikan: hampir semua lauk punya nilai purin besar, jadi badge "Tinggi" selalu
+  // dimenangkannya dan tidak pernah menunjukkan keunggulan gizi apa pun.
   const micros = Object.entries(f.nutrition)
-    .filter(([k, v]) => !['kcal', 'protein', 'carbs', 'fat'].includes(k) && v > 0)
+    .filter(([k, v]) => !['kcal', 'protein', 'carbs', 'fat', 'purine'].includes(k) && v > 0)
     .sort((a, b) => b[1] - a[1]);
-  const highestMicroStr = micros.length > 0 
-    ? `Tinggi ${NUTRIENTS[micros[0][0]]?.label || micros[0][0]}` 
+  const highestMicroStr = micros.length > 0
+    ? `Tinggi ${NUTRIENTS.find(n => n.key === micros[0][0])?.label || micros[0][0]}`
     : '';
 
   const isValidCustomImg = typeof f.image === 'string' && (f.image.startsWith('http') || f.image.startsWith('data:image/'));
@@ -215,6 +217,9 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
     let list = searchFoods(term, customFoods);
     if (viewMode === 'custom') list = list.filter((f) => f.isCustom);
     if (showFavoritesOnly) list = list.filter((f) => favoriteFoods.includes(f.id));
+    // Chip "Fokus Nutrisi" menyala seolah aktif tapi dulu cuma dipakai sebagai kunci sort,
+    // jadi memilih "Vitamin C" tetap menampilkan makanan tanpa vitamin C sama sekali.
+    if (macroFilter.length > 0) list = list.filter((f) => macroFilter.every(k => (f.nutrition[k] || 0) > 0));
 
     if (sortOrder === 'popular') {
       list = sortFoodsByUsage(list, favoriteFoods);
@@ -224,14 +229,13 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
       list.sort((a, b) => b.name.localeCompare(a.name));
     } else if (sortOrder === 'nutrisi_asc' || sortOrder === 'nutrisi_desc') {
       const keys = macroFilter.length > 0 ? macroFilter : ['kcal'];
-      list.sort((a, b) => {
-        let scoreA = 0, scoreB = 0;
-        keys.forEach(k => {
-          scoreA += (a.nutrition[k] || 0);
-          scoreB += (b.nutrition[k] || 0);
-        });
-        return sortOrder === 'nutrisi_asc' ? scoreA - scoreB : scoreB - scoreA;
-      });
+      // Skor dinormalisasi per nutrien. Menjumlah nilai mentah membandingkan mg dengan g dan
+      // mcg, sehingga nutrien bersatuan mg (natrium) selalu menenggelamkan yang lain.
+      const maxOf = Object.fromEntries(
+        keys.map(k => [k, Math.max(1e-9, ...list.map(f => f.nutrition[k] || 0))])
+      );
+      const score = (f) => keys.reduce((s, k) => s + (f.nutrition[k] || 0) / maxOf[k], 0);
+      list.sort((a, b) => (sortOrder === 'nutrisi_asc' ? score(a) - score(b) : score(b) - score(a)));
     }
 
     return list.slice(0, viewMode === 'custom' ? 80 : 150);
@@ -773,6 +777,11 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
               })}
             </div>
           </div>
+          {macroFilter.length > 0 && (
+            <p className={`caption ${t.textMuted}`}>
+              Hanya menampilkan makanan yang mengandung nutrisi terpilih. Urutan nutrisi dihitung per 100 g/ml, bukan per porsi.
+            </p>
+          )}
           <div className={`flex items-center justify-between pt-3 border-t ${t.border}`}>
             <div className="flex items-center gap-2">
               <span className={`text-[10px] font-black uppercase tracking-wider ${t.textMuted}`}>Urutkan</span>

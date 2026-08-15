@@ -1,10 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { X, Camera, Send, Loader2, Check } from 'lucide-react';
-import { MEAL_SESSIONS } from '../data/constants';
-import { makeEntry } from '../utils/foodLog';
+import { X, Camera, Send, Loader2, Check, Pencil } from 'lucide-react';
+import { MEAL_SESSIONS, AI_DAILY_LIMIT } from '../data/constants';
+import { makeEntry, checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
 import { runLocalNlpParse } from '../utils/nlpParser';
+import { parseFoodText } from '../utils/aiFood';
 
-const InboxProcessor = ({ t, theme, item, onClose, onSaveToLog, onSaveToDomus, onNutritionSaved }) => {
+const sumNutrition = (foods) => ({
+  kcal: foods.reduce((a, f) => a + (f.nutrition?.kcal || f.kcal || 0), 0),
+  protein: foods.reduce((a, f) => a + (f.nutrition?.protein || f.protein || 0), 0),
+  carbs: foods.reduce((a, f) => a + (f.nutrition?.carbs || f.carbs || 0), 0),
+  fat: foods.reduce((a, f) => a + (f.nutrition?.fat || f.fat || 0), 0),
+});
+
+const InboxProcessor = ({ t, theme, item, user, aiKey, customFoods = [], todayYmd, showAlert, onClose, onSaveToLog, onSaveToDomus, onNutritionSaved, onParseFailed }) => {
   // If item already has nutrition (e.g. auto-parsed), skip to step 2
   const initialStep = (item.skipToStep2 && item.nutrition?.kcal) ? 2 : 1;
   const [step, setStep] = useState(initialStep);
@@ -15,49 +23,74 @@ const InboxProcessor = ({ t, theme, item, onClose, onSaveToLog, onSaveToDomus, o
       : null
   );
   const [session, setSession] = useState('lunch');
+  const [manual, setManual] = useState(null);
 
+  const accept = (foods, isDrink) => {
+    const nutrition = sumNutrition(foods);
+    const first = foods[0] || {};
+    setParsedData({
+      name: item.text,
+      grams: first.grams || 1,
+      unit: first.unit || 'porsi',
+      isDrink: isDrink ?? !!first.isDrink,
+      nutrition,
+    });
+    setStep(2);
+    onNutritionSaved?.(nutrition).catch((e) => console.error('Nutrition autosave fail', e));
+  };
+
+  // Tebakan gizi TIDAK BOLEH dikarang. Kalau parser lokal dan AI sama-sama gagal, item
+  // ditandai gagal dan user mengisi manual — angka karangan sebelumnya ikut tersimpan ke
+  // Firestore, jadi sebotol air tercatat permanen sebagai 450 kkal.
   const handleParse = async () => {
     setLoading(true);
     try {
-      const res = await runLocalNlpParse(item.text, '', false);
-      let nutrition;
-      if (res && res.foods && res.foods.length > 0) {
-        nutrition = {
-          kcal: res.foods.reduce((acc, curr) => acc + (curr.nutrition?.kcal || curr.kcal || 0), 0),
-          protein: res.foods.reduce((acc, curr) => acc + (curr.nutrition?.protein || curr.protein || 0), 0),
-          carbs: res.foods.reduce((acc, curr) => acc + (curr.nutrition?.carbs || curr.carbs || 0), 0),
-          fat: res.foods.reduce((acc, curr) => acc + (curr.nutrition?.fat || curr.fat || 0), 0),
-        };
-      } else {
-        nutrition = { kcal: 450, protein: 20, carbs: 50, fat: 15 }; // fallback
-      }
+      const local = runLocalNlpParse(item.text, customFoods);
+      if (local?.foods?.length) return accept(local.foods);
 
-      const parsed = { name: item.text, grams: 1, unit: 'porsi', nutrition };
-      setParsedData(parsed);
-      setStep(2);
+      if (!aiKey && !user?.uid) return setManual({ kcal: '', protein: '', carbs: '', fat: '' });
 
-      // Autosave nutrition back to Firestore
-      if (onNutritionSaved) {
-        onNutritionSaved(nutrition).catch(e => console.error('Nutrition autosave fail', e));
+      const quota = await checkAndCountAiUsage(user.uid, todayYmd, AI_DAILY_LIMIT);
+      if (!quota.allowed) {
+        showAlert?.(`Kuota Lomy harian habis (${AI_DAILY_LIMIT} request/hari). Isi manual dulu ya.`);
+        return setManual({ kcal: '', protein: '', carbs: '', fat: '' });
       }
+      try {
+        const res = await parseFoodText(aiKey, item.text, null, customFoods);
+        if (res?.foods?.length) return accept(res.foods);
+        await refundAiUsage(user.uid);
+      } catch (e) {
+        await refundAiUsage(user.uid);
+        if (e.message !== 'OUT_OF_SCOPE') console.error('Inbox AI parse fail', e);
+      }
+      onParseFailed?.();
+      setManual({ kcal: '', protein: '', carbs: '', fat: '' });
     } catch (e) {
       console.error(e);
-      const fallback = { kcal: 450, protein: 20, carbs: 50, fat: 15 };
-      setParsedData({ name: item.text, grams: 1, unit: 'porsi', nutrition: fallback });
-      setStep(2);
-      if (onNutritionSaved) {
-        onNutritionSaved(fallback).catch(() => {});
-      }
+      onParseFailed?.();
+      setManual({ kcal: '', protein: '', carbs: '', fat: '' });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  };
+
+  const submitManual = () => {
+    const nutrition = {
+      kcal: Number(manual.kcal) || 0,
+      protein: Number(manual.protein) || 0,
+      carbs: Number(manual.carbs) || 0,
+      fat: Number(manual.fat) || 0,
+    };
+    setManual(null);
+    accept([{ nutrition }]);
   };
 
   const handleEatNow = () => {
-    const isDrink = item.text.toLowerCase().includes('coca') || item.text.toLowerCase().includes('es teh') || item.text.toLowerCase().includes('kopi');
+    const isDrink = parsedData.isDrink;
     const entry = makeEntry({
       name: parsedData.name,
-      grams: isDrink ? 250 : parsedData.grams,
-      unit: isDrink ? 'ml' : 'porsi',
+      grams: parsedData.grams,
+      unit: parsedData.unit,
       nutrition: parsedData.nutrition,
       source: item.source || 'darka',
       isMealPrep: false,
@@ -90,11 +123,33 @@ const InboxProcessor = ({ t, theme, item, onClose, onSaveToLog, onSaveToDomus, o
               <p className={`caption text-center ${t.textMuted}`}>Tidak yakin? <span className="text-emerald-500 font-bold">Upload foto</span> untuk analisis yang lebih presisi (Opsional).</p>
             </div>
             
-            <button disabled={loading} onClick={handleParse}
-              className={`w-full py-3.5 mt-2 rounded-2xl bg-emerald-500 text-white font-bold flex items-center justify-center gap-2 shadow-lg disabled:opacity-50`}>
-              {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-              Hitung Nutrisi AI
-            </button>
+            {manual ? (
+              <div className={`p-4 rounded-2xl border ${t.border} ${t.bgSunken} space-y-3`}>
+                <div className={`flex items-center gap-2 caption font-bold ${t.textMuted}`}>
+                  <Pencil size={14} /> Gizi belum ketemu — isi manual
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[['kcal', 'Kalori (kkal)'], ['protein', 'Protein (g)'], ['carbs', 'Karbo (g)'], ['fat', 'Lemak (g)']].map(([k, label]) => (
+                    <label key={k} className={`caption ${t.textMuted}`}>
+                      {label}
+                      <input type="number" inputMode="decimal" min="0" value={manual[k]}
+                        onChange={(e) => setManual({ ...manual, [k]: e.target.value })}
+                        className={`w-full mt-1 px-3 py-2 rounded-xl border ${t.border} ${t.bgCard} ${t.textMain} text-sm`} />
+                    </label>
+                  ))}
+                </div>
+                <button onClick={submitManual}
+                  className="w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold text-sm">
+                  Pakai angka ini
+                </button>
+              </div>
+            ) : (
+              <button disabled={loading} onClick={handleParse}
+                className={`w-full py-3.5 mt-2 rounded-2xl bg-emerald-500 text-white font-bold flex items-center justify-center gap-2 shadow-lg disabled:opacity-50`}>
+                {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                Hitung Nutrisi AI
+              </button>
+            )}
           </div>
         )}
 
@@ -114,7 +169,7 @@ const InboxProcessor = ({ t, theme, item, onClose, onSaveToLog, onSaveToDomus, o
             </div>
 
             {/* Recalculate button */}
-            <button onClick={() => { setStep(1); setParsedData(null); }} className={`w-full py-2 rounded-xl border ${t.border} ${t.textMuted} caption font-bold`}>
+            <button onClick={() => { setStep(1); setParsedData(null); setManual(null); }} className={`w-full py-2 rounded-xl border ${t.border} ${t.textMuted} caption font-bold`}>
               Hitung ulang nutrisi
             </button>
 

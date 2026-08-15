@@ -151,7 +151,9 @@ export const runLocalNlpParse = (text, customFoods = []) => {
     const best = results[0];
     
     // Syarat lolos: harus cukup mirip
-    if (best && (best.name.toLowerCase() === name.toLowerCase() || best.name.toLowerCase().includes(name.toLowerCase()))) {
+    const lower = name.toLowerCase();
+    const aliasHit = best && (best.aliases || []).some(a => a.toLowerCase() === lower);
+    if (best && (aliasHit || best.name.toLowerCase() === lower || best.name.toLowerCase().includes(lower))) {
       let grams = calculateGramsFromURT(qty, unitStr);
       if (grams === null) grams = best.portion.grams * qty; // satuan gak dikenal → pakai porsi bawaan
       // Satuan rumah tangga ("gelas") dipertahankan supaya sheet konfirmasi tetap nampilin

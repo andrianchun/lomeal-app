@@ -255,8 +255,10 @@ const LogTab = ({ t, theme, user, profile, daysMap, saveDay, customFoods, saveCu
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = file.name;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(a.href);
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
     } catch (e) {
       if (e.name !== 'AbortError') showAlert(`Gagal menyimpan foto ke HP: ${e.message}`);
     }

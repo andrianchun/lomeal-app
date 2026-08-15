@@ -981,7 +981,14 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
         <InboxProcessor
           t={t} theme={theme}
           item={processingInbox}
+          user={user} aiKey={aiKey} customFoods={customFoods}
+          todayYmd={getLocalYMD(new Date())} showAlert={showAlert}
           onClose={() => setProcessingInbox(null)}
+          onParseFailed={async () => {
+            if (processingInbox.source === 'darka') {
+              await updateInboxNutrition(processingInbox.id, null, true).catch(() => {});
+            }
+          }}
           onNutritionSaved={async (nutrition) => {
             // Autosave nutrition back to Firestore
             if (processingInbox.source === 'darka') {

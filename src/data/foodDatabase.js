@@ -25,6 +25,7 @@ const F = (id, name, category, portionLabel, portionGrams, n, opts = {}) => ({
   },
   source: opts.source || 'TKPI',
   image: opts.image || null,
+  aliases: opts.aliases || [],
 });
 
 export const FOOD_CATEGORIES = [
@@ -138,7 +139,7 @@ const OLD_FOOD_DB = [
   F('klepon',          'Klepon',                'snack', '3 buah (60g)',        60, [ 220,  2.0, 45.0,  3.5,   80, 22.0,   0,  2.8, 0.8,   30,   5]),
 
   // ---------- MINUMAN (per 100 ml) ----------
-  F('air-putih',       'Air Putih',             'drink', '1 gelas (250ml)',    250, [   0,  0.0,  0.0,  0.0,    0,  0.0,   0,  0.0, 0.0,    0,   0], { unit: 'ml', isDrink: true }),
+  F('air-putih',       'Air Putih',             'drink', '1 gelas (250ml)',    250, [   0,  0.0,  0.0,  0.0,    0,  0.0,   0,  0.0, 0.0,    0,   0], { unit: 'ml', isDrink: true, aliases: ['aqua', 'le minerale', 'air mineral', 'cleo', 'vit', 'nestle pure life', 'air'] }),
   F('teh-manis',       'Teh Manis',             'drink', '1 gelas (250ml)',    250, [  30,  0.0,  7.8,  0.0,    2,  7.6,   0,  0.0, 0.0,    2,   0], { unit: 'ml', isDrink: true }),
   F('teh-tawar',       'Teh Tawar',             'drink', '1 gelas (250ml)',    250, [   1,  0.0,  0.2,  0.0,    2,  0.0,   0,  0.0, 0.0,    2,   0], { unit: 'ml', isDrink: true }),
   F('kopi-hitam',      'Kopi Hitam Tanpa Gula', 'drink', '1 cangkir (200ml)',  200, [   2,  0.1,  0.4,  0.0,    2,  0.0,   0,  0.0, 0.0,    2,   0], { unit: 'ml', isDrink: true }),
@@ -180,7 +181,9 @@ export const searchFoods = (term, customFoods = []) => {
   const words = q.split(/\s+/);
   return all.filter(f => {
     const name = f.name.toLowerCase();
-    return words.every(w => name.includes(w));
+    if (words.every(w => name.includes(w))) return true;
+    // Merek dagang tidak masuk nama resmi TKPI, tapi user mengetiknya ("aqua", bukan "air putih").
+    return (f.aliases || []).some(a => words.every(w => a.toLowerCase().includes(w)));
   });
 };
 
