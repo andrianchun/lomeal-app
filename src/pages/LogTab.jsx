@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
 import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import RingChart from '../components/RingChart';
+import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity } from '../utils/domusSync';
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
@@ -158,7 +159,9 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
     const next = Math.max(0, entry.stock + delta);
     saveProfilePatch({ [field]: (profile?.[field] || []).map(x => (x.id === entry.id ? { ...x, stock: next } : x)) });
     if (next === 0 && delta < 0) {
-      requestShoppingListDomus(user.uid, entry.name).catch(console.error);
+      // Beli sebanyak isi terakhir yang tercatat, satuannya butir — daftar belanja Domus
+      // nyimpen jumlah sebagai angka + satuan, jadi kirim angkanya, bukan cuma namanya.
+      requestShoppingListDomus(user.uid, entry.name, { qtyValue: entry.stock || 1, qtyUnit: 'butir' }).catch(console.error);
       showToast(`${entry.name} habis — sudah masuk list belanja Domus 🛒`);
     }
   };
@@ -1957,6 +1960,11 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
           customFoods={customFoods} recipes={recipes} domusItems={domusItems}
           favoriteFoods={profile?.favoriteFoods || []}
           onAdd={(entry) => {
+            // Potong stok gudang (Domus) secara atomik jika barang ini terhubung.
+            if (entry.domus_item_id && entry.grams) {
+              deductDomusItemQuantity(entry.domus_item_id, entry.grams).catch(e => console.error("Gagal potong stok Domus:", e));
+            }
+            
             if (detailSession) {
                const newEntry = makeEntry({ name: entry.name, grams: entry.grams, unit: entryUnit(entry.unit, entry.isDrink), nutrition: { ...EMPTY_NUTRITION, ...entry.nutrition }, source: 'picker', time: activeSessions.find(s => s.id === detailSession)?.time || new Date().toTimeString().slice(0, 5) });
                let meals = { ...(day.meals || {}) };

@@ -51,11 +51,15 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
   }), [recipe.ingredients, domusItems, factor, overrides]);
 
   // Bahan yang belum dicentang perlu dibeli. Kalau stoknya ada tapi kurang, cukup beli selisihnya.
+  // Jumlahnya dibawa sebagai ANGKA + SATUAN terpisah, BUKAN ditempel ke nama: Domus nyimpen jumlah
+  // di field sendiri, dan nama yang ketempelan "(200 g lagi)" gak bakal cocok lagi waktu
+  // belanjaannya balik lewat nota Darka.
   const missing = useMemo(() => {
     const seen = new Map();
     for (const r of rows) {
       if (r.on || seen.has(r.name)) continue;
-      seen.set(r.name, r.shortfall > 0 ? `${r.name} (${r.shortfall} g lagi)` : r.name);
+      const grams = r.shortfall > 0 ? r.shortfall : r.needed;
+      seen.set(r.name, { name: r.name, qtyValue: grams > 0 ? grams : null, qtyUnit: grams > 0 ? 'g' : null });
     }
     return [...seen.values()];
   }, [rows]);
@@ -63,7 +67,7 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
   const addMissingToCart = async () => {
     setCartBusy(true);
     try {
-      for (const name of missing) await requestShoppingListDomus(user.uid, name);
+      for (const m of missing) await requestShoppingListDomus(user.uid, m.name, { qtyValue: m.qtyValue, qtyUnit: m.qtyUnit });
       setCartDone(true);
       showToast?.(`${missing.length} bahan masuk list belanja 🛒`);
     } catch (e) {
@@ -198,7 +202,9 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
               {missing.length > 0 && (
                 <div className={`mt-6 rounded-2xl border ${t.border} ${t.bgCard} p-4`}>
                   <p className={`body-md ${t.textMain}`}>{missing.length} bahan belum ada di dapur</p>
-                  <p className={`caption font-medium mt-1 ${t.textMuted}`}>{missing.join(', ')}</p>
+                  <p className={`caption font-medium mt-1 ${t.textMuted}`}>
+                    {missing.map((m) => (m.qtyValue ? `${m.name} (${m.qtyValue} ${m.qtyUnit})` : m.name)).join(', ')}
+                  </p>
                   <button onClick={addMissingToCart} disabled={cartBusy || cartDone}
                     className={`w-full mt-4 py-2.5 rounded-xl caption font-bold flex items-center justify-center gap-2 disabled:opacity-60 ${
                       cartDone ? `${t.bgAccentSoft} border ${t.borderAccentSoft} ${t.textAccent}` : t.bgAccent}`}>
