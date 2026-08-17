@@ -764,6 +764,14 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                             Sisa <span className="text-emerald-500 font-bold">{inb.quantity || 1}</span> porsi
                             {inb.nutrition?.kcal ? ` · ${Math.round(inb.nutrition.kcal)}Kcal · ${macroText(inb.nutrition)}` : ''}
                           </p>
+                          {/* Item ini sudah pernah diproses, lalu notanya dikoreksi di Darka.
+                              Entri food log yang lama TIDAK ikut berubah — jadi user perlu tahu,
+                              biar tidak mencatat kalorinya untuk kedua kali. */}
+                          {inb.isRevision && (
+                            <p className="caption mt-1 text-amber-500 font-bold">
+                              Dikoreksi di Darka — mungkin sudah kamu catat sebelumnya. Cek log hari itu dulu.
+                            </p>
+                          )}
                           {!inb.nutrition?.kcal && inb.autoParseFailed ? (
                             <p className={`caption mt-1 text-amber-500 italic`}>Silakan hitung nutrisi ulang</p>
                           ) : !inb.nutrition?.kcal && autoParsingIds.has(inb.id) ? (

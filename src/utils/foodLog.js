@@ -185,6 +185,10 @@ export const subscribeInbox = (uid, cb) => {
         nutrition: data.nutrition || null,
         autoParseFailed: data.autoParseFailed || false,
         imageUrl: data.imageUrl || data.image || null,
+        // Item ini pernah diproses, lalu notanya disunting di Darka dan dikirim ulang. Entri food
+        // log yang terlanjur tercatat TIDAK ikut berubah — angka gizi hari lampau gak boleh gerak
+        // sendiri. Jadi user yang diberitahu, biar gak nyatet dobel.
+        isRevision: data.previousStatus === 'claimed',
       };
     });
     cb(items);
