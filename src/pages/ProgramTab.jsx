@@ -479,7 +479,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
     mealPreps?.filter(m => m.domusItemId).map(m => m.domusItemId) || []
   );
 
-  const domusMatang = domusItems?.filter(i => i.isFood && (i.readyToEat || i.category === 'Makanan Jadi' || i.sourceApp === 'lomeal') && !mirroredDomusIds.has(i.id)) || [];
+  const domusMatang = domusItems?.filter(i => i.isFood && !mirroredDomusIds.has(i.id)) || [];
 
   return (
     <div className="max-w-2xl mx-auto px-4 pt-4 pb-32" onTouchStart={handleSubTabTouchStart} onTouchMove={handleSubTabTouchMove} onTouchEnd={handleSubTabTouchEnd}>
