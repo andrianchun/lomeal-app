@@ -475,8 +475,11 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
 
   // Item Domus yang sebenarnya cerminan batch Lomeal dilewati — kalau tidak, satu stok
   // tampil dua kali (di seksi Lomeal dengan badge Domus, dan lagi di seksi Domus).
-  const mirroredDomusIds = new Set(mealPreps.map(b => b.domusItemId).filter(Boolean));
-  const domusMatang = domusItems?.filter(i => i.isFood && (i.readyToEat || i.sourceApp === 'lomeal') && !mirroredDomusIds.has(i.id)) || [];
+  const mirroredDomusIds = new Set(
+    mealPreps?.filter(m => m.domusItemId).map(m => m.domusItemId) || []
+  );
+
+  const domusMatang = domusItems?.filter(i => i.isFood && (i.readyToEat || i.category === 'Makanan Jadi' || i.sourceApp === 'lomeal') && !mirroredDomusIds.has(i.id)) || [];
 
   return (
     <div className="max-w-2xl mx-auto px-4 pt-4 pb-32" onTouchStart={handleSubTabTouchStart} onTouchMove={handleSubTabTouchMove} onTouchEnd={handleSubTabTouchEnd}>
