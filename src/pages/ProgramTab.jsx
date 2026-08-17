@@ -262,7 +262,12 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
             qtyUnit: 'porsi',
             isFood: true,
             sourceApp: 'lomeal',
-            kind: 'mealprep',
+            // Masakan matang: kategorinya jelas, jangan biarkan Domus menerima barang tanpa
+            // kategori. Kosakatanya milik Domus (domus-app/src/lib/items.js#CATEGORIES).
+            category: 'Makanan Jadi',
+            // `kind: 'mealprep'` DIHAPUS — Domus sekarang memakai `kind` untuk tipe barang
+            // (stok/aset/dokumen/langganan), jadi nilai asing bikin kartunya tidak dikenali.
+            // Penanda meal prep sudah cukup dari `recipeId` + `portions` + `sourceApp`.
             portions: stockPortions,
             kcalPerPortion: Math.round(r.perPortion?.kcal || 0),
             cookedAt: new Date().toISOString(),
@@ -333,9 +338,16 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
       const domusItemId = await createDomusItem(user.uid, {
         name: `${b.name} (Meal Prep)`,
         locationId,
-        quantity: `${b.remainingPortions} porsi`,
+        // ANGKA + SATUAN terpisah, bukan string "2 porsi": Domus menyimpan jumlah di `qtyValue`/
+        // `qtyUnit` dan indikator sisanya dihitung dari situ. String-nya cuma turunan — dulu
+        // dikirim string saja, hasilnya kartu menampilkan "2 porsi" tapi isian jumlahnya kosong
+        // waktu dibuka, dan sisa stoknya tidak bisa dihitung siapa pun.
+        qtyValue: b.remainingPortions,
+        qtyUnit: 'porsi',
         isFood: true,
         sourceApp: 'lomeal',
+        category: 'Makanan Jadi',
+        portions: b.remainingPortions,
       });
       saveMealPrepsFn(mealPreps.map(x => x.id === b.id ? {
         ...x, domusItemId, domusLocationName: domusLocations?.find(l => l.id === locationId)?.name || '',

@@ -154,7 +154,7 @@ export const SharedDietStepRenderer = ({
         {fromLogym ? (
           <div className={`p-4 rounded-2xl border-2 ${t.borderAccent} ${t.bgAccentSoft} text-center`}>
             <div className="w-12 h-12 mx-auto mb-3 bg-black rounded-xl flex items-center justify-center shadow-lg">
-              <img src="/logym-icon.png" alt="Logym" className="w-8 h-8 object-contain" onError={(e) => e.target.style.display = 'none'} />
+              <img src="/logym-icon.webp" alt="Logym" className="w-8 h-8 object-contain" onError={(e) => e.target.style.display = 'none'} />
             </div>
             <p className={`body-md font-bold ${t.textMain}`}>Data Profil Terhubung!</p>
             <p className={`caption font-medium mt-1 ${t.textMuted}`}>Semua data yang tersedia di ekosistem Hexa-Life sudah ditarik otomatis — cek di langkah berikutnya.</p>
@@ -162,7 +162,7 @@ export const SharedDietStepRenderer = ({
         ) : (
           <div className={`p-4 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5'} text-center`}>
             <div className="w-12 h-12 mx-auto mb-3 bg-black rounded-xl flex items-center justify-center shadow-lg">
-              <img src="/logym-icon.png" alt="Logym" className="w-8 h-8 object-contain" onError={(e) => e.target.style.display = 'none'} />
+              <img src="/logym-icon.webp" alt="Logym" className="w-8 h-8 object-contain" onError={(e) => e.target.style.display = 'none'} />
             </div>
             <p className={`body-md font-bold ${t.textMain}`}>Belum punya Logym?</p>
             <p className={`caption mt-1 ${t.textMuted}`}>Logym adalah aplikasi tracker gym yang terhubung langsung dengan Lomeal. Install sekarang untuk mempermudah tracking fitness kamu!</p>
