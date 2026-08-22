@@ -6,8 +6,9 @@ import { MEAL_SESSIONS, DEFAULT_SESSION_TIMES, macroText, getLocalYMD, DAY_NAMES
 import { STATUS } from '../theme';
 import { makeEntry } from '../utils/foodLog';
 import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from '../utils/aiFood';
-import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, markDomusItemConsumed, matchDomusItem } from '../utils/domusSync';
-import { deductStock, stockInGrams, itemStock, formatStock } from '../utils/stockConverter';
+import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, zeroDomusItemStock, discardDomusItem, addPortionsToDomusItem, cookEntry, matchDomusItem } from '../utils/domusSync';
+import { deductStock, stockInGrams, itemStock, formatStock, unitToGrams } from '../utils/stockConverter';
+import { blockingShortages, formatShortfall, ingredientAvailability } from '../utils/recipeStock.js';
 import { db } from '../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import RecipeBuilder from '../components/RecipeBuilder';
@@ -154,16 +155,32 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
     return b.remainingPortions - scheduledUneaten;
   };
 
-  const startCook = (r, servings) => setCooking({ recipe: r, servings: Math.max(1, Number(servings) || Number(r.portions) || 1) });
+  /**
+   * Gerbang kedua sebelum layar masak kebuka. Tombol di layar resep udah mati duluan kalau
+   * bahannya kurang, tapi pintunya dijaga hitungan yang SAMA (utils/recipeStock.js) — dua pintu
+   * dengan dua hitungan cepat atau lambat bakal beda pendapat.
+   */
+  const startCook = (r, servings) => {
+    const portions = Math.max(1, Number(servings) || Number(r.portions) || 1);
+    const factor = portions / Math.max(1, Number(r.portions) || 1);
+    const blockers = blockingShortages(ingredientAvailability(r, factor, domusItems));
+    if (blockers.length > 0) {
+      showToast(`Bahan belum cukup — ${blockers.map(formatShortfall).join(', ')}`);
+      return;
+    }
+    setCooking({ recipe: r, servings: portions });
+  };
 
   // Potong stok bahan di Domus sesuai porsi yang BENAR-BENAR dimasak (bukan porsi resep),
   // lalu bahan yang habis/tidak ada langsung diusulkan ke keranjang belanja Domus.
   const syncIngredientsToDomus = async (recipe, factor) => {
     if (!domusItems?.length) return;
-    const missing = new Set();
+    const missing = new Map();
     for (const ing of recipe.ingredients) {
       const match = matchDomusItem(domusItems, ing.name);
-      if (!match) { missing.add(ing.name); continue; }
+      // Bahan yang belum pernah kecatat di Domus tetap diusulkan belanja, cuma tanpa `itemId` —
+      // gak ada entitas yang bisa ditunjuk. Nyocokinnya nanti balik lewat nama.
+      if (!match) { missing.set(ing.name, { name: ing.name }); continue; }
       try {
         const needed = Number(ing.grams || 0) * factor;
         const res = deductStock(match, needed);
@@ -171,10 +188,22 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
         // Dulu keduanya sama-sama null dan itemnya ikut ditandai habis lalu lenyap dari Domus.
         if (!res.ok) continue;
         if (res.depleted) {
-          await markDomusItemConsumed(match.id);
+          // Stoknya nol, BARANGNYA TETAP ADA. Dulu di sini barangnya dipensiunkan
+          // (`markDomusItemConsumed`) dan itu bikin belanjaan berikutnya dari Darka mendarat di
+          // barang kembar — lihat domus-app/model-barang.md.
+          await zeroDomusItemStock(match.id);
           const have = stockInGrams(match);
-          // Belanja cuma kekurangannya, bukan seluruh kebutuhan resep.
-          missing.add(have != null && have > 0 ? `${ing.name} (${Math.ceil(needed - have)} g lagi)` : ing.name);
+          const shortGrams = have != null && have > 0 ? needed - have : needed;
+          // Jumlah kekurangannya dikirim sebagai ANGKA + SATUAN barangnya, bukan ditempel ke nama
+          // ("Telur (200 g lagi)"): nama begitu gak akan pernah cocok balik waktu belanjaannya
+          // masuk lewat nota Darka. `itemId` yang bikin entri belanja nunjuk ke barang ini.
+          const perUnit = unitToGrams(match.qtyUnit, match);
+          missing.set(match.id, {
+            name: match.name,
+            itemId: match.id,
+            qtyValue: perUnit ? Math.ceil(shortGrams / perUnit) : Math.ceil(shortGrams),
+            qtyUnit: perUnit ? (match.qtyUnit || 'g') : 'g',
+          });
         } else {
           await updateDomusItemQuantity(match.id, res.value, res.unit);
         }
@@ -182,8 +211,8 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
         console.error(`Gagal potong stok untuk ${ing.name}`, e);
       }
     }
-    for (const m of missing) {
-      try { await requestShoppingListDomus(user.uid, m); }
+    for (const m of missing.values()) {
+      try { await requestShoppingListDomus(user.uid, m.name, { qtyValue: m.qtyValue ?? null, qtyUnit: m.qtyUnit ?? null, itemId: m.itemId ?? null }); }
       catch (e) { console.error('Gagal tambah ke shopping list', e); }
     }
   };
@@ -255,7 +284,16 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
       let domus = null;
       if (locationId) {
         try {
-          const domusItemId = await createDomusItem(user.uid, {
+          // Resep yang sama pernah dimasak -> porsinya NUMPANG barang yang udah ada, bukan bikin
+          // entitas baru tiap masak. Meal prep itu barang yang dirotasi, dan id-nya harus tetap:
+          // riwayat masaknya numpuk di satu tempat, dan batch di sini gak pindah-pindah tuan.
+          const existing = domusItems.find((i) => i.recipeId === r.id && !i.discardedAt);
+          let domusItemId;
+          if (existing) {
+            await addPortionsToDomusItem(existing.id, stockPortions, { recipeId: r.id, locationId });
+            domusItemId = existing.id;
+          } else {
+            domusItemId = await createDomusItem(user.uid, {
             name: `${r.name} (Meal Prep)`,
             locationId,
             qtyValue: stockPortions,
@@ -263,8 +301,9 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
             isFood: true,
             sourceApp: 'lomeal',
             // Masakan matang: kategorinya jelas, jangan biarkan Domus menerima barang tanpa
-            // kategori. Kosakatanya milik Domus (domus-app/src/lib/items.js#CATEGORIES).
-            category: 'Makanan Jadi',
+            // kategori. Kosakatanya milik Domus (domus-app/src/lib/items.js#CATEGORIES) — di sana
+            // mentah & matang sudah disatukan jadi satu 'Makanan', 'Makanan Jadi' tidak ada lagi.
+            category: 'Makanan',
             // `kind: 'mealprep'` DIHAPUS — Domus sekarang memakai `kind` untuk tipe barang
             // (stok/aset/dokumen/langganan), jadi nilai asing bikin kartunya tidak dikenali.
             // Penanda meal prep sudah cukup dari `recipeId` + `portions` + `sourceApp`.
@@ -272,8 +311,11 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
             kcalPerPortion: Math.round(r.perPortion?.kcal || 0),
             cookedAt: new Date().toISOString(),
             recipeId: r.id,
+            // Riwayat masak dimulai dari masakan pertama ini (bentuknya niru `priceLog` Domus).
+            cookLog: [cookEntry(stockPortions, r.id)],
             ...(photoUrl ? { photoUrl } : {}),
-          });
+            });
+          }
           domus = {
             domusItemId,
             domusLocationName: domusLocations?.find(l => l.id === locationId)?.name || '',
@@ -346,7 +388,8 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
         qtyUnit: 'porsi',
         isFood: true,
         sourceApp: 'lomeal',
-        category: 'Makanan Jadi',
+        // Kosakata kategori milik Domus — mentah & matang sudah satu 'Makanan' di sana.
+        category: 'Makanan',
         portions: b.remainingPortions,
       });
       saveMealPrepsFn(mealPreps.map(x => x.id === b.id ? {
@@ -737,7 +780,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                                 const val = Number(input);
                                 if (!Number.isFinite(val)) return showToast('Isi dengan angka ya.');
                                 if (val <= 0) {
-                                  markDomusItemConsumed(i.id).then(() => showToast('Dibuang dari Domus!'));
+                                  discardDomusItem(i.id, 'dibuang').then(() => showToast('Masuk kotak sampah Domus.'));
                                 } else {
                                   updateDomusItemQuantity(i.id, val, cur?.unit || i.qtyUnit || '').then(() => showToast('Sisa stok diupdate!'));
                                 }
@@ -1038,7 +1081,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
             if (processingInbox.source === 'darka') {
               await markInboxClaimed(processingInbox.id);
             } else if (processingInbox.source === 'domus') {
-              await markDomusItemConsumed(processingInbox.id);
+              await zeroDomusItemStock(processingInbox.id);
             }
             
             setProcessingInbox(null);

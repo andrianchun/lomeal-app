@@ -3,8 +3,9 @@ import { X, Share2, Loader2, Minus, Plus, Clock, Flame, ChefHat, Pencil, Timer, 
 import { NUTRIENTS } from '../data/nutrition';
 import { heroForRecipe, formatDuration, formatClock } from '../data/constants';
 import { STATUS } from '../theme';
-import { matchDomusItem, requestShoppingListDomus } from '../utils/domusSync';
-import { stockInGrams, itemStock, formatStock } from '../utils/stockConverter';
+import { requestShoppingListDomus } from '../utils/domusSync';
+import { itemStock, formatStock } from '../utils/stockConverter';
+import { blockingShortages, formatShortfall, ingredientAvailability, shortfallInItemUnit } from '../utils/recipeStock.js';
 import { PillTabs, CheckBox } from './RecipeBits';
 import useBackClose from '../hooks/useBackClose';
 
@@ -37,18 +38,19 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
   const totalSteps = useMemo(() => components.reduce((n, c) => n + c.steps.length, 0), [components]);
 
   // Cek bahan ke inventaris Domus — biar user tahu apa yang harus dibeli SEBELUM mulai masak,
-  // bukan pas wajan sudah panas.
-  const rows = useMemo(() => recipe.ingredients.map((ing, i) => {
-    const key = `i${i}`;
-    const name = ing.rawName || ing.name;
-    const needed = Math.round((ing.grams || 0) * factor);
-    const match = matchDomusItem(domusItems, name);
-    const have = match ? stockInGrams(match) : null;
-    // Stok tak terukur (satuan aneh / kosong) dianggap cukup — user yang tahu isi dapurnya.
-    const enough = !!match && (have == null || have >= needed);
-    const on = overrides.has(key) ? overrides.get(key) : enough;
-    return { key, name, needed, match, have, enough, on, shortfall: have != null ? Math.max(0, needed - have) : 0 };
-  }), [recipe.ingredients, domusItems, factor, overrides]);
+  // bukan pas wajan sudah panas. Hitungannya di utils/recipeStock.js (ada tesnya) karena dipakai
+  // DUA tempat: daftar bahan di bawah, dan gerbang tombol "Mulai Masak" di CTA.
+  const rows = useMemo(() => {
+    const base = ingredientAvailability(recipe, factor, domusItems);
+    return base.map((r) => ({ ...r, on: overrides.has(r.key) ? overrides.get(r.key) : r.enough }));
+  }, [recipe, domusItems, factor, overrides]);
+
+  /**
+   * Bahan yang bikin masak gak bisa jalan: stoknya keukur dan kurang. Sengaja BUKAN `rows.on` —
+   * centang di daftar itu "gak usah dibeli", bukan "anggap aja ada". Kalau centang bisa nembus
+   * gerbang ini, gerbangnya cuma hiasan dan stok Domus balik jadi angka bohong.
+   */
+  const blockers = useMemo(() => blockingShortages(rows), [rows]);
 
   // Bahan yang belum dicentang perlu dibeli. Kalau stoknya ada tapi kurang, cukup beli selisihnya.
   // Jumlahnya dibawa sebagai ANGKA + SATUAN terpisah, BUKAN ditempel ke nama: Domus nyimpen jumlah
@@ -58,8 +60,18 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
     const seen = new Map();
     for (const r of rows) {
       if (r.on || seen.has(r.name)) continue;
-      const grams = r.shortfall > 0 ? r.shortfall : r.needed;
-      seen.set(r.name, { name: r.name, qtyValue: grams > 0 ? grams : null, qtyUnit: grams > 0 ? 'g' : null });
+      // Kurang -> beli selisihnya; belum punya sama sekali -> beli sebutuhnya.
+      const short = r.shortfall > 0 ? shortfallInItemUnit(r) : null;
+      seen.set(r.name, {
+        // Nama BARANGNYA (kalau ketemu), bukan nama bahan di resep: entri belanjanya kudu kebaca
+        // sebagai barang yang sama dengan yang ada di inventaris.
+        name: r.match?.name || r.name,
+        // `itemId` yang bikin belanjaan ini mendarat balik ke barang yang tepat waktu notanya
+        // masuk lewat Darka — nama cuma cadangan buat bahan yang belum pernah kecatat.
+        itemId: r.match?.id ?? null,
+        qtyValue: short ? Math.ceil(short.value) : (r.needed > 0 ? r.needed : null),
+        qtyUnit: short ? short.unit : (r.needed > 0 ? 'g' : null),
+      });
     }
     return [...seen.values()];
   }, [rows]);
@@ -67,7 +79,7 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
   const addMissingToCart = async () => {
     setCartBusy(true);
     try {
-      for (const m of missing) await requestShoppingListDomus(user.uid, m.name, { qtyValue: m.qtyValue, qtyUnit: m.qtyUnit });
+      for (const m of missing) await requestShoppingListDomus(user.uid, m.name, { qtyValue: m.qtyValue, qtyUnit: m.qtyUnit, itemId: m.itemId });
       setCartDone(true);
       showToast?.(`${missing.length} bahan masuk list belanja 🛒`);
     } catch (e) {
@@ -189,7 +201,7 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
                         <span className={`block caption ${r.enough ? t.textMuted : 'text-amber-500'}`}>
                           {r.have == null
                             ? `ada di ${r.match.name}`
-                            : `sisa ${formatStock(itemStock(r.match))}${r.shortfall > 0 ? ` · kurang ${r.shortfall} g` : ''}`}
+                            : `sisa ${formatStock(itemStock(r.match))}${r.shortfall > 0 ? ` · kurang ${Math.ceil(shortfallInItemUnit(r).value)} ${shortfallInItemUnit(r).unit}` : ''}`}
                         </span>
                       )}
                     </span>
@@ -253,9 +265,30 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
 
       {/* ---------- CTA ---------- */}
       <div className={`fixed bottom-0 inset-x-0 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] z-50 ${isDark ? 'bg-[#0a1510]/90' : 'bg-white/90'} backdrop-blur-xl border-t ${t.border}`}>
-        <button onClick={() => onCook(servings)}
-          className={`w-full max-w-2xl mx-auto py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow flex items-center justify-center gap-2`}>
-          <ChefHat size={18} /> Mulai Masak
+        {blockers.length > 0 && (
+          <div className="max-w-2xl mx-auto mb-2 flex flex-col gap-1.5">
+            <p className={`caption font-bold ${STATUS.warn.text}`}>
+              {blockers.map(formatShortfall).join(' · ')}
+            </p>
+            <button
+              onClick={addMissingToCart}
+              disabled={cartBusy || cartDone || missing.length === 0}
+              className={`w-full py-2.5 rounded-2xl border ${t.border} ${t.textMain} body-md flex items-center justify-center gap-2 disabled:opacity-40`}
+            >
+              <ShoppingCart size={16} />
+              {cartDone ? 'Sudah masuk keranjang' : cartBusy ? 'Menambahkan…' : 'Tambah kekurangan ke keranjang'}
+            </button>
+          </div>
+        )}
+        <button
+          onClick={() => onCook(servings)}
+          disabled={blockers.length > 0}
+          title={blockers.length > 0 ? 'Stok bahannya kurang' : undefined}
+          className={`w-full max-w-2xl mx-auto py-3.5 rounded-2xl ${t.bgAccent} body-lg shadow-glow flex items-center justify-center gap-2 disabled:opacity-40 disabled:shadow-none`}>
+          {/* Stok kurang = gak bisa masak. Jalan keluarnya belanja dulu (stok Domus kebarui
+              sendiri begitu notanya masuk), atau ubah resep/porsinya — bukan nerobos dan bikin
+              catatan stoknya bohong. */}
+          <ChefHat size={18} /> {blockers.length > 0 ? 'Bahan belum cukup' : 'Mulai Masak'}
         </button>
       </div>
     </div>

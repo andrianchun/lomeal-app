@@ -15,7 +15,7 @@ import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, sav
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
 import { isNativeApp, captureToFile } from '../utils/nativeCamera';
-import { markDomusItemConsumed, updateDomusItemQuantity, requestShoppingListDomus } from '../utils/domusSync';
+import { zeroDomusItemStock, updateDomusItemQuantity, requestShoppingListDomus } from '../utils/domusSync';
 import { deductStock, formatStock, itemStock } from '../utils/stockConverter';
 import { nutrientSources } from '../utils/nutrientSources';
 import AttachmentMenu from '../components/AttachmentMenu';
@@ -397,7 +397,9 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
         // Sync to Domus if linked
         if (batch.domusItemId) {
           if (newRemaining <= 0) {
-            markDomusItemConsumed(batch.domusItemId).catch(console.error);
+            // Porsinya abis, entitasnya tetap — resep yang sama bakal dimasak lagi dan porsinya
+            // numpang barang ini juga (addPortionsToDomusItem), jadi id-nya harus kejaga.
+            zeroDomusItemStock(batch.domusItemId).catch(console.error);
           } else {
             updateDomusItemQuantity(batch.domusItemId, newRemaining, 'porsi').catch(console.error);
           }
@@ -457,7 +459,7 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
         // e.grams is the amount consumed in Lomeal
         const res = deductStock(domusItem, e.grams || 100);
         if (res.ok && res.depleted) {
-          markDomusItemConsumed(e.domusItemId).catch(console.error);
+          zeroDomusItemStock(e.domusItemId).catch(console.error);
           showToast(`Stok ${domusItem.name} di kulkas (Domus) habis.`);
         } else if (res.ok) {
           updateDomusItemQuantity(e.domusItemId, res.value, res.unit).catch(console.error);
@@ -1961,8 +1963,10 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
           favoriteFoods={profile?.favoriteFoods || []}
           onAdd={(entry) => {
             // Potong stok gudang (Domus) secara atomik jika barang ini terhubung.
-            if (entry.domus_item_id && entry.grams) {
-              deductDomusItemQuantity(entry.domus_item_id, entry.grams).catch(e => console.error("Gagal potong stok Domus:", e));
+            // `domusItemId` — bukan `domus_item_id`. Sampai dibetulin, potongan stok dari
+            // Food Picker gak pernah kepanggil sama sekali (makeEntry nyalin apa adanya).
+            if (entry.domusItemId && entry.grams) {
+              deductDomusItemQuantity(entry.domusItemId, entry.grams).catch(e => console.error("Gagal potong stok Domus:", e));
             }
             
             if (detailSession) {
