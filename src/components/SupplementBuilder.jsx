@@ -32,6 +32,7 @@ const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods 
   const handleSave = () => {
     onSave({
       ...editing,
+      volumeMl: editing.volumeMl !== undefined && editing.volumeMl !== '' ? Number(editing.volumeMl) : 250,
       nutrition: draftTotals,
     });
   };
@@ -175,6 +176,17 @@ const SupplementBuilder = ({ t, theme, editing, setEditing, onSave, customFoods 
             )}
           </div>
         )}
+      </div>
+
+      <div className={`p-4 rounded-2xl border ${t.border} ${t.bgCard}`}>
+        <p className={`caption font-bold mb-1.5 ${t.textMuted}`}>Volume Minuman / Takaran Air</p>
+        <div className="flex gap-2 items-center">
+          <input type="number" inputMode="numeric" min="0" placeholder="250" value={editing.volumeMl ?? (editing.volumeMl === '' ? '' : 250)}
+            onChange={(e) => setEditing(r => ({ ...r, volumeMl: e.target.value === '' ? '' : Number(e.target.value) }))}
+            className={`w-28 px-3 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} font-bold text-center outline-none`} />
+          <span className={`caption font-bold ${t.textMuted}`}>mL</span>
+          <p className={`caption ${t.textMuted} flex-1`}>Otomatis menambah volume cairan (mL) saat dicatat.</p>
+        </div>
       </div>
 
       <div className={`p-4 rounded-2xl border ${t.border} ${t.bgCard}`}>

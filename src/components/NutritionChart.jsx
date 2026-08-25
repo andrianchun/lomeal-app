@@ -79,51 +79,28 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
   // Pinch-to-zoom logic
   const [pointWidth, setPointWidth] = useState(45);
   const touchState = useRef({ initialDist: 0, initialPointWidth: 45, pinchRatio: 0, scrollRelCenterX: 0 });
-
-  // Auto scroll ke tengah titik data terbaru
-  useEffect(() => {
-     if(scrollRef.current && multiChartData.length > 0) {
-        const data = multiChartData;
-        const activeObj = chartMetricsList.find(m => m.key === activeMetric);
-        
-        let latestIdxWithData = -1;
-        for (let i = data.length - 1; i >= 0; i--) {
-            const hasData = activeObj.type === 'single' 
-                ? (data[i][activeMetric] !== undefined && data[i][activeMetric] !== null)
-                : (data[i].nutritionCalories !== null || data[i].activityCalories !== null);
-
-            if (hasData) {
-                latestIdxWithData = i;
-                break;
-            }
-        }
-        
-        if (latestIdxWithData !== -1) {
-             const latestDateObj = new Date(data[latestIdxWithData].dateFull);
-             const oneMonthAgo = new Date(latestDateObj.getTime() - 30 * 24 * 60 * 60 * 1000);
-             const oneMonthAgoStr = getLocalYMD(oneMonthAgo);
-
-             let startIdx = latestIdxWithData;
-             while (startIdx > 0 && data[startIdx - 1].dateFull >= oneMonthAgoStr) {
-                 startIdx--;
-             }
-
-             const numPoints = latestIdxWithData - startIdx + 1;
-             const clientW = scrollRef.current.clientWidth || (window.innerWidth - 64);
-             
-             let newPointWidth = clientW / Math.max(1.5, numPoints);
-             if (newPointWidth > 200) newPointWidth = 200;
-             if (newPointWidth < 25) newPointWidth = 25;
-
-             setPointWidth(newPointWidth);
-             scrollTarget.current = startIdx * newPointWidth;
-        } else {
-             const clientW = scrollRef.current.clientWidth || (window.innerWidth - 64);
-             scrollTarget.current = Math.max(0, ((data.length - 1) * pointWidth) - (clientW / 2));
-        }
-     }
-  }, [multiChartData, activeMetric]);
   const scrollTarget = useRef(null);
+
+  const scrollToRight = useCallback(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+    }
+  }, []);
+
+  // Auto scroll mentok ke kanan (menampilkan hari ini / data terbaru)
+  useEffect(() => {
+    if (multiChartData.length > 0) {
+      scrollToRight();
+      const t1 = setTimeout(scrollToRight, 50);
+      const t2 = setTimeout(scrollToRight, 150);
+      const raf = requestAnimationFrame(scrollToRight);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        cancelAnimationFrame(raf);
+      };
+    }
+  }, [multiChartData, activeMetric, scrollToRight]);
 
   const [yDomain, setYDomain] = useState(['auto', 'auto']);
   const pointWidthRef = useRef(pointWidth);

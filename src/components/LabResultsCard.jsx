@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { FlaskConical, Plus, Camera, Loader2, X, Trash2, ShieldAlert, ChevronDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ReferenceArea, ResponsiveContainer, Tooltip } from 'recharts';
 import { LAB_PANELS, LAB_MARKERS, findMarker, markerStatus, referenceText, LAB_DISCLAIMER } from '../data/labPanels';
@@ -22,6 +23,8 @@ const LabResultsCard = ({ t, theme, user, aiKey, profile, saveProfilePatch, show
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [expandedMarker, setExpandedMarker] = useState(null);
+  const [showAddCustom, setShowAddCustom] = useState(false);
+  const [newCustom, setNewCustom] = useState({ label: '', unit: '', low: '', high: '', val: '' });
 
   const accepted = !!profile?.labDisclaimerAcceptedAt;
 
@@ -32,18 +35,83 @@ const LabResultsCard = ({ t, theme, user, aiKey, profile, saveProfilePatch, show
 
   useBackClose(!!editing, () => setEditing(null));
 
+  const customMarkers = useMemo(() => profile?.customLabMarkers || [], [profile?.customLabMarkers]);
+
+  const allMarkers = useMemo(() => {
+    return [...LAB_MARKERS, ...customMarkers.map((m) => ({ ...m, isCustom: true }))];
+  }, [customMarkers]);
+
+  const findAnyMarker = (key) => allMarkers.find((m) => m.key === key) || null;
+
+  const getMarkerStatus = (key, value) => {
+    const m = findAnyMarker(key);
+    if (!m || value == null || value === '') return null;
+    const v = Number(value);
+    if (!Number.isFinite(v)) return null;
+    if (m.low != null && v < m.low) return 'low';
+    if (m.high != null && v > m.high) return 'high';
+    return 'normal';
+  };
+
+  const getReferenceText = (m) => {
+    if (!m) return '';
+    if (m.low != null && m.high != null) return `${m.low}–${m.high} ${m.unit || ''}`.trim();
+    if (m.high != null) return `< ${m.high} ${m.unit || ''}`.trim();
+    if (m.low != null) return `> ${m.low} ${m.unit || ''}`.trim();
+    return m.unit || '—';
+  };
+
   const sorted = useMemo(() => [...entries].sort((a, b) => (a.testDate || '').localeCompare(b.testDate || '')), [entries]);
   const latest = sorted[sorted.length - 1];
 
-  // Penanda yang pernah punya nilai — tidak perlu menampilkan 17 baris kosong.
+  // Penanda yang pernah punya nilai — termasuk penanda kustom
   const trackedMarkers = useMemo(
-    () => LAB_MARKERS.filter((m) => sorted.some((e) => e.results?.[m.key] != null)),
-    [sorted]
+    () => allMarkers.filter((m) => sorted.some((e) => e.results?.[m.key] != null)),
+    [allMarkers, sorted]
   );
 
   const persist = (items) => saveLabResults(user.uid, items);
 
   const openNew = () => setEditing({ id: `lab_${Date.now()}`, testDate: getLocalYMD(), labName: '', results: {} });
+
+  const handleAddCustomMarker = () => {
+    const label = newCustom.label.trim();
+    if (!label) return showAlert('Nama parameter lab harus diisi.');
+    const key = `custom_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+    const unit = newCustom.unit.trim() || 'satuan';
+    const low = newCustom.low !== '' && !isNaN(Number(newCustom.low)) ? Number(newCustom.low) : null;
+    const high = newCustom.high !== '' && !isNaN(Number(newCustom.high)) ? Number(newCustom.high) : null;
+
+    const createdMarker = { key, label, unit, low, high };
+    const updatedCustom = [...customMarkers, createdMarker];
+    saveProfilePatch({ customLabMarkers: updatedCustom });
+
+    if (newCustom.val !== '' && !isNaN(Number(newCustom.val))) {
+      setEditing((prev) => ({
+        ...prev,
+        results: { ...(prev?.results || {}), [key]: Number(newCustom.val) },
+      }));
+    }
+
+    setNewCustom({ label: '', unit: '', low: '', high: '', val: '' });
+    setShowAddCustom(false);
+    showToast(`Penanda "${label}" berhasil ditambahkan.`);
+  };
+
+  const handleDeleteCustomMarker = async (markerKey) => {
+    const m = customMarkers.find((x) => x.key === markerKey);
+    if (!m) return;
+    if (
+      !(await showConfirm(
+        `Hapus penanda kustom "${m.label}"? Data yang sudah tersimpan di riwayat tidak akan dihapus.`,
+        { title: 'Hapus Penanda', confirmText: 'Hapus', danger: true }
+      ))
+    )
+      return;
+    const updatedCustom = customMarkers.filter((x) => x.key !== markerKey);
+    saveProfilePatch({ customLabMarkers: updatedCustom });
+    showToast(`Penanda "${m.label}" dihapus.`);
+  };
 
   const save = async () => {
     const clean = Object.fromEntries(
@@ -134,25 +202,28 @@ const LabResultsCard = ({ t, theme, user, aiKey, profile, saveProfilePatch, show
 
           {trackedMarkers.map((m) => {
             const value = latest?.results?.[m.key];
-            const st = markerStatus(m.key, value);
+            const st = getMarkerStatus(m.key, value);
             const series = sorted.filter((e) => e.results?.[m.key] != null)
               .map((e) => ({ date: (e.testDate || '').slice(5), value: e.results[m.key] }));
             const isOpen = expandedMarker === m.key;
             return (
               <div key={m.key}>
                 <button onClick={() => setExpandedMarker(isOpen ? null : m.key)} className="w-full flex items-baseline justify-between py-1.5">
-                  <span className={`body-md ${t.textMain}`}>{m.label}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className={`body-md ${t.textMain}`}>{m.label}</span>
+                    {m.isCustom && <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[9px] font-bold uppercase">Kustom</span>}
+                  </span>
                   <span className="flex items-baseline gap-2">
                     <span className={`body-md font-bold tabular-nums ${STATUS_COLOR[st] || t.textMain}`}>
                       {value ?? '—'} <span className={`caption font-medium ${t.textMuted}`}>{m.unit}</span>
                     </span>
-                    <span className={`caption ${t.textMuted}`}>({referenceText(m)})</span>
+                    <span className={`caption ${t.textMuted}`}>({getReferenceText(m)})</span>
                   </span>
                 </button>
                 {isOpen && (
                   <div className={`rounded-2xl ${t.bgSunken} p-3 mb-2`}>
                     <p className={`caption mb-2 ${STATUS_COLOR[st] || t.textMuted}`}>
-                      {st ? `Nilai terakhir ${STATUS_LABEL[st]} umum (${referenceText(m)}).` : 'Belum ada nilai.'} Rentang rujukan labmu sendiri yang berlaku — tanyakan ke dokter.
+                      {st ? `Nilai terakhir ${STATUS_LABEL[st]} umum (${getReferenceText(m)}).` : 'Belum ada nilai.'} Rentang rujukan labmu sendiri yang berlaku — tanyakan ke dokter.
                     </p>
                     {series.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={140}>
@@ -201,51 +272,246 @@ const LabResultsCard = ({ t, theme, user, aiKey, profile, saveProfilePatch, show
         </div>
       )}
 
-      {editing && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm no-swipe" onClick={() => setEditing(null)}>
-          <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-[85vh] overflow-y-auto hide-scrollbar rounded-3xl border ${t.border} ${theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'} p-5 anim-rise`}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className={`h2 ${t.textMain}`}>Hasil Lab</h2>
-              <button onClick={() => setEditing(null)} className={`p-1.5 rounded-xl ${t.btnBg} ${t.textMuted}`}><X size={16} /></button>
+      {editing && createPortal(
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm no-swipe" onClick={() => setEditing(null)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`relative w-full sm:max-w-lg rounded-[2rem] border ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} ${theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'} backdrop-blur-2xl max-h-[88vh] flex flex-col overflow-hidden shadow-2xl anim-rise`}
+          >
+            {/* Modal Header */}
+            <div className={`flex items-center justify-between px-5 py-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0`}>
+              <div className="flex items-center gap-2">
+                <FlaskConical size={20} className="text-purple-500" />
+                <h2 className={`h2 ${t.textMain}`}>Hasil Lab</h2>
+              </div>
+              <button onClick={() => setEditing(null)} className={`p-1.5 rounded-full ${t.btnBg} ${t.textMuted}`}>
+                <X size={16} />
+              </button>
             </div>
 
-            {editing.fromOcr && (
-              <p className={`caption text-amber-500 mb-3`}>Hasil pindai foto — cocokkan dulu dengan lembar aslinya sebelum disimpan.</p>
-            )}
+            {/* Modal Body */}
+            <div className="overflow-y-auto px-5 py-4 space-y-4 flex-1 hide-scrollbar">
+              {editing.fromOcr && (
+                <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs">
+                  <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">Hasil pindai foto — cocokkan dulu dengan lembar aslinya sebelum disimpan.</span>
+                </div>
+              )}
 
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              <label className={`caption ${t.textMuted}`}>Tanggal Periksa
-                <input type="date" value={editing.testDate || ''} onChange={(e) => setEditing({ ...editing, testDate: e.target.value })}
-                  className={`w-full mt-1 px-3 py-2 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} text-sm`} />
-              </label>
-              <label className={`caption ${t.textMuted}`}>Nama Lab
-                <input type="text" value={editing.labName || ''} onChange={(e) => setEditing({ ...editing, labName: e.target.value })}
-                  className={`w-full mt-1 px-3 py-2 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} text-sm`} />
-              </label>
-            </div>
-
-            {LAB_PANELS.map((panel) => (
-              <div key={panel.id} className="mb-4">
-                <p className={`caption font-bold mb-2 ${t.textMuted} uppercase tracking-wider`}>{panel.label}</p>
-                <div className="space-y-2">
-                  {panel.markers.map((m) => (
-                    <label key={m.key} className="flex items-center gap-2">
-                      <span className={`flex-1 caption ${t.textMain}`}>{m.label}</span>
-                      <input type="number" inputMode="decimal" step="any" min="0"
-                        value={editing.results[m.key] ?? ''}
-                        onChange={(e) => setEditing({ ...editing, results: { ...editing.results, [m.key]: e.target.value } })}
-                        className={`w-20 px-2 py-1.5 rounded-lg border ${t.border} ${t.inputBg} ${t.textMain} text-sm text-right tabular-nums`} />
-                      <span className={`caption ${t.textMuted} w-14`}>{m.unit}</span>
-                    </label>
-                  ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={`caption font-bold ${t.textMuted} block mb-1.5`}>Tanggal Periksa</label>
+                  <input
+                    type="date"
+                    value={editing.testDate || ''}
+                    onChange={(e) => setEditing({ ...editing, testDate: e.target.value })}
+                    className={`w-full px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} font-semibold text-sm outline-none`}
+                  />
+                </div>
+                <div>
+                  <label className={`caption font-bold ${t.textMuted} block mb-1.5`}>Nama Lab / Klinik</label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Prodia, Pramita..."
+                    value={editing.labName || ''}
+                    onChange={(e) => setEditing({ ...editing, labName: e.target.value })}
+                    className={`w-full px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} font-semibold text-sm outline-none`}
+                  />
                 </div>
               </div>
-            ))}
 
-            <button onClick={save} className={`w-full py-3 rounded-2xl ${t.bgAccent} body-lg`}>Simpan</button>
+              {LAB_PANELS.map((panel) => (
+                <div key={panel.id} className={`rounded-2xl border ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} ${t.bgSunken} p-3.5 space-y-2.5`}>
+                  <p className={`caption font-black ${t.textMuted} uppercase tracking-wider`}>{panel.label}</p>
+                  <div className="space-y-1.5">
+                    {panel.markers.map((m) => (
+                      <div
+                        key={m.key}
+                        className={`flex items-center justify-between gap-3 p-2 rounded-xl border ${theme === 'dark' ? 'border-white/5 bg-black/20' : 'border-black/5 bg-white'}`}
+                      >
+                        <div className="flex-1 min-w-0 pr-2">
+                          <p className={`text-sm font-bold ${t.textMain} truncate`}>{m.label}</p>
+                          <p className={`text-[10px] ${t.textMuted}`}>Rujukan: {referenceText(m)}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step="any"
+                            min="0"
+                            placeholder="—"
+                            value={editing.results[m.key] ?? ''}
+                            onChange={(e) => setEditing({ ...editing, results: { ...editing.results, [m.key]: e.target.value } })}
+                            className={`w-24 px-2.5 py-1.5 rounded-lg border ${t.border} ${t.inputBg} ${t.textMain} text-sm font-bold text-right tabular-nums outline-none focus:ring-1 focus:ring-purple-500`}
+                          />
+                          <span className={`text-xs font-semibold ${t.textMuted} w-14 truncate text-left pl-1`}>{m.unit}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {/* Panel Penanda Kustom */}
+              <div className={`rounded-2xl border ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} ${t.bgSunken} p-3.5 space-y-2.5`}>
+                <div className="flex items-center justify-between">
+                  <p className={`caption font-black ${t.textMuted} uppercase tracking-wider`}>Penanda Kustom / Tambahan</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCustom(!showAddCustom)}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold ${t.bgAccent} flex items-center gap-1 active:scale-95 transition-all`}
+                  >
+                    <Plus size={13} /> Tambah Kustom
+                  </button>
+                </div>
+
+                {/* Form Tambah Penanda Kustom Baru */}
+                {showAddCustom && (
+                  <div className={`p-3.5 rounded-xl border border-purple-500/30 ${theme === 'dark' ? 'bg-purple-950/20' : 'bg-purple-50'} space-y-3 anim-rise`}>
+                    <p className="text-xs font-bold text-purple-400">Buat Penanda Lab Kustom</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className={`text-[10px] font-bold ${t.textMuted} block mb-1`}>Nama Parameter *</label>
+                        <input
+                          type="text"
+                          placeholder="Contoh: SGPT, Kreatinin, Hb..."
+                          value={newCustom.label}
+                          onChange={(e) => setNewCustom({ ...newCustom, label: e.target.value })}
+                          className={`w-full px-3 py-2 rounded-lg border ${t.border} ${t.inputBg} ${t.textMain} text-xs font-semibold outline-none`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`text-[10px] font-bold ${t.textMuted} block mb-1`}>Satuan *</label>
+                        <input
+                          type="text"
+                          placeholder="Contoh: U/L, mg/dL, g/dL..."
+                          value={newCustom.unit}
+                          onChange={(e) => setNewCustom({ ...newCustom, unit: e.target.value })}
+                          className={`w-full px-3 py-2 rounded-lg border ${t.border} ${t.inputBg} ${t.textMain} text-xs font-semibold outline-none`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className={`text-[10px] font-bold ${t.textMuted} block mb-1`}>Min (Rujukan)</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="any"
+                          placeholder="Batas Bawah"
+                          value={newCustom.low}
+                          onChange={(e) => setNewCustom({ ...newCustom, low: e.target.value })}
+                          className={`w-full px-2.5 py-2 rounded-lg border ${t.border} ${t.inputBg} ${t.textMain} text-xs text-center font-bold outline-none`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`text-[10px] font-bold ${t.textMuted} block mb-1`}>Max (Rujukan)</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="any"
+                          placeholder="Batas Atas"
+                          value={newCustom.high}
+                          onChange={(e) => setNewCustom({ ...newCustom, high: e.target.value })}
+                          className={`w-full px-2.5 py-2 rounded-lg border ${t.border} ${t.inputBg} ${t.textMain} text-xs text-center font-bold outline-none`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`text-[10px] font-bold text-purple-400 block mb-1`}>Nilai Saat Ini</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="any"
+                          placeholder="Hasil Lab"
+                          value={newCustom.val}
+                          onChange={(e) => setNewCustom({ ...newCustom, val: e.target.value })}
+                          className={`w-full px-2.5 py-2 rounded-lg border border-purple-500/40 ${t.inputBg} ${t.textMain} text-xs text-center font-bold outline-none`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddCustom(false)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${t.btnBg} ${t.textMuted}`}
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddCustomMarker}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold ${t.bgAccent}`}
+                      >
+                        Simpan Penanda
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Daftar Penanda Kustom Yang Sudah Dibuat */}
+                <div className="space-y-1.5">
+                  {customMarkers.map((m) => (
+                    <div
+                      key={m.key}
+                      className={`flex items-center justify-between gap-3 p-2 rounded-xl border ${theme === 'dark' ? 'border-white/5 bg-black/20' : 'border-black/5 bg-white'}`}
+                    >
+                      <div className="flex-1 min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-sm font-bold ${t.textMain} truncate`}>{m.label}</p>
+                          <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[9px] font-bold uppercase">Kustom</span>
+                        </div>
+                        <p className={`text-[10px] ${t.textMuted}`}>Rujukan: {getReferenceText(m)}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="any"
+                          min="0"
+                          placeholder="—"
+                          value={editing.results[m.key] ?? ''}
+                          onChange={(e) => setEditing({ ...editing, results: { ...editing.results, [m.key]: e.target.value } })}
+                          className={`w-24 px-2.5 py-1.5 rounded-lg border ${t.border} ${t.inputBg} ${t.textMain} text-sm font-bold text-right tabular-nums outline-none focus:ring-1 focus:ring-purple-500`}
+                        />
+                        <span className={`text-xs font-semibold ${t.textMuted} w-14 truncate text-left pl-1`}>{m.unit}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCustomMarker(m.key)}
+                          className="p-1 rounded text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          title="Hapus Penanda"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {customMarkers.length === 0 && !showAddCustom && (
+                    <p className={`caption ${t.textMuted} text-center py-2`}>Belum ada penanda kustom. Klik "+ Tambah Kustom" untuk menambah parameter baru.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className={`flex gap-3 px-5 py-4 border-t ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0`}>
+              <button
+                onClick={() => setEditing(null)}
+                className={`flex-1 py-3 rounded-2xl font-bold text-sm ${t.btnBg} ${t.textMain}`}
+              >
+                Batal
+              </button>
+              <button
+                onClick={save}
+                className={`flex-1 py-3 rounded-2xl font-bold text-sm ${t.bgAccent}`}
+              >
+                Simpan
+              </button>
+            </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

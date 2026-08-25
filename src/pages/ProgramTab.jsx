@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ChefHat, Plus, X, Clock, CalendarPlus, Warehouse, Bot, ClipboardList, Sparkles, Send, Trash2, Utensils, Calculator, Coins } from 'lucide-react';
-import { EMPTY_NUTRITION } from '../data/nutrition';
+import { ChefHat, Plus, X, Clock, CalendarPlus, Warehouse, ClipboardList, Send, Trash2, Utensils, Calculator, Coins, Loader2 } from 'lucide-react';
+import { EMPTY_NUTRITION, DIET_PROFILES, DIET_GOALS, ACTIVITY_LEVELS } from '../data/nutrition';
 import { MEAL_SESSIONS, DEFAULT_SESSION_TIMES, macroText, getLocalYMD, DAY_NAMES_ID, heroForRecipe, formatDuration } from '../data/constants';
 import { STATUS } from '../theme';
 import { makeEntry } from '../utils/foodLog';
@@ -10,7 +11,7 @@ import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, zer
 import { deductStock, stockInGrams, itemStock, formatStock, unitToGrams } from '../utils/stockConverter';
 import { blockingShortages, formatShortfall, ingredientAvailability } from '../utils/recipeStock.js';
 import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import RecipeBuilder from '../components/RecipeBuilder';
 import RecipeDetail from '../components/RecipeDetail';
 import CookingSession from '../components/CookingSession';
@@ -53,6 +54,11 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
   const [cooking, setCooking] = useState(null); // { recipe, servings } — sesi masak yang lagi jalan
   const [shareBusy, setShareBusy] = useState(null);
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+  const [showQuickAiModal, setShowQuickAiModal] = useState(false);
+  const [quickPrompt, setQuickPrompt] = useState('');
+  const [selectedIngredients, setSelectedIngredients] = useState([]);
+  const [ingredientSearch, setIngredientSearch] = useState('');
+  const [isQuickGenerating, setIsQuickGenerating] = useState(false);
   const [processingInbox, setProcessingInbox] = useState(null);
   const [openPrepSection, setOpenPrepSection] = useState('lomeal'); // 'lomeal', 'domus', 'darka'
   const [autoParsingIds, setAutoParsingIds] = useState(new Set()); // track which inbox items are being auto-parsed
@@ -68,6 +74,73 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
   const isDark = theme === 'dark';
 
   const viewing = useMemo(() => recipes.find(r => r.id === viewingId) || null, [recipes, viewingId]);
+
+  const dietLabel = useMemo(() => {
+    return DIET_PROFILES.find((d) => d.id === profile?.dietProfile)?.label || profile?.dietProfile || 'Seimbang';
+  }, [profile?.dietProfile]);
+
+  const goalLabel = useMemo(() => {
+    return DIET_GOALS.find((g) => g.id === profile?.dietGoal)?.label || null;
+  }, [profile?.dietGoal]);
+
+  const activityLabel = useMemo(() => {
+    return ACTIVITY_LEVELS.find((a) => a.id === profile?.activityLevel)?.label || 'Sedang';
+  }, [profile?.activityLevel]);
+
+  // Sync selectedIngredients from profile when opening quick modal
+  useEffect(() => {
+    if (showQuickAiModal) {
+      const init = (profile?.kulkas || []).map((k) => (typeof k === 'string' ? k : k?.name)).filter(Boolean);
+      setSelectedIngredients(init);
+      setIngredientSearch('');
+    }
+  }, [showQuickAiModal, profile?.kulkas]);
+
+  // Semua bahan yang tersedia dari Domus, custom foods, dan database pangan
+  const allAvailableIngredients = useMemo(() => {
+    const fromDomus = (domusItems || []).map((i) => i.name).filter(Boolean);
+    const fromCustom = (customFoods || []).map((f) => f.name).filter(Boolean);
+    const commonStaples = [
+      'Dada Ayam', 'Telur', 'Tahu', 'Tempe', 'Daging Sapi', 'Ikan Salmon', 'Udang',
+      'Bayam', 'Brokoli', 'Nasi Merah', 'Nasi Putih', 'Kentang', 'Oatmeal', 'Wortel',
+      'Tomat', 'Alpukat', 'Bawang Putih', 'Bawang Merah', 'Minyak Zaitun'
+    ];
+    const set = new Set([...fromDomus, ...fromCustom, ...commonStaples]);
+    return Array.from(set);
+  }, [domusItems, customFoods]);
+
+  const suggestedIngredients = useMemo(() => {
+    const q = ingredientSearch.trim().toLowerCase();
+    if (!q) return allAvailableIngredients.slice(0, 16);
+    return allAvailableIngredients.filter((item) => item.toLowerCase().includes(q)).slice(0, 16);
+  }, [allAvailableIngredients, ingredientSearch]);
+
+  const handleAddIngredient = (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    if (!selectedIngredients.includes(trimmed)) {
+      setSelectedIngredients((prev) => [...prev, trimmed]);
+    }
+    setIngredientSearch('');
+  };
+
+  const handleToggleIngredient = (name) => {
+    if (selectedIngredients.includes(name)) {
+      setSelectedIngredients((prev) => prev.filter((x) => x !== name));
+    } else {
+      setSelectedIngredients((prev) => [...prev, name]);
+    }
+  };
+
+  // Item Domus yang sebenarnya cerminan batch Lomeal dilewati — kalau tidak, satu stok
+  // tampil dua kali (di seksi Lomeal dengan badge Domus, dan lagi di seksi Domus).
+  const mirroredDomusIds = useMemo(() => new Set(
+    mealPreps?.filter(m => m.domusItemId).map(m => m.domusItemId) || []
+  ), [mealPreps]);
+
+  const domusMatang = useMemo(() => (
+    domusItems?.filter(i => i.isFood && !mirroredDomusIds.has(i.id)) || []
+  ), [domusItems, mirroredDomusIds]);
 
   // Balik ke sesi masak yang timernya masih jalan (mis. user ketuk notifikasi "Sedang masak"
   // sesudah app dibunuh Android). Sekali saja per mount — kalau user nutup sendiri, ya sudah.
@@ -482,7 +555,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
   // ============ BUILDER VIEWS ============
   if (editing) return (
     <RecipeBuilder
-      t={t} theme={theme} user={user} customFoods={customFoods} showToast={showToast}
+      t={t} theme={theme} user={user} customFoods={customFoods} domusItems={domusItems} showToast={showToast}
       editing={editing} setEditing={setEditing}
       onCancel={() => setEditing(null)}
       onSave={saveRecipe}
@@ -491,38 +564,41 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
 
 
   // ============ LIST VIEW ============
-  
-  
   // `freshProfile` datang dari DietQuestionnaireModal begitu kuesioner selesai. WAJIB dipakai
   // kalau ada: prop `profile` baru saja disimpan lewat saveProfilePatch dan belum tentu
   // sampai ke render ini, jadi memakainya = mengirim jawaban kuesioner yang lama ke Lomy.
-  const generateTrueAIRecipes = async (freshProfile) => {
+  const generateTrueAIRecipes = async (freshProfile, customPrompt, customIngredients = null) => {
     const src = freshProfile || profile;
-    const input = buildRecipeProfileInput(src);
+    const promptToUse = customPrompt !== undefined ? customPrompt : (src?.recipePrompt || '');
+    const input = buildRecipeProfileInput(src, promptToUse, customIngredients);
     const dietName = input.dietName;
 
     try {
-        const generated = await generateDietRecipe(aiKey, input);
-        const aiRecipe = buildAiRecipe(generated, dietName);
-        saveRecipesFn([aiRecipe, ...recipes]);
-        showToast(`Resep Lomy "${aiRecipe.name}" berhasil dibuat! 🍲`);
-        setViewingId(aiRecipe.id);
+      const generated = await generateDietRecipe(aiKey, input);
+      const aiRecipe = buildAiRecipe(generated, dietName);
+      saveRecipesFn([aiRecipe, ...recipes]);
+      showToast(`Resep "${aiRecipe.name}" berhasil dibuat! 🍲`);
+      setViewingId(aiRecipe.id);
     } catch (err) {
-        if (err.message === 'RATE_LIMIT_EXCEEDED') {
-            showAlert('Limit Lomy harian habis! Masukkan API Key pribadimu di Pengaturan untuk lanjut generate resep.');
-        } else {
-            showAlert(`Gagal generate Lomy: ${err.message}`);
-        }
+      if (err.message === 'RATE_LIMIT_EXCEEDED') {
+        showAlert('Limit harian habis! Masukkan API Key pribadimu di Pengaturan untuk lanjut buat resep.');
+      } else {
+        showAlert(`Gagal membuat resep: ${err.message}`);
+      }
     }
   };
 
-  // Item Domus yang sebenarnya cerminan batch Lomeal dilewati — kalau tidak, satu stok
-  // tampil dua kali (di seksi Lomeal dengan badge Domus, dan lagi di seksi Domus).
-  const mirroredDomusIds = new Set(
-    mealPreps?.filter(m => m.domusItemId).map(m => m.domusItemId) || []
-  );
-
-  const domusMatang = domusItems?.filter(i => i.isFood && !mirroredDomusIds.has(i.id)) || [];
+  const handleQuickGenerate = async () => {
+    if (isQuickGenerating) return;
+    setIsQuickGenerating(true);
+    try {
+      await generateTrueAIRecipes(profile, quickPrompt, selectedIngredients);
+      setShowQuickAiModal(false);
+      setQuickPrompt('');
+    } finally {
+      setIsQuickGenerating(false);
+    }
+  };
 
   return (
     <div className="max-w-2xl mx-auto px-4 pt-4 pb-32" onTouchStart={handleSubTabTouchStart} onTouchMove={handleSubTabTouchMove} onTouchEnd={handleSubTabTouchEnd}>
@@ -559,21 +635,210 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
           <div className={`w-full ${isDark ? 'bg-black/10 backdrop-blur-sm border-t border-white/10' : 'bg-black/5 backdrop-blur-sm border-t border-white/20'} p-5 pt-4 sm:p-6 sm:pt-4 transition-all duration-300`}>
             <div className="grid grid-cols-2 gap-3">
               <button 
-                onClick={() => setShowQuestionnaire(true)}
+                onClick={() => setShowQuickAiModal(true)}
                 className={`w-full py-3.5 rounded-[14px] font-black text-black bg-white shadow-[0_0_20px_rgba(255,255,255,0.3)] active:scale-95 transition-all flex items-center justify-center text-sm`}
               >
-                Coach Lomy
+                Buat Resep
               </button>
               <button 
                 onClick={() => newRecipe()}
                 className={`w-full py-3.5 rounded-[14px] font-bold text-white transition-all active:scale-95 flex items-center justify-center text-sm bg-white/10 hover:bg-white/20 border border-white/20 shadow-sm`}
               >
-                Resep Custom
+                Resep Manual
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {showQuickAiModal && createPortal(
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm no-swipe" onClick={() => !isQuickGenerating && setShowQuickAiModal(false)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`relative w-full sm:max-w-md max-h-[90vh] overflow-y-auto hide-scrollbar rounded-[2rem] border ${theme === 'dark' ? 'border-white/10 bg-[#0a1510]' : 'border-black/10 bg-white'} backdrop-blur-2xl p-6 flex flex-col shadow-2xl anim-rise`}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-black/5 dark:border-white/10 shrink-0">
+              <h3 className={`h2 ${t.textMain}`}>Buat Resep</h3>
+              <button onClick={() => !isQuickGenerating && setShowQuickAiModal(false)} className={`p-1.5 rounded-full ${t.btnBg} ${t.textMuted}`}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4">
+              {/* Profil Target Nutrisi (Single surface, NO nested boxes) */}
+              <div className={`p-4 rounded-2xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5'} space-y-2.5`}>
+                <div className="flex items-center justify-between border-b border-black/5 dark:border-white/10 pb-2">
+                  <span className={`h3 ${t.textMuted}`}>Target Nutrisi</span>
+                  <span className={`body-md font-bold ${t.textAccent}`}>{Math.round(profile?.targets?.kcal || 2000).toLocaleString('id-ID')} kkal / hari</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <div>
+                    <span className={`caption ${t.textMuted} block`}>Fisik (BB / TB)</span>
+                    <span className={`body-md ${t.textMain}`}>
+                      {profile?.physical?.weight || profile?.weight || '—'} kg · {profile?.physical?.height || profile?.height || '—'} cm
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className={`caption ${t.textMuted} block`}>Diet & Fase</span>
+                    <span className={`body-md ${t.textMain} truncate block`}>
+                      {dietLabel} {goalLabel ? `(${goalLabel})` : ''}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className={`caption ${t.textMuted} block`}>Target Makro</span>
+                    <span className={`body-md ${t.textMain}`}>
+                      P {Math.round(profile?.targets?.protein || 0)}g · K {Math.round(profile?.targets?.carbs || 0)}g · L {Math.round(profile?.targets?.fat || 0)}g
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className={`caption ${t.textMuted} block`}>Aktivitas</span>
+                    <span className={`body-md ${t.textMain} truncate block`}>
+                      {activityLabel}
+                    </span>
+                  </div>
+                </div>
+
+                {(profile?.allergies?.trim() || (profile?.medicalHistory || []).length > 0) && (
+                  <div className="pt-2 border-t border-black/5 dark:border-white/10 flex items-baseline gap-1.5 flex-wrap">
+                    <span className={`caption ${t.textMuted}`}>Pantangan / Alergi:</span>
+                    <span className="caption text-rose-400 font-bold">
+                      {[profile?.allergies?.trim(), ...(profile?.medicalHistory || [])].filter(Boolean).join(', ')}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Multi-Select Bahan Makanan yang Tersedia */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className={`caption ${t.textMain}`}>Bahan yang Tersedia</label>
+                  <span className={`caption ${t.textMuted}`}>{selectedIngredients.length} bahan</span>
+                </div>
+
+                {/* Selected chips */}
+                {selectedIngredients.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto hide-scrollbar">
+                    {selectedIngredients.map((name, i) => (
+                      <span
+                        key={`${name}-${i}`}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl caption font-bold ${t.bgAccent} text-white shadow-sm`}
+                      >
+                        {name}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedIngredients(prev => prev.filter((_, idx) => idx !== i))}
+                          className="hover:opacity-80 p-0.5"
+                        >
+                          <X size={14} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Search & Add Input */}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Cari atau tambah bahan (Domus / Database)..."
+                    value={ingredientSearch}
+                    onChange={(e) => setIngredientSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && ingredientSearch.trim()) {
+                        e.preventDefault();
+                        handleAddIngredient(ingredientSearch);
+                      }
+                    }}
+                    className={`flex-1 px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none focus:ring-1 focus:ring-purple-500`}
+                  />
+                  {ingredientSearch.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => handleAddIngredient(ingredientSearch)}
+                      className={`px-3.5 py-2.5 rounded-xl ${t.bgAccent} text-white caption font-bold shrink-0 active:scale-95 transition-transform`}
+                    >
+                      + Tambah
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick suggestions chips */}
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto hide-scrollbar pt-1">
+                  {suggestedIngredients.map((name) => {
+                    const isSelected = selectedIngredients.includes(name);
+                    return (
+                      <button
+                        type="button"
+                        key={name}
+                        onClick={() => handleToggleIngredient(name)}
+                        className={`px-2.5 py-1 rounded-xl caption transition-all ${
+                          isSelected
+                            ? `${t.bgAccent} text-white font-bold`
+                            : `${isDark ? 'bg-white/5 hover:bg-white/10 text-white/70' : 'bg-black/5 hover:bg-black/10 text-black/70'}`
+                        }`}
+                      >
+                        {isSelected ? '✓ ' : '+ '}{name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Konsep Masakan */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className={`caption ${t.textMain}`}>Konsep Masakan (Opsional)</label>
+                  <span className={`caption ${quickPrompt.length >= 150 ? 'text-amber-500' : t.textMuted}`}>
+                    {quickPrompt.length}/150
+                  </span>
+                </div>
+                <textarea
+                  maxLength={150}
+                  rows={2}
+                  placeholder="Misal: aglio e olio, ala Korea, tomyam segar, pasta rendah kalori..."
+                  value={quickPrompt}
+                  onChange={(e) => setQuickPrompt(e.target.value.slice(0, 150))}
+                  className={`w-full px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none resize-none focus:ring-1 focus:ring-purple-500`}
+                />
+              </div>
+            </div>
+
+            <div className="pt-2 space-y-2 shrink-0">
+              <button
+                disabled={isQuickGenerating}
+                onClick={handleQuickGenerate}
+                className={`w-full py-3.5 rounded-2xl body-md ${t.bgAccent} flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${isQuickGenerating ? 'opacity-80 cursor-not-allowed' : ''}`}
+              >
+                {isQuickGenerating ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span>Sedang Membuat Resep...</span>
+                  </>
+                ) : (
+                  'Buat Resep'
+                )}
+              </button>
+
+              <button
+                type="button"
+                disabled={isQuickGenerating}
+                onClick={() => {
+                  setShowQuickAiModal(false);
+                  setShowQuestionnaire(true);
+                }}
+                className={`w-full py-2.5 rounded-xl caption ${t.btnBg} ${t.textMuted} text-center hover:opacity-80 transition-opacity`}
+              >
+                Ubah Profil / Program
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {showQuestionnaire && (
         <DietQuestionnaireModal
@@ -589,18 +854,18 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
         />
       )}
 
-      <div className={`flex items-center gap-1.5 mb-5 p-1.5 rounded-2xl ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'}`}>
+      <div className={`relative flex items-center p-1 rounded-full ${t.btnBg} border ${t.border} mb-5`}>
         {[
           { id: 'resep', label: 'Buku Resep' },
           { id: 'meal_prep', label: 'Stok Matang' },
         ].map(tb => (
           <button key={tb.id} onClick={() => setActiveTab(tb.id)}
-            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all relative ${activeTab === tb.id ? `${t.bgCard} shadow-sm text-emerald-500` : t.textMuted}`}>
+            className={`flex-1 py-2.5 rounded-full text-sm font-black transition-all relative z-10 ${activeTab === tb.id ? `${t.bgAccent} text-white shadow-sm` : t.textMuted}`}>
             {tb.label}
             {tb.id === 'meal_prep' && inboxItems?.length > 0 && (
               <span className="absolute -top-1 -right-1 flex h-4 w-4">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 text-[9px] font-black text-white items-center justify-center">
+                <span className={`relative inline-flex rounded-full h-4 w-4 ${activeTab === 'meal_prep' ? 'bg-white text-emerald-600' : 'bg-emerald-500 text-white'} text-[9px] font-black items-center justify-center`}>
                   {inboxItems.length}
                 </span>
               </span>
@@ -692,28 +957,28 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 mt-3">
+                      <div className="flex items-center gap-2 mt-3 overflow-x-auto hide-scrollbar">
                         {!b.recipeId && (
-                          <button onClick={() => setProcessingInbox({ id: b.id, text: b.name, source: 'lomeal', nutrition: b.perPortion })} className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1`}>
+                          <button onClick={() => setProcessingInbox({ id: b.id, text: b.name, source: 'lomeal', nutrition: b.perPortion })} className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1 shrink-0`}>
                             <Calculator size={12} /> Hitung
                           </button>
                         )}
                         <button disabled={b.remainingPortions <= 0} onClick={() => setEating({ batch: b, sessionId: nearestSessionId(), time: nowHHMM() })}
-                          className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                          className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1 shrink-0 disabled:opacity-30`}>
                           <Utensils size={12} /> Makan
                         </button>
                         <button onClick={() => setAssigning({ ...b, _source: 'lomeal' })} disabled={b.remainingPortions <= 0}
-                          className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                          className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1 shrink-0 disabled:opacity-30`}>
                           <CalendarPlus size={12} /> Jadwal
                         </button>
                         {!b.domusItemId && domusLocations?.length > 0 && (
                           <button onClick={() => setMovingBatch(b)}
-                            className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1`}>
+                            className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 shrink-0`}>
                             <Warehouse size={12} /> Pindah
                           </button>
                         )}
-                        <button onClick={() => deleteBatch(b)} className={`px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 caption font-bold flex items-center gap-1`}>
-                          <Trash2 size={12} /> Buang
+                        <button onClick={() => deleteBatch(b)} title="Buang" className={`p-1.5 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center shrink-0 ml-auto hover:bg-red-500/20 active:scale-95 transition-all`}>
+                          <X size={15} />
                         </button>
                       </div>
                     </div>
@@ -763,14 +1028,14 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                                 </p>
                               </div>
                             </div>
-                            <div className="flex flex-wrap gap-2 mt-3">
-                              <button onClick={() => setProcessingInbox({ id: i.id, text: i.name, source: 'domus', originalData: i })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1`}>
+                            <div className="flex items-center gap-2 mt-3 overflow-x-auto hide-scrollbar">
+                              <button onClick={() => setProcessingInbox({ id: i.id, text: i.name, source: 'domus', originalData: i })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 shrink-0`}>
                                 <Calculator size={12} /> Hitung
                               </button>
-                              <button disabled={!i.nutrition?.kcal} onClick={() => setProcessingInbox({ id: i.id, text: i.name, source: 'domus', originalData: i, skipToStep2: true })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                              <button disabled={!i.nutrition?.kcal} onClick={() => setProcessingInbox({ id: i.id, text: i.name, source: 'domus', originalData: i, skipToStep2: true })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 shrink-0 disabled:opacity-30`}>
                                 <Utensils size={12} /> Makan
                               </button>
-                              <button disabled={!i.nutrition?.kcal} onClick={() => setAssigning({ id: i.id, name: i.name, nutrition: i.nutrition, remainingPortions: 1, initialPortions: 1, _source: 'domus' })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                              <button disabled={!i.nutrition?.kcal} onClick={() => setAssigning({ id: i.id, name: i.name, nutrition: i.nutrition, remainingPortions: 1, initialPortions: 1, _source: 'domus' })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 shrink-0 disabled:opacity-30`}>
                                 <CalendarPlus size={12} /> Jadwal
                               </button>
                               <button onClick={() => {
@@ -784,8 +1049,8 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                                 } else {
                                   updateDomusItemQuantity(i.id, val, cur?.unit || i.qtyUnit || '').then(() => showToast('Sisa stok diupdate!'));
                                 }
-                              }} className={`px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 caption font-bold flex items-center gap-1`}>
-                                <Trash2 size={12} /> Buang
+                              }} title="Buang" className={`p-1.5 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center shrink-0 ml-auto hover:bg-red-500/20 active:scale-95 transition-all`}>
+                                <X size={15} />
                               </button>
                             </div>
                           </div>
@@ -837,22 +1102,22 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                           ) : null}
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        <button onClick={() => setProcessingInbox(inb)} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1`}>
+                      <div className="flex items-center gap-2 mt-3 overflow-x-auto hide-scrollbar">
+                        <button onClick={() => setProcessingInbox(inb)} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1 shrink-0`}>
                           <Calculator size={12} /> Hitung
                         </button>
-                        <button disabled={!inb.nutrition?.kcal} onClick={() => setProcessingInbox({ ...inb, skipToStep2: true })} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                        <button disabled={!inb.nutrition?.kcal} onClick={() => setProcessingInbox({ ...inb, skipToStep2: true })} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1 shrink-0 disabled:opacity-30`}>
                           <Utensils size={12} /> Makan
                         </button>
-                        <button disabled={!inb.nutrition?.kcal} onClick={() => setAssigning({ id: inb.id, name: inb.text, nutrition: inb.nutrition, remainingPortions: inb.quantity || 1, initialPortions: inb.quantity || 1, _source: 'darka' })} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1 disabled:opacity-30`}>
+                        <button disabled={!inb.nutrition?.kcal} onClick={() => setAssigning({ id: inb.id, name: inb.text, nutrition: inb.nutrition, remainingPortions: inb.quantity || 1, initialPortions: inb.quantity || 1, _source: 'darka' })} className={`px-3 py-1.5 rounded-xl bg-lime-500/10 text-lime-500 caption font-bold flex items-center gap-1 shrink-0 disabled:opacity-30`}>
                           <CalendarPlus size={12} /> Jadwal
                         </button>
                         <button onClick={() => {
                           showConfirm(`Hapus jajanan ini dari inbox?`).then(yes => {
                             if (yes) markInboxClaimed(inb.id).then(() => showToast('Dihapus dari inbox!'));
                           });
-                        }} className={`px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 caption font-bold flex items-center gap-1`}>
-                          <Trash2 size={12} /> Buang
+                        }} title="Buang" className={`p-1.5 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center shrink-0 ml-auto hover:bg-red-500/20 active:scale-95 transition-all`}>
+                          <X size={15} />
                         </button>
                       </div>
                     </div>
@@ -877,11 +1142,15 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
         const selectedCount = assignSelectedDates.length;
 
         const toggleDate = (ymd) => {
-          setAssignSelectedDates(prev => {
-            if (prev.includes(ymd)) return prev.filter(d => d !== ymd);
-            if (prev.length >= maxStock) { showToast(`Maksimal ${maxStock} tanggal (sisa stok)`); return prev; }
-            return [...prev, ymd].sort();
-          });
+          if (assignSelectedDates.includes(ymd)) {
+            setAssignSelectedDates(prev => prev.filter(d => d !== ymd));
+            return;
+          }
+          if (assignSelectedDates.length >= maxStock) {
+            showToast(`Maksimal ${maxStock} tanggal (sisa stok)`);
+            return;
+          }
+          setAssignSelectedDates(prev => [...prev, ymd].sort());
         };
 
         const handleApply = () => {
@@ -1066,9 +1335,18 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
             }
           }}
           onNutritionSaved={async (nutrition) => {
-            // Autosave nutrition back to Firestore
-            if (processingInbox.source === 'darka') {
-              await updateInboxNutrition(processingInbox.id, nutrition);
+            // Autosave nutrition back to Firestore / State immediately
+            try {
+              if (processingInbox.source === 'darka') {
+                await updateInboxNutrition(processingInbox.id, nutrition);
+              } else if (processingInbox.source === 'domus') {
+                await updateDoc(doc(db, 'domus_items', processingInbox.id), { nutrition });
+              } else if (processingInbox.source === 'lomeal') {
+                saveMealPrepsFn(mealPreps.map(b => b.id === processingInbox.id ? { ...b, perPortion: nutrition } : b));
+              }
+              showToast('Nutrisi berhasil dihitung & disimpan! 📊');
+            } catch (e) {
+              console.error('Failed to save nutrition:', e);
             }
           }}
           onSaveToLog={async (session, entry) => {

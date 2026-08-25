@@ -197,11 +197,15 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
                     <span className={`w-1.5 h-1.5 shrink-0 rounded-full mt-2 ${r.match ? (isDark ? 'bg-white' : 'bg-black') : (isDark ? 'bg-white/20' : 'bg-black/20')}`} />
                     <span className="flex-1 min-w-0">
                       <span className={`block body-md ${r.on ? `line-through ${t.textMuted}` : t.textMain}`}>{r.name}</span>
-                      {r.match && (
-                        <span className={`block caption ${r.enough ? t.textMuted : 'text-amber-500'}`}>
+                      {r.match ? (
+                        <span className={`block caption ${r.enough ? t.textMuted : 'text-amber-500 font-medium'}`}>
                           {r.have == null
                             ? `ada di ${r.match.name}`
-                            : `sisa ${formatStock(itemStock(r.match))}${r.shortfall > 0 ? ` · kurang ${Math.ceil(shortfallInItemUnit(r).value)} ${shortfallInItemUnit(r).unit}` : ''}`}
+                            : `sisa ${formatStock(itemStock(r.match))}${r.shortfall > 0 ? ` · kurang ${Math.ceil(shortfallInItemUnit(r).value)} ${shortfallInItemUnit(r).unit}` : ' (cukup)'}`}
+                        </span>
+                      ) : (
+                        <span className="block caption text-rose-400/80">
+                          Belum ada di dapur
                         </span>
                       )}
                     </span>

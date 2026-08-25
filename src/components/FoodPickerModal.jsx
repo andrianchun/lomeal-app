@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { X, Search, ChefHat, Plus, Star, Box, Sparkles, PenLine } from 'lucide-react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+import { X, Search, ChefHat, Plus, Star, Box, PenLine } from 'lucide-react';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { scaleNutrition, EMPTY_NUTRITION } from '../data/nutrition';
 import { makeEntry } from '../utils/foodLog';
@@ -18,6 +18,16 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
   const [tab, setTab] = useState(initialTab); // 'db' | 'recipes' | 'domus'
   const [term, setTerm] = useState('');
   const [category, setCategory] = useState(null);
+  const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    if (open && tab === 'db') {
+      const timer = setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 120);
+      return () => clearTimeout(timer);
+    }
+  }, [open, tab]);
 
   const results = useMemo(() => {
     let list = searchFoods(term, customFoods);
@@ -119,7 +129,7 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
                   <p className={`body-md text-center ${t.textMuted}`}>Tidak ditemukan di database lokal.</p>
                   {term.trim() !== '' && (
                     <button onClick={() => onSearchAi?.(term)} className={`px-5 py-2.5 rounded-2xl ${t.bgAccent} text-white shadow-glow font-bold flex items-center gap-2`}>
-                      <Sparkles size={16} /> Cari "{term}" dengan Lomy
+                      <Search size={16} /> Cari "{term}" dengan Lomy
                     </button>
                   )}
                 </div>
@@ -164,13 +174,29 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
 
         </div>
 
-        {/* Search bar — sengaja di BAWAH (dekat jempol, gampang ketemu) bukan nyempil di atas */}
+        {/* Search bar — dibuat besar, mentereng, dan mudah dijangkau */}
         {tab === 'db' && (
-          <div className={`shrink-0 p-3 pt-2 border-t ${t.border}`}>
-            <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border ${t.border} ${t.inputBg}`}>
-              <Search size={16} className={t.textMuted} />
-              <input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Cari nasi goreng, tempe…" autoFocus
-                className={`flex-1 bg-transparent outline-none body-md ${t.textMain}`} />
+          <div className="shrink-0 p-3.5 pt-2 pb-5 sm:pb-4 border-t border-white/10 bg-black/40 backdrop-blur-md">
+            <div className="flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 border-emerald-500/40 focus-within:border-emerald-400 bg-neutral-900/90 dark:bg-black/70 shadow-lg shadow-emerald-500/10 focus-within:shadow-[0_0_25px_rgba(16,185,129,0.25)] transition-all">
+              <Search size={20} className="text-emerald-400 shrink-0" />
+              <input
+                ref={searchInputRef}
+                value={term}
+                onChange={(e) => setTerm(e.target.value)}
+                placeholder="Ketik nama makanan di sini…"
+                className="flex-1 bg-transparent outline-none text-base font-semibold text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500"
+              />
+              {term.trim() !== '' && (
+                <button
+                  onClick={() => {
+                    setTerm('');
+                    searchInputRef.current?.focus();
+                  }}
+                  className="p-1 rounded-full bg-white/10 hover:bg-white/20 text-neutral-400 hover:text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
           </div>
         )}

@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { ChevronRight, ChevronLeft, Sparkles, X, Check } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ChevronRight, ChevronLeft, ChefHat, X, Check } from 'lucide-react';
 import { computeAge } from '../data/constants';
 import { calcTargets } from '../data/nutrition';
 import useBackClose from '../hooks/useBackClose';
 import useSwipeStep from '../hooks/useSwipeStep';
 import { fetchDomusItems } from '../utils/domusSync';
+import { fetchLyfitProfile } from '../utils/lyfitSync';
 import { auth } from '../firebase';
 import { hcAvailable, hcRequestPermissions } from '../utils/healthConnect';
 import { getSharedDietSteps, SharedDietStepRenderer, isValidAge, hasValidConsent, CONSENT_VERSION } from './SharedDietSteps';
@@ -29,7 +30,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, o
     dob: bio('dob', ''),
     height: bio('height', 165),
     weight: bio('weight', 60),
-    targetWeight: profile?.targetWeight || 55,
+    targetWeight: profile?.targetWeight || bio('weight', 60),
     activityLevel: profile?.activityLevel || null,
     gender: bio('gender', 'male'),
     dietProfile: profile?.dietProfile || 'balanced',
@@ -39,6 +40,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, o
     pace: profile?.pace || 'normal',
     medicalHistory: profile?.medicalHistory || [],
     allergies: profile?.allergies || '',
+    recipePrompt: profile?.recipePrompt || '',
     kulkas: (profile?.kulkas || []).filter(k => {
       if (typeof k === 'string') return false;
       const dummy = ['ayam', 'telur', 'bayam', 'beras', 'brokoli'];
@@ -48,6 +50,23 @@ const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, o
     kulkasSearch: '',
     consents: profile?.consents || { tos: false, data: false, ai: false, research: false }
   }));
+
+  // Auto-fetch biometrik dari Logym jika profil Lomeal belum terisi lengkap
+  useEffect(() => {
+    if (!logymUser?.uid) return;
+    fetchLyfitProfile(logymUser.uid).then((p) => {
+      if (!p) return;
+      setAnswers((prev) => ({
+        ...prev,
+        height: (!profile?.physical?.height && p.height) ? p.height : prev.height,
+        weight: (!profile?.physical?.weight && p.weight) ? p.weight : prev.weight,
+        gender: p.gender || prev.gender,
+        dob: p.dob || prev.dob,
+        activityLevel: prev.activityLevel || p.activityLevel || prev.activityLevel,
+        name: prev.name || (p.displayName || '').trim().split(/\s+/)[0] || prev.name,
+      }));
+    });
+  }, [logymUser?.uid, profile?.physical]);
 
   // 'pace' (Santai/Normal/Agresif) cuma ngaruh ke kalori kalau dietGoal cutting/bulk —
   // calcTargets nggak pernah pakai paceFactor buat maintenance, jadi nanya "seberapa
@@ -151,6 +170,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, o
       medicalHistory: answers.medicalHistory,
       allergies: answers.allergies.trim(),
       kulkas: answers.kulkas,
+      recipePrompt: (answers.recipePrompt || '').trim(),
       // Kalau langkah persetujuan sampai tampil di sini (teks S&K direvisi, atau profil
       // lama belum punya consent sama sekali), hasil centangnya HARUS ikut tersimpan —
       // kalau tidak, langkah itu bakal muncul lagi terus tiap buka kuesioner.
@@ -269,7 +289,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, o
                                 <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md rounded-[2.5rem]">
                                     <div className="relative w-16 h-16 mb-4">
                                         <div className="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                                        <Sparkles className="absolute inset-0 m-auto text-emerald-500" size={24} />
+                                        <ChefHat className="absolute inset-0 m-auto text-emerald-500" size={24} />
                                     </div>
                                     <p className={`h3 text-white`}>Meracik Menu Diet...</p>
                                     <p className={`caption text-white/70 mt-2 px-8 text-center`}>Mohon tunggu sebentar, Lomy sedang menyusun resep presisi untuk Anda.</p>

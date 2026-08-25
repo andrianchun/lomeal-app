@@ -1,6 +1,6 @@
-import { calculateGramsFromURT, normalizeUnit } from './urtMapping';
-import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
-import { db } from '../firebase';
+import { calculateGramsFromURT, normalizeUnit } from './urtMapping.js';
+import { searchFoods, nutritionForAmount } from '../data/foodDatabase.js';
+import { db } from '../firebase.js';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const PATTERN_CACHE_KEY = 'lomeal_pattern_cache';
@@ -93,21 +93,53 @@ const splitInput = (text) => {
     .filter(t => t.length > 0);
 };
 
+const SE_UNITS = {
+  sebuah: { qty: 1, unit: 'buah' },
+  sebutir: { qty: 1, unit: 'butir' },
+  sepotong: { qty: 1, unit: 'potong' },
+  sepiring: { qty: 1, unit: 'piring' },
+  segelas: { qty: 1, unit: 'gelas' },
+  secangkir: { qty: 1, unit: 'cangkir' },
+  semangkok: { qty: 1, unit: 'mangkok' },
+  semangkuk: { qty: 1, unit: 'mangkok' },
+  selembar: { qty: 1, unit: 'lembar' },
+  sebungkus: { qty: 1, unit: 'bungkus' },
+  sebatang: { qty: 1, unit: 'batang' },
+  seekor: { qty: 1, unit: 'ekor' },
+  sesendok: { qty: 1, unit: 'sdm' },
+  secentong: { qty: 1, unit: 'centong' },
+  setongkol: { qty: 1, unit: 'tongkol' },
+  sebotol: { qty: 1, unit: 'botol' },
+  sekaleng: { qty: 1, unit: 'kaleng' },
+  sekeping: { qty: 1, unit: 'keping' },
+  seporsi: { qty: 1, unit: 'porsi' },
+  secuil: { qty: 0.25, unit: 'potong' },
+};
+
 /**
  * Extract qty, unit, and food name from a chunk.
- * Handles patterns like "nasi 1 centong" or "1 centong nasi"
+ * Handles patterns like "nasi 1 centong", "1 centong nasi", "sebuah pisang", "pisang 2"
  */
 const extractFoodParts = (chunk) => {
   let qty = 1;
-  let name = chunk;
+  let name = chunk.trim();
   let unitStr = '';
 
-  // Pattern 1: [Name] [Qty] [Unit] -> "Nasi goreng 1.5 porsi"
-  // Note: we want to match fractions like 1/2 or words like "setengah"
-  const m1 = chunk.match(/^([\D]+?)\s+(\d+(?:\.\d+)?|\d+\/\d+|setengah|seperempat)\s*([a-zA-Z]+)?$/i);
+  // Check prefix se- (contoh: "sebuah pisang", "sepiring nasi goreng")
+  const seMatch = name.match(/^(se[a-z]+)\s+([\D]+)$/i);
+  if (seMatch && SE_UNITS[seMatch[1].toLowerCase()]) {
+    const info = SE_UNITS[seMatch[1].toLowerCase()];
+    qty = info.qty;
+    unitStr = info.unit;
+    name = seMatch[2].trim();
+    return { name, qty, unitStr };
+  }
+
+  // Pattern 1: [Name] [Qty] [Unit] -> "Nasi goreng 1.5 porsi" atau "pisang 2 buah" atau "pisang 2"
+  const m1 = name.match(/^([\D]+?)\s+(\d+(?:\.\d+)?|\d+\/\d+|setengah|seperempat)\s*([a-zA-Z]+)?$/i);
   
-  // Pattern 2: [Qty] [Unit] [Name] -> "1 centong nasi putih"
-  const m2 = chunk.match(/^(\d+(?:\.\d+)?|\d+\/\d+|setengah|seperempat)\s*([a-zA-Z]+)?\s+([\D]+)$/i);
+  // Pattern 2: [Qty] [Unit] [Name] -> "1 centong nasi putih" atau "2 buah pisang" atau "2 pisang"
+  const m2 = name.match(/^(\d+(?:\.\d+)?|\d+\/\d+|setengah|seperempat)\s*([a-zA-Z]+)?\s+([\D]+)$/i);
 
   let match = m1 || m2;
   if (match) {
@@ -146,14 +178,18 @@ export const runLocalNlpParse = (text, customFoods = []) => {
   for (const chunk of chunks) {
     const { name, qty, unitStr } = extractFoodParts(chunk);
     
-    // Search DB
+    // Search DB dengan relevansi pintar
     const results = searchFoods(name, customFoods);
     const best = results[0];
     
-    // Syarat lolos: harus cukup mirip
-    const lower = name.toLowerCase();
-    const aliasHit = best && (best.aliases || []).some(a => a.toLowerCase() === lower);
-    if (best && (aliasHit || best.name.toLowerCase() === lower || best.name.toLowerCase().includes(lower))) {
+    // Syarat lolos: semua kata dalam query harus ada di dalam best.name atau best.aliases
+    const lower = name.toLowerCase().trim();
+    const queryWords = lower.split(/\s+/).filter(Boolean);
+    const bestNameClean = best ? best.name.toLowerCase().replace(/[,/()\-+]/g, ' ') : '';
+    const aliasHit = best && (best.aliases || []).some(a => a.toLowerCase() === lower || queryWords.every(qw => a.toLowerCase().includes(qw)));
+    const nameHit = best && (best.name.toLowerCase() === lower || queryWords.every(qw => bestNameClean.includes(qw)));
+    
+    if (best && (aliasHit || nameHit)) {
       let grams = calculateGramsFromURT(qty, unitStr);
       if (grams === null) grams = best.portion.grams * qty; // satuan gak dikenal → pakai porsi bawaan
       // Satuan rumah tangga ("gelas") dipertahankan supaya sheet konfirmasi tetap nampilin

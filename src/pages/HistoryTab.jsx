@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Sparkles, X, Bell, BellOff, Clock, ChefHat, Box, Droplet, Pill, Check, Droplets } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, Bell, BellOff, Clock, ChefHat, Box, Droplet, Pill, Check, Droplets } from 'lucide-react';
 import FoodPickerModal from '../components/FoodPickerModal';
 import { MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, getMonthKey, DEFAULT_SESSION_TIMES } from '../data/constants';
 import { computeDayTotals, NUTRIENTS } from '../data/nutrition';
@@ -255,7 +255,6 @@ const HistoryTab = ({ t, theme, profile, daysMap, saveDay, ensureMonth, customFo
                       <div key={e.id} className={`flex items-center justify-between pl-3 pr-1 py-1.5 mt-1 rounded-xl ${t.bgSunken}`}>
                         <p className={`caption font-semibold flex-1 ${t.textMain}`}>
                           {e.name}
-                          {(e.source === 'ai' || e.source === 'text_ai') && <Sparkles size={12} strokeWidth={2.5} className="inline ml-1 text-emerald-500" />}
                           {e.source === 'recipe' && <ChefHat size={12} strokeWidth={2.5} className="inline ml-1 text-emerald-500" />}
                           {e.source === 'domus' && <Box size={12} strokeWidth={2.5} className="inline ml-1 text-blue-500" />}
                         </p>

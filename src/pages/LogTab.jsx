@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
-import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, Sparkles, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download } from 'lucide-react';
+import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import RingChart from '../components/RingChart';
 import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity } from '../utils/domusSync';
@@ -15,7 +15,7 @@ import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, sav
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
 import { isNativeApp, captureToFile } from '../utils/nativeCamera';
-import { zeroDomusItemStock, updateDomusItemQuantity, requestShoppingListDomus } from '../utils/domusSync';
+import { zeroDomusItemStock, updateDomusItemQuantity, requestShoppingListDomus, matchDomusItem } from '../utils/domusSync';
 import { deductStock, formatStock, itemStock } from '../utils/stockConverter';
 import { nutrientSources } from '../utils/nutrientSources';
 import AttachmentMenu from '../components/AttachmentMenu';
@@ -90,6 +90,10 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
     if (routeState?.openSession) setDetailSession(routeState.openSession);
   }, [routeState?.openSession]);
 
+  useEffect(() => {
+    setDetailSlide(0);
+  }, [detailSession]);
+
   const [copySourceSession, setCopySourceSession] = useState(null);
   const [copyTargetSessions, setCopyTargetSessions] = useState([]);
   const [copyTargetDate, setCopyTargetDate] = useState(todayYmd);
@@ -152,17 +156,31 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
   const drinkTemplates = profile?.drinkTemplates || [];
   const medicines = profile?.medicines || [];
 
-  // Rak suplemen & obat punya stok sendiri (bukan di Domus — barangnya per-orang, bukan per-rumah).
-  // `delta` negatif = terpakai. Item tanpa `stock` diabaikan supaya rak lama tetap jalan.
+  // Rak suplemen & obat bisa sinkron dengan Domus (atau punya stok lokal sendiri).
+  // `delta` negatif = terpakai.
   const consumeShelfStock = (field, entry, delta) => {
-    if (typeof entry.stock !== 'number') return;
-    const next = Math.max(0, entry.stock + delta);
-    saveProfilePatch({ [field]: (profile?.[field] || []).map(x => (x.id === entry.id ? { ...x, stock: next } : x)) });
-    if (next === 0 && delta < 0) {
-      // Beli sebanyak isi terakhir yang tercatat, satuannya butir — daftar belanja Domus
-      // nyimpen jumlah sebagai angka + satuan, jadi kirim angkanya, bukan cuma namanya.
-      requestShoppingListDomus(user.uid, entry.name, { qtyValue: entry.stock || 1, qtyUnit: 'butir' }).catch(console.error);
-      showToast(`${entry.name} habis — sudah masuk list belanja Domus 🛒`);
+    // 1. Sync with Domus items if matched
+    const domusMatch = domusItems ? matchDomusItem(domusItems, entry.name) : null;
+    if (domusMatch && delta !== 0) {
+      const cur = itemStock(domusMatch);
+      if (cur && typeof cur.value === 'number') {
+        const nextDomusQty = Math.max(0, cur.value + delta);
+        if (nextDomusQty <= 0) {
+          zeroDomusItemStock(domusMatch.id).catch(console.error);
+        } else {
+          updateDomusItemQuantity(domusMatch.id, nextDomusQty, cur.unit).catch(console.error);
+        }
+      }
+    }
+
+    // 2. Update local profile shelf stock
+    if (typeof entry.stock === 'number') {
+      const next = Math.max(0, entry.stock + delta);
+      saveProfilePatch({ [field]: (profile?.[field] || []).map(x => (x.id === entry.id ? { ...x, stock: next } : x)) });
+      if (next === 0 && delta < 0) {
+        requestShoppingListDomus(user.uid, entry.name, { qtyValue: entry.stock || 1, qtyUnit: 'butir', itemId: domusMatch?.id }).catch(console.error);
+        showToast(`${entry.name} habis — sudah masuk list belanja Domus 🛒`);
+      }
     }
   };
 
@@ -262,22 +280,59 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
     inputRef.current?.click();
   };
 
-  // Simpan ke HP. Di Android, share sheet-nya ngasih opsi "Simpan ke Galeri/Foto";
-  // kalau Web Share gak ada (desktop), jatuhnya jadi unduhan biasa.
+  // Unduh foto langsung tanpa kompresi ulang, mempertahankan kualitas maksimal aslinya.
   const downloadPhoto = async (sessionId, photo) => {
     try {
-      const blob = await (await fetch(photo.url)).blob();
-      const file = new File([blob], `lomeal-${selectedYmd}-${sessionId}.webp`, { type: blob.type || 'image/webp' });
-      if (navigator.canShare?.({ files: [file] })) return await navigator.share({ files: [file], title: 'Foto Lomeal' });
+      const targetUrl = photo?.originalUrl || photo?.url;
+      if (!targetUrl) throw new Error('URL foto tidak ditemukan');
+
+      let blob;
+      if (targetUrl.startsWith('data:')) {
+        const res = await fetch(targetUrl);
+        blob = await res.blob();
+      } else {
+        try {
+          const res = await fetch(targetUrl, { mode: 'cors' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          blob = await res.blob();
+        } catch {
+          // Fallback via Image -> canvas jika fetch kena restriksi CORS
+          blob = await new Promise((resolve, reject) => {
+            const img = new window.Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+              try {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth || img.width;
+                canvas.height = img.naturalHeight || img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                canvas.toBlob((b) => {
+                  if (b) resolve(b);
+                  else reject(new Error('Gagal mengonversi gambar'));
+                }, 'image/webp', 1.0); // Kualitas maksimal 100%
+              } catch (canvasErr) {
+                reject(canvasErr);
+              }
+            };
+            img.onerror = () => reject(new Error('Gagal memuat gambar untuk diunduh'));
+            img.src = targetUrl;
+          });
+        }
+      }
+
+      const fileName = `lomeal-${selectedYmd || 'foto'}-${sessionId || 'makanan'}-${Date.now().toString().slice(-4)}.webp`;
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = file.name;
+      a.href = blobUrl;
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      showToast?.('Foto berhasil diunduh 📸');
     } catch (e) {
-      if (e.name !== 'AbortError') showAlert(`Gagal menyimpan foto ke HP: ${e.message}`);
+      showAlert(`Gagal mengunduh foto: ${e.message}`);
     }
   };
 
@@ -290,15 +345,24 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
   // dataUrl null = balik ke foto asli. Thumbnail ikut diperbarui, kalau tidak strip masih
   // memajang versi sebelum di-crop. Versi asli & thumb aslinya sengaja disimpan terus supaya
   // "Foto Asli" tidak perlu mengunduh ulang apa pun.
-  const replacePhoto = async (sessionId, photo, dataUrl) => {
+  const replacePhoto = async (sessionId, photo, dataUrl, isNewOriginal = false) => {
     try {
-      const next = dataUrl
-        ? await uploadPhotoPair(sessionId, dataUrl)
-        : { url: photo.originalUrl, thumbUrl: photo.originalThumbUrl || photo.originalUrl };
-      await writePhotos(sessionId, storedPhotos(sessionId).map((p) => (p.id === photo.id ? { ...p, ...next } : p)));
-      // Buang hasil crop yang barusan digantikan — tapi jangan sentuh berkas aslinya.
-      if (photo.url !== photo.originalUrl) dropFiles(photo.url);
-      if (photo.thumbUrl && photo.thumbUrl !== photo.originalThumbUrl) dropFiles(photo.thumbUrl);
+      if (isNewOriginal && dataUrl) {
+        const next = await uploadPhotoPair(sessionId, dataUrl);
+        await writePhotos(sessionId, storedPhotos(sessionId).map((p) => (p.id === photo.id ? { ...p, ...next, originalUrl: next.url, originalThumbUrl: next.thumbUrl } : p)));
+        if (photo.url) dropFiles(photo.url);
+        if (photo.originalUrl && photo.originalUrl !== photo.url) dropFiles(photo.originalUrl);
+        if (photo.thumbUrl) dropFiles(photo.thumbUrl);
+        if (photo.originalThumbUrl && photo.originalThumbUrl !== photo.thumbUrl) dropFiles(photo.originalThumbUrl);
+      } else {
+        const next = dataUrl
+          ? await uploadPhotoPair(sessionId, dataUrl)
+          : { url: photo.originalUrl, thumbUrl: photo.originalThumbUrl || photo.originalUrl };
+        await writePhotos(sessionId, storedPhotos(sessionId).map((p) => (p.id === photo.id ? { ...p, ...next } : p)));
+        // Buang hasil crop yang barusan digantikan — tapi jangan sentuh berkas aslinya.
+        if (photo.url !== photo.originalUrl) dropFiles(photo.url);
+        if (photo.thumbUrl && photo.thumbUrl !== photo.originalThumbUrl) dropFiles(photo.thumbUrl);
+      }
     } catch (e) {
       showAlert(`Gagal menyimpan foto: ${e.message}`);
     }
@@ -1083,7 +1147,8 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
   const MacroBar = ({ mkey, showSources = false }) => {
     const target = targets[mkey] || 1;
     const value = totals[mkey] || 0;
-    const pct = Math.min(100, (value / target) * 100);
+    const actualPct = (value / target) * 100;
+    const barWidth = Math.min(100, Math.max(0, actualPct));
     const mc = mkey === 'kcal' ? { label: 'Kalori', hex: value > (target || Infinity) ? '#cd4a4a' : '#3daa5c' } : MACRO_COLORS[mkey];
     const sources = showSources && expandedNutrient === mkey ? nutrientSources(day, mkey) : null;
     return (
@@ -1103,12 +1168,12 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
               <span className={`caption ${t.textMuted}`}>{mc.label}</span>
             )}
             <div className="flex items-center gap-2">
-              {mkey !== 'kcal' && <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(pct)}%</span>}
+              {mkey !== 'kcal' && <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(actualPct)}%</span>}
               <span className={`caption ${t.textMain}`}>{Math.round(value)}<span className={t.textMuted}>/{target}{mkey==='kcal'?'':'g'}</span></span>
             </div>
           </div>
           <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: mc.hex }} />
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${barWidth}%`, backgroundColor: mc.hex }} />
           </div>
           {sources && (
             <div className={`rounded-xl ${t.bgSunken} p-2.5 mt-1 space-y-1`}>
@@ -1145,6 +1210,14 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
       { value: sTotals.fat * 9, color: MACRO_COLORS.fat.hex },
     ] : null;
 
+    const drinkEntriesMl = entries.reduce((sum, e) => {
+      const u = (e.unit || '').toLowerCase();
+      if (u === 'ml') return sum + (Number(e.grams) || 0);
+      if (e.volumeMl) return sum + (Number(e.volumeMl) * (Number(e.grams) || 1));
+      return sum;
+    }, 0);
+    const displayWaterMl = Math.max(Math.round(day.water || 0), Math.round(drinkEntriesMl));
+
     return (
       <button onClick={() => setDetailSession(session.id)}
         className={`rounded-3xl border p-3.5 flex flex-col items-center ${t.border} ${t.bgCard} transition-transform active:scale-[0.98]`}>
@@ -1164,7 +1237,7 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
         <p className={`body-md mt-2 ${t.textMain}`}>{session.label}</p>
         <p className={`caption font-medium ${t.textMuted} flex items-center justify-center gap-1`}>
           {session.id === 'drink' ? (
-            <>{Math.round(day.water || 0)} mL {sTotals.kcal > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : ''}</>
+            <>{displayWaterMl} mL {sTotals.kcal > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : ''}</>
           ) : (
             <>{session.time} {eatenEntries.length > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : (allPlanned ? '· Direncanakan' : '')}</>
           )}
@@ -1259,40 +1332,66 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                          <div className="flex-1 min-w-0 shrink"></div>
                          
                          {medicines.map(med => {
-                           const IconComp = ICONS[med.icon] || Pill;
-                           const textClass = COLORS.find(c => c.id === med.color)?.bg.replace('bg-', 'text-') || 'text-zinc-500';
-                           const isChecked = (day.medChecks || {})[med.id];
-                           return (
-                             <button key={med.id} onClick={() => {
-                               const medChecks = { ...(day.medChecks || {}), [med.id]: !isChecked };
-                               persistDay({ ...day, medChecks });
-                               consumeShelfStock('medicines', med, isChecked ? 1 : -1);
-                             }} className={`shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border shadow-md transition-all ${isChecked ? `${t.bgAccent} border-transparent text-white` : `${t.bgCard} ${t.border} ${t.textMuted}`}`}>
-                               {isChecked ? <Check size={18} className="mb-0.5" /> : <IconComp size={18} className={`mb-0.5 ${textClass}`} />}
-                               <span className="text-[8px] font-bold px-1 text-center line-clamp-2 leading-tight w-full whitespace-normal">{med.name}</span>
-                               {typeof med.stock === 'number' && (
-                                 <span className={`text-[7px] font-bold ${med.stock === 0 ? 'text-red-500' : 'opacity-60'}`}>sisa {med.stock}</span>
-                               )}
-                             </button>
-                           )
-                         })}
+                            const IconComp = ICONS[med.icon] || Pill;
+                            const textClass = COLORS.find(c => c.id === med.color)?.bg.replace('bg-', 'text-') || 'text-zinc-500';
+                            const isChecked = (day.medChecks || {})[med.id];
+                            const domusMatch = domusItems ? matchDomusItem(domusItems, med.name) : null;
+                            const curStock = domusMatch ? itemStock(domusMatch) : null;
+                            const stockText = curStock ? formatStock(curStock) : (typeof med.stock === 'number' ? `${med.stock}` : null);
+
+                            return (
+                              <button key={med.id} onClick={() => {
+                                const medChecks = { ...(day.medChecks || {}), [med.id]: !isChecked };
+                                persistDay({ ...day, medChecks });
+                                consumeShelfStock('medicines', med, isChecked ? 1 : -1);
+                              }} className={`shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border shadow-md transition-all ${isChecked ? `${t.bgAccent} border-transparent text-white` : `${t.bgCard} ${t.border} ${t.textMuted}`}`}>
+                                {isChecked ? <Check size={18} className="mb-0.5" /> : <IconComp size={18} className={`mb-0.5 ${textClass}`} />}
+                                <span className="text-[8px] font-bold px-1 text-center line-clamp-2 leading-tight w-full whitespace-normal">{med.name}</span>
+                                {stockText && (
+                                  <span className={`text-[7px] font-bold ${curStock?.value === 0 || med.stock === 0 ? 'text-red-500' : 'opacity-60'}`}>sisa {stockText}</span>
+                                )}
+                              </button>
+                            );
+                          })}
                          
                          {drinkTemplates.map(drink => {
-                           const IconComp = ICONS[drink.icon] || CupSoda;
-                           const bgClass = COLORS.find(c => c.id === drink.color)?.bg || 'bg-zinc-500';
-                           return (
-                             <button key={drink.id} onClick={() => {
-                               const meals = { ...(day.meals || {}) };
-                               meals['drink'] = [...(meals['drink'] || []), makeEntry({ name: drink.name, grams: 1, unit: 'porsi', nutrition: drink.nutrition, source: 'manual' })];
-                               persistDay({ ...day, meals });
-                               consumeShelfStock('drinkTemplates', drink, -1);
-                               showAlert(`${drink.name} ditambahkan ke sesi Minuman!`);
-                             }} className={`shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border border-transparent shadow-md text-white active:scale-95 transition-all ${bgClass}`}>
-                               <IconComp size={18} className="mb-0.5" />
-                               <span className="text-[8px] font-bold px-1 text-center line-clamp-2 leading-tight w-full whitespace-normal">{drink.name}</span>
-                             </button>
-                           )
-                         })}
+                            const IconComp = ICONS[drink.icon] || CupSoda;
+                            const bgClass = COLORS.find(c => c.id === drink.color)?.bg || 'bg-zinc-500';
+                            const domusMatch = domusItems ? matchDomusItem(domusItems, drink.name) : null;
+                            const curStock = domusMatch ? itemStock(domusMatch) : null;
+                            const stockText = curStock ? formatStock(curStock) : (typeof drink.stock === 'number' ? `${drink.stock}` : null);
+                            const drinkVol = drink.volumeMl !== undefined && drink.volumeMl !== null
+                              ? Number(drink.volumeMl)
+                              : (drink.unit === 'ml' ? (Number(drink.grams) || 250) : 250);
+                            return (
+                              <button key={drink.id} onClick={() => {
+                                const meals = { ...(day.meals || {}) };
+                                const currentTime = new Date().toTimeString().slice(0, 5);
+                                meals['drink'] = [
+                                  ...(meals['drink'] || []),
+                                  makeEntry({
+                                    name: drink.name,
+                                    grams: drinkVol,
+                                    unit: 'ml',
+                                    volumeMl: drinkVol,
+                                    nutrition: drink.nutrition,
+                                    source: 'manual',
+                                    time: currentTime
+                                  })
+                                ];
+                                const newWater = (day.water || 0) + (drinkVol || 0);
+                                persistDay({ ...day, meals, water: newWater });
+                                consumeShelfStock('drinkTemplates', drink, -1);
+                                showAlert(`${drink.name} (${drinkVol} mL) ditambahkan ke sesi Minuman!`);
+                              }} className={`shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border border-transparent shadow-md text-white active:scale-95 transition-all ${bgClass}`}>
+                                <IconComp size={18} className="mb-0.5" />
+                                <span className="text-[8px] font-bold px-1 text-center line-clamp-2 leading-tight w-full whitespace-normal">{drink.name}</span>
+                                {stockText && (
+                                  <span className={`text-[7px] font-bold ${curStock?.value === 0 || drink.stock === 0 ? 'text-red-300' : 'opacity-80'}`}>sisa {stockText}</span>
+                                )}
+                              </button>
+                            );
+                          })}
                      </div>
                  )}
                  
@@ -1344,7 +1443,7 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
           
           {aiBusy ? (
             <div className="relative z-10 flex-1 px-2 body-lg font-bold text-green-600 dark:text-green-400 animate-pulse flex items-center gap-2 min-w-0">
-              <Sparkles size={18} className="shrink-0" /> <span className="truncate">Memproses...</span>
+              <Loader2 size={18} className="animate-spin shrink-0" /> <span className="truncate">Memproses...</span>
             </div>
           ) : (
             <textarea
@@ -1395,7 +1494,8 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                 <input type="time"
                   value={aiResult.time || ''}
                   onChange={(e) => setAiResult(r => ({ ...r, time: e.target.value }))}
-                  className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1`}
+                  onClick={(e) => { try { e.target.showPicker?.(); } catch {} }}
+                  className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1 [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
                 />
                 <button onClick={() => setAiResult(null)} className={`p-2 rounded-xl ${t.btnBg}`}><X size={15} className={t.textMuted} /></button>
               </div>
@@ -1535,7 +1635,7 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
               ))}
             </div>
             <label className={`flex items-center gap-2 mb-4 p-3 rounded-xl border ${t.border} ${t.bgSunken} cursor-pointer`}>
-               <input type="checkbox" checked={saveToDb} onChange={(e) => setSaveToDb(e.target.checked)} className="w-5 h-5 rounded accent-emerald-500" />
+<input type="checkbox" checked={saveToDb} onChange={(e) => setSaveToDb(e.target.checked)} className="w-5 h-5 rounded accent-emerald-500" />
                <span className={`caption font-medium ${t.textMain}`}>Simpan ke Database Custom</span>
             </label>
             <button disabled={!aiResult.foods.length} onClick={confirmAiResult}
@@ -1547,77 +1647,116 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
       )}
 
       {/* ===== SHEET DETAIL SESI (edit/hapus entri) ===== */}
-      {detailSession && (
-        <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe ${pickerOpen || copySourceSession || editingPhotoObj || !!aiResult || aiBusy ? 'hidden' : ''}`} onClick={() => setDetailSession(null)}>
-          <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl anim-rise`}>
-            
-            {/* FIXED HEADER */}
-            <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5`}>
-              <div className="flex flex-col flex-1 mr-4">
-                <input key={detailSession} type="text" className={`bg-transparent outline-none h2 ${t.textMain} w-full`} 
-                  placeholder="Sesi Baru"
-                  defaultValue={activeSessions.find(s => s.id === detailSession)?.label || ''}
-                  onBlur={(e) => {
-                    const newVal = e.target.value.trim();
-                    if (newVal && newVal !== activeSessions.find(s => s.id === detailSession)?.label) {
-                      persistDay({ ...day, sessionLabels: { ...(day.sessionLabels || {}), [detailSession]: newVal } });
-                    }
-                  }} />
+      {detailSession && (() => {
+        const sessionPhotos = photosOf(detailSession);
+        let sessionItems = day.meals?.[detailSession] || [];
+        
+        // Auto-migrate data lama: jika ada foto tapi item Lomy tidak punya photoId, masukkan ke foto pertama
+        if (sessionPhotos.length > 0) {
+          sessionItems = sessionItems.map(item => {
+            if (!item.photoId && item.source === 'ai') {
+              return { ...item, photoId: sessionPhotos[0].id };
+            }
+            return item;
+          });
+        }
+
+        const itemsByPhoto = {};
+        const noPhotoItems = [];
+        
+        sessionItems.forEach(item => {
+          if (item.photoId && sessionPhotos.some(p => p.id === item.photoId)) {
+            if (!itemsByPhoto[item.photoId]) itemsByPhoto[item.photoId] = [];
+            itemsByPhoto[item.photoId].push(item);
+          } else {
+            noPhotoItems.push(item);
+          }
+        });
+
+        const sessionDefaultTime = activeSessions.find(s => s.id === detailSession)?.time || '12:00';
+
+        const slides = sessionPhotos.map((p, idx) => {
+          const items = itemsByPhoto[p.id] || [];
+          const slideTime = items.find(i => i.time)?.time || p.time || (idx === 0 ? sessionDefaultTime : '12:00');
+          return { type: 'photo', photo: p, items, time: slideTime };
+        });
+
+        if (noPhotoItems.length > 0 || slides.length === 0) {
+          const slideTime = noPhotoItems.find(i => i.time)?.time || (slides.length === 0 ? sessionDefaultTime : new Date().toTimeString().slice(0, 5));
+          slides.push({ type: 'manual', items: noPhotoItems, time: slideTime });
+        }
+
+        const activeSlideIndex = Math.min(detailSlide, Math.max(0, slides.length - 1));
+        const activeSlide = slides[activeSlideIndex] || slides[0] || {};
+        const activeSlideTime = activeSlide.time || sessionDefaultTime;
+
+        const handleUpdateSlideTime = (newTime) => {
+          // 1. Update waktu semua item di slide yang sedang aktif
+          const meals = { ...(day.meals || {}) };
+          if (meals[detailSession]) {
+            const currentItemIds = new Set((activeSlide.items || []).map(i => i.id));
+            meals[detailSession] = meals[detailSession].map(item => {
+              if (currentItemIds.has(item.id)) {
+                return { ...item, time: newTime };
+              }
+              return item;
+            });
+          }
+
+          // 2. Update sessionTimes jika ini slide pertama (atau satu-satunya slide)
+          const sessionTimes = { ...(day.sessionTimes || {}) };
+          if (activeSlideIndex === 0 || !sessionTimes[detailSession]) {
+            sessionTimes[detailSession] = newTime;
+          }
+
+          // 3. Update photo.time jika slide bertipe photo
+          if (activeSlide.photo) {
+            const updatedPhotos = storedPhotos(detailSession).map(p => p.id === activeSlide.photo.id ? { ...p, time: newTime } : p);
+            writePhotos(detailSession, updatedPhotos);
+          }
+
+          persistDay({ ...day, meals, sessionTimes });
+        };
+
+        return (
+          <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe ${pickerOpen || copySourceSession || editingPhotoObj || !!aiResult || aiBusy ? 'hidden' : ''}`} onClick={() => setDetailSession(null)}>
+            <div onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-sm max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl anim-rise`}>
+              
+              {/* FIXED HEADER */}
+              <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5`}>
+                <div className="flex flex-col flex-1 mr-4">
+                  <input key={detailSession} type="text" className={`bg-transparent outline-none h2 ${t.textMain} w-full`} 
+                    placeholder="Sesi Baru"
+                    defaultValue={activeSessions.find(s => s.id === detailSession)?.label || ''}
+                    onBlur={(e) => {
+                      const newVal = e.target.value.trim();
+                      if (newVal && newVal !== activeSessions.find(s => s.id === detailSession)?.label) {
+                        persistDay({ ...day, sessionLabels: { ...(day.sessionLabels || {}), [detailSession]: newVal } });
+                      }
+                    }} />
+                </div>
+                <div className="flex items-center gap-2">
+                  {detailSession !== 'drink' && (
+                    <input type="time" 
+                      value={activeSlideTime}
+                      onChange={(e) => handleUpdateSlideTime(e.target.value)}
+                      onClick={(e) => { try { e.target.showPicker?.(); } catch {} }}
+                      className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none cursor-pointer`} />
+                  )}
+                  <button onClick={() => handleRemoveSession(detailSession)} className={`p-2 rounded-xl bg-red-400/10 text-red-400`}><X size={15} /></button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {detailSession !== 'drink' && (
-                  <input type="time" 
-                    value={activeSessions.find(s => s.id === detailSession)?.time || '12:00'}
-                    onChange={(e) => setSessionTime(detailSession, e.target.value)}
-                    className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1`} />
-                )}
-                <button onClick={() => handleRemoveSession(detailSession)} className={`p-2 rounded-xl bg-red-400/10 text-red-400`}><X size={15} /></button>
-              </div>
-            </div>
 
-            {/* CAROUSEL */}
-            <div className="flex-1 flex flex-col min-h-0">
-              {(() => {
-                 const sessionPhotos = photosOf(detailSession);
-                 let sessionItems = day.meals?.[detailSession] || [];
-                 
-                 // Auto-migrate data lama: jika ada foto tapi item Lomy tidak punya photoId, masukkan ke foto pertama
-                 if (sessionPhotos.length > 0) {
-                   sessionItems = sessionItems.map(item => {
-                     if (!item.photoId && item.source === 'ai') {
-                       return { ...item, photoId: sessionPhotos[0].id };
-                     }
-                     return item;
-                   });
-                 }
-
-                 const itemsByPhoto = {};
-                 const noPhotoItems = [];
-                 
-                 sessionItems.forEach(item => {
-                   if (item.photoId && sessionPhotos.some(p => p.id === item.photoId)) {
-                     if (!itemsByPhoto[item.photoId]) itemsByPhoto[item.photoId] = [];
-                     itemsByPhoto[item.photoId].push(item);
-                   } else {
-                     noPhotoItems.push(item);
-                   }
-                 });
-
-                 const slides = sessionPhotos.map(p => ({ type: 'photo', photo: p, items: itemsByPhoto[p.id] || [] }));
-                 if (noPhotoItems.length > 0 || slides.length === 0) {
-                   slides.push({ type: 'manual', items: noPhotoItems });
-                 }
-
-                 return (
-                   <>
-                     <div className="flex-1 flex w-full overflow-x-auto snap-x snap-mandatory hide-scrollbar"
-                          onScroll={(e) => {
-                            const idx = Math.round(e.target.scrollLeft / e.target.clientWidth);
-                            if (idx !== detailSlide && idx >= 0 && idx < slides.length) setDetailSlide(idx);
-                          }}>
-                       {slides.map((slide, slideIdx) => (
-                         <div key={slide.photo?.id || 'manual'} className="w-full h-full flex flex-col shrink-0 snap-center relative">
+              {/* CAROUSEL */}
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex-1 flex w-full overflow-x-auto snap-x snap-mandatory hide-scrollbar"
+                     onScroll={(e) => {
+                       const idx = Math.round(e.target.scrollLeft / e.target.clientWidth);
+                       if (idx !== detailSlide && idx >= 0 && idx < slides.length) setDetailSlide(idx);
+                     }}>
+                  {slides.map((slide, slideIdx) => (
+                    <div key={slide.photo?.id || `manual_${slideIdx}`} className="w-full h-full flex flex-col shrink-0 snap-center relative">
                       {/* Sub-Session Header */}
                       {slide.type === 'photo' ? (
                         <div className={`relative h-48 w-full shrink-0 ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
@@ -1632,102 +1771,169 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                                <Loader2 size={12} className="animate-spin" /> Menyimpan
                              </div>
                            ) : (
-                             <>
-                               <div className="absolute top-3 right-3 flex gap-2">
-                                 <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP"><Download size={16} /></button>
-                                 <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95"><Edit2 size={16} /></button>
-                                 <button onClick={() => removePhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95"><X size={16} /></button>
-                               </div>
-                               <div className="absolute bottom-4 inset-x-4 flex items-center gap-2">
-                                 <button onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)} disabled={aiBusy} className={`flex-1 py-2 rounded-xl bg-emerald-500/90 text-white caption font-bold shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2 backdrop-blur-md ${aiBusy ? 'opacity-50' : ''}`}>
-                                   {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Analisa Ulang
-                                 </button>
-                               </div>
-                             </>
+                             <div className="absolute top-3 right-3 flex items-center gap-2">
+                               <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP"><Download size={16} /></button>
+                               <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95"><Edit2 size={16} /></button>
+                               <button onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)} disabled={aiBusy} className={`p-2 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white backdrop-blur-md active:scale-95 shadow-md shadow-emerald-500/30 ${aiBusy ? 'opacity-50' : ''}`} title="Hitung / Analisa Ulang Gizi" aria-label="Hitung / Analisa Ulang Gizi">
+                                 {aiBusy ? <Loader2 size={16} className="animate-spin" /> : <Calculator size={16} />}
+                               </button>
+                               <button onClick={() => removePhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95" aria-label="Hapus foto"><X size={16} /></button>
+                             </div>
                            )}
                         </div>
                       ) : (
-                        <div className={`relative h-28 w-full shrink-0 flex flex-col items-center justify-center gap-3 ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
+                        <div className={`relative h-24 w-full shrink-0 flex items-center justify-center ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
                            <div className="flex items-center gap-3">
                              <button onClick={() => openCamera((file) => addPhoto(detailSession, file), detailCameraRef)}
-                               className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`} aria-label="Jepret foto">
+                               className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform border ${t.border}`} aria-label="Jepret foto">
                                <Camera size={20} />
                              </button>
                              <button onClick={() => detailPhotoRef.current?.click()}
-                               className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform`} aria-label="Pilih dari galeri">
+                               className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform border ${t.border}`} aria-label="Pilih dari galeri">
                                <Image size={20} />
                              </button>
                            </div>
-                           <span className={`caption font-medium ${t.textMuted}`}>Tambah Foto (Menu Manual)</span>
                         </div>
                       )}
 
                       {/* Items List for this Sub-Session */}
                       <div className="flex-1 overflow-y-auto p-5 pb-8">
+                         {(() => {
+                           const slideTotals = slide.items.reduce((acc, e) => {
+                             const isMealPrep = e.isMealPrep || e.source === 'recipe';
+                             const isEaten = e.isEaten !== undefined ? e.isEaten : !isMealPrep;
+                             return isEaten !== false ? addNutrition(acc, e.nutrition) : acc;
+                           }, { ...EMPTY_NUTRITION });
+
+                           const displayTotals = (slideTotals.kcal > 0 || slide.items.length === 0)
+                             ? slideTotals
+                             : slide.items.reduce((acc, e) => addNutrition(acc, e.nutrition), { ...EMPTY_NUTRITION });
+
+                           const kcal = Math.round(displayTotals.kcal || 0);
+                           const p = Math.round((displayTotals.protein || 0) * 10) / 10;
+                           const c = Math.round((displayTotals.carbs || 0) * 10) / 10;
+                           const f = Math.round((displayTotals.fat || 0) * 10) / 10;
+
+                           const totalMacroKcal = (p * 4) + (c * 4) + (f * 9);
+                           const pPct = totalMacroKcal > 0 ? ((p * 4) / totalMacroKcal) * 100 : 0;
+                           const cPct = totalMacroKcal > 0 ? ((c * 4) / totalMacroKcal) * 100 : 0;
+                           const fPct = totalMacroKcal > 0 ? ((f * 9) / totalMacroKcal) * 100 : 0;
+
+                           if (slide.items.length === 0) return null;
+
+                           return (
+                              <div className="mb-4 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-baseline gap-1">
+                                    <span className={`text-2xl font-black tabular-nums ${t.textMain}`}>{kcal}</span>
+                                    <span className={`text-xs font-semibold ${t.textMuted}`}>kkal</span>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-xs font-bold tabular-nums">
+                                    <span className="flex items-center gap-1 text-green-500">
+                                      <span className="text-[10px] uppercase font-semibold text-green-500/70">P</span> {p}g
+                                    </span>
+                                    <span className="flex items-center gap-1 text-amber-500">
+                                      <span className="text-[10px] uppercase font-semibold text-amber-500/70">K</span> {c}g
+                                    </span>
+                                    <span className="flex items-center gap-1 text-red-400">
+                                      <span className="text-[10px] uppercase font-semibold text-red-400/70">L</span> {f}g
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Horizontal Macro Bar */}
+                                <div className={`h-2 rounded-full overflow-hidden flex w-full ${t.bgSunken}`}>
+                                  {totalMacroKcal > 0 ? (
+                                    <>
+                                      <div
+                                        style={{ width: `${pPct}%` }}
+                                        className="h-full bg-green-500 transition-all duration-300 first:rounded-l-full last:rounded-r-full"
+                                      />
+                                      <div
+                                        style={{ width: `${cPct}%` }}
+                                        className="h-full bg-amber-500 transition-all duration-300 first:rounded-l-full last:rounded-r-full"
+                                      />
+                                      <div
+                                        style={{ width: `${fPct}%` }}
+                                        className="h-full bg-red-400 transition-all duration-300 first:rounded-l-full last:rounded-r-full"
+                                      />
+                                    </>
+                                  ) : (
+                                    <div className="h-full w-full bg-white/5" />
+                                  )}
+                                </div>
+                              </div>
+                           );
+                         })()}
+
                          <div className="flex items-center justify-between mb-3">
-                           <p className={`caption font-bold ${t.textMain}`}>
-                             Daftar Menu {slides.length > 1 ? `(${slideIdx + 1}/${slides.length})` : ''}
-                           </p>
-                           {slide.items.length > 0 && (
-                             <button onClick={() => { 
-                               setCopySourceSession(detailSession);
-                               setCopyTargetDate(selectedYmd);
-                               setCopySelectedItems(slide.items.map(e => e.id));
-                               setCopySourcePhoto(slide.type === 'photo' ? slide.photo : null);
-                               setDetailSession(null);
-                             }} className={`p-2 rounded-xl ${t.btnBg} text-emerald-500 flex items-center gap-1.5`}><Copy size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Pindah / Salin</span></button>
-                           )}
+                           <h3 className={`h3 ${t.textMuted}`}>Daftar Menu {slides.length > 1 ? `(${slideIdx + 1}/${slides.length})` : ''}</h3>
+                           <button onClick={() => {
+                             setCopySourceSession(detailSession);
+                             setCopySourcePhoto(slide.photo || null);
+                             setCopySelectedItems(slide.items.map(i => i.id));
+                           }} className={`px-2.5 py-1 rounded-lg ${t.bgSunken} ${t.textAccent} text-xs font-bold flex items-center gap-1 active:scale-95 transition-transform`}>
+                             <Copy size={12} /> PINDAH / SALIN
+                           </button>
                          </div>
-                         <div className="space-y-1.5 mb-3">
-                             {slide.items.map(e => {
+                         <div className="space-y-2">
+                           {slide.items.map((e) => {
                              const isMealPrep = e.isMealPrep || e.source === 'recipe';
                              const isEaten = e.isEaten !== undefined ? e.isEaten : !isMealPrep;
                              return (
-                  <div key={e.id} className={`flex items-center justify-between p-3 rounded-2xl border ${theme === 'dark' ? 'bg-black/20 border-white/5' : 'bg-white/50 border-black/5'} transition-all ${isEaten === false ? 'opacity-50' : ''}`}>
-                    <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                      { isMealPrep && (
-                        <input type="checkbox" checked={isEaten} onChange={(ev) => toggleEatenStatus(detailSession, e, ev.target.checked)} className="w-5 h-5 rounded accent-emerald-500 shrink-0" />
-                      )}
-                      <div className="truncate flex-1">
-                        <p className={`body-md ${t.textMain} truncate`}>
-                          {e.name}
-                        </p>
-                        <div className={`caption font-medium ${t.textMuted} flex flex-wrap items-center gap-1.5`}>
-                          {detailSession === 'drink' && (
-                            <input type="time" value={e.time || '12:00'} onChange={(ev) => {
-                               const meals = { ...(day.meals || {}) };
-                               meals[detailSession] = meals[detailSession].map(x => x.id === e.id ? { ...x, time: ev.target.value } : x);
-                               persistDay({ ...day, meals });
-                            }} className={`bg-transparent outline-none border-b border-dashed ${t.border} text-center`} style={{ width: '40px' }} />
-                          )}
-                          <span className="truncate flex items-center gap-1">
-                            <input type="number" inputMode="numeric" value={Math.round(e.grams) || ''} placeholder="0" onChange={(ev) => {
-                              const grams = Number(ev.target.value) || 0;
-                              const meals = { ...(day.meals || {}) };
-                              meals[detailSession] = meals[detailSession].map(x => {
-                                if (x.id !== e.id) return x;
-                                const baseGrams = x.baseGrams || (x.grams > 0 ? x.grams : 1);
-                                const baseNutrition = x.baseNutrition || x.nutrition;
-                                const factor = grams / baseGrams;
-                                return {
-                                  ...x,
-                                  grams,
-                                  baseGrams,
-                                  baseNutrition,
-                                  nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
-                                };
-                              });
-                              persistDay({ ...day, meals });
-                            }} className={`w-12 bg-transparent border-b border-dashed ${t.border} outline-none no-spinners text-center ${t.textMain}`} />
-                            {e.unit || 'g'} · {Math.round(e.nutrition?.kcal || 0)} kkal
-                          </span>
-                          {(e.source === 'ai' || e.source === 'text_ai') && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <Sparkles size={14} strokeWidth={2.5} /></span>}{e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}{e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500">· <Box size={14} strokeWidth={2.5} /></span>}
-                          {e.isMealPrep && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border shrink-0 ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>Meal Prep</span>}
-                        </div>
-                      </div>
-                    </div>
-                    <button onClick={() => removeEntry(detailSession, e.id)} className="p-2 rounded-xl text-red-400 shrink-0"><X size={14} /></button>
-                  </div>
+                               <div key={e.id} className={`flex items-center justify-between p-3.5 rounded-2xl border ${t.border} ${t.bgCard} ${!isEaten ? 'opacity-50' : ''}`}>
+                                 <div className="flex items-center gap-3 min-w-0 flex-1">
+                                   {isMealPrep && (
+                                     <input type="checkbox" checked={isEaten} onChange={(ev) => toggleEatenStatus(detailSession, e, ev.target.checked)} className="w-5 h-5 rounded accent-emerald-500 shrink-0" />
+                                   )}
+                                   <div className="truncate flex-1">
+                                     <p className={`body-md ${t.textMain} truncate`}>
+                                       {e.name}
+                                     </p>
+                                     <div className={`caption font-medium ${t.textMuted} flex flex-wrap items-center gap-2 mt-1`}>
+                                       {detailSession === 'drink' && (
+                                         <div className={`px-2 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} shrink-0`}>
+                                           <input
+                                             type="time"
+                                             value={e.time || '12:00'}
+                                             onChange={(ev) => {
+                                               const meals = { ...(day.meals || {}) };
+                                               meals[detailSession] = meals[detailSession].map(x => x.id === e.id ? { ...x, time: ev.target.value } : x);
+                                               persistDay({ ...day, meals });
+                                             }}
+                                             onClick={(ev) => { try { ev.target.showPicker?.(); } catch {} }}
+                                             className={`bg-transparent outline-none text-xs font-bold ${t.textMain} [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
+                                           />
+                                         </div>
+                                       )}
+                                       <span className="truncate flex items-center gap-1">
+                                         <input type="number" inputMode="numeric" value={Math.round(e.grams) || ''} placeholder="0" onChange={(ev) => {
+                                           const grams = Number(ev.target.value) || 0;
+                                           const meals = { ...(day.meals || {}) };
+                                           meals[detailSession] = meals[detailSession].map(x => {
+                                             if (x.id !== e.id) return x;
+                                             const baseGrams = x.baseGrams || x.grams || 1;
+                                             const baseNutrition = x.baseNutrition || x.nutrition || EMPTY_NUTRITION;
+                                             const factor = baseGrams > 0 ? grams / baseGrams : 1;
+                                             return {
+                                               ...x,
+                                               grams,
+                                               baseGrams,
+                                               baseNutrition,
+                                               nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
+                                             };
+                                           });
+                                           persistDay({ ...day, meals });
+                                         }} className={`w-14 bg-transparent border-b border-dashed ${t.border} outline-none no-spinners text-center font-bold ${t.textMain}`} />
+                                         {e.unit || (detailSession === 'drink' ? 'mL' : 'g')} · {Math.round(e.nutrition?.kcal || 0)} kkal
+                                       </span>
+                                       {e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}{e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500">· <Box size={14} strokeWidth={2.5} /></span>}
+                                       {e.isMealPrep && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border shrink-0 ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>Meal Prep</span>}
+                                     </div>
+                                   </div>
+                                 </div>
+                                 <button onClick={() => removeEntry(detailSession, e.id)} className="p-2 rounded-xl text-red-400 shrink-0"><X size={14} /></button>
+                               </div>
                              );
                            })}
                          </div>
@@ -1737,69 +1943,65 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                            </div>
                          )}
                        </div>
-                       
-                       {/* Input Manual Picker per slide */}
-                       <div className="px-5 mt-auto pb-5 pt-2 bg-gradient-to-t from-black/5 dark:from-black/40 to-transparent sticky bottom-0">
-                          <button onClick={() => { setAiTargetSession(detailSession); setPickerOpen(true); }}
-                            className={`w-full py-3 rounded-2xl ${t.btnBg} ${t.textMain} body-md font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95`}>
-                            <Plus size={16} /> Tambah Menu Manual
-                          </button>
-                       </div>
-                       </div>
-                   ))}
-                     </div>
-                   </>
-                 );
-              })()}
-            </div>
-               <input ref={detailPhotoRef} type="file" accept="image/*" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
-               <input ref={detailCameraRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
-            </div>
-          </div>
-      )}
-
-      {/* ===== SHEET COPY SESI ===== */}
-      {copySourceSession && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe" onClick={() => setCopySourceSession(null)}>
-          <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-[90vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
-            <h2 className={`h2 mb-4 ${t.textMain}`}>Salin / Pindah Menu</h2>
-            
-            <div className="flex-1 overflow-y-auto hide-scrollbar -mx-2 px-2 space-y-4">
-              {/* Pemilihan Item */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className={`caption font-bold ${t.textMain}`}>Pilih Menu (Sesi {activeSessions.find(s => s.id === copySourceSession)?.label}):</p>
-                  {copySelectedItems.length === (day.meals?.[copySourceSession]?.length || 0) ? (
-                    <button onClick={() => setCopySelectedItems([])} className={`text-[11px] font-bold ${t.textMuted}`}>Hapus Semua</button>
-                  ) : (
-                    <button onClick={() => setCopySelectedItems(day.meals?.[copySourceSession]?.map(e => e.id) || [])} className={`text-[11px] font-bold ${t.textAccent}`}>Pilih Semua</button>
-                  )}
-                </div>
-                <div className={`space-y-1 p-2 rounded-2xl border ${t.border} ${t.bgSunken} max-h-[25vh] overflow-y-auto`}>
-                  {(day.meals?.[copySourceSession] || []).map(item => (
-                    <label key={item.id} className="flex items-start gap-2 p-2 rounded-xl active:bg-black/5 dark:active:bg-white/5 transition-colors cursor-pointer">
-                      <input type="checkbox" 
-                        checked={copySelectedItems.includes(item.id)} 
-                        onChange={(e) => {
-                          if (e.target.checked) setCopySelectedItems(prev => [...prev, item.id]);
-                          else setCopySelectedItems(prev => prev.filter(id => id !== item.id));
-                        }}
-                        className="w-4 h-4 mt-0.5 rounded accent-emerald-500 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className={`body-md font-medium ${t.textMain} truncate`}>{item.name}</p>
-                        <p className={`caption ${t.textMuted}`}>{item.grams}{item.unit || 'g'} · {Math.round(item.nutrition?.kcal || 0)} kkal</p>
-                      </div>
-                    </label>
+                    </div>
                   ))}
-                  {(day.meals?.[copySourceSession] || []).length === 0 && (
-                    <p className={`caption text-center p-3 ${t.textMuted}`}>Sesi kosong.</p>
-                  )}
                 </div>
               </div>
 
+              {/* Input Manual Picker — Selalu di paling bawah sheet */}
+              <div className={`p-4 border-t ${t.border} bg-black/5 dark:bg-white/5 shrink-0`}>
+                 <button onClick={() => { setAiTargetSession(detailSession); setPickerOpen(true); }}
+                   className={`w-full py-3 rounded-2xl ${t.btnBg} ${t.textMain} body-md font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 border ${t.border}`}>
+                   <Plus size={16} className={t.textAccent} /> Tambah Menu Manual
+                 </button>
+              </div>
+
+              <input ref={detailPhotoRef} type="file" accept="image/*" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
+              <input ref={detailCameraRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ===== SHEET COPY SESI ===== */}
+      {copySourceSession && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe" onClick={() => { setCopySourceSession(null); setCopyTargetSessions([]); }}>
+          <div onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/90 border-white/10' : 'bg-white/90 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
+            <h2 className={`h2 ${t.textMain} mb-4`}>Pindahkan / Salin Menu</h2>
+            
+            <div className="flex-1 overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <p className={`caption font-bold ${t.textMain}`}>Pilih Menu (Sesi {activeSessions.find(s => s.id === copySourceSession)?.label}):</p>
+                {copySelectedItems.length === (day.meals?.[copySourceSession]?.length || 0) ? (
+                  <button onClick={() => setCopySelectedItems([])} className={`text-[11px] font-bold ${t.textMuted}`}>Hapus Semua</button>
+                ) : (
+                  <button onClick={() => setCopySelectedItems(day.meals?.[copySourceSession]?.map(e => e.id) || [])} className={`text-[11px] font-bold ${t.textAccent}`}>Pilih Semua</button>
+                )}
+              </div>
+              <div className={`space-y-1 p-2 rounded-2xl border ${t.border} ${t.bgSunken} max-h-[25vh] overflow-y-auto`}>
+                {(day.meals?.[copySourceSession] || []).map(item => (
+                  <label key={item.id} className="flex items-start gap-2 p-2 rounded-xl active:bg-black/5 dark:active:bg-white/5 transition-colors cursor-pointer">
+                    <input type="checkbox" 
+                      checked={copySelectedItems.includes(item.id)} 
+                      onChange={(e) => {
+                        if (e.target.checked) setCopySelectedItems(prev => [...prev, item.id]);
+                        else setCopySelectedItems(prev => prev.filter(id => id !== item.id));
+                      }}
+                      className="w-4 h-4 mt-0.5 rounded accent-emerald-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className={`body-md font-medium ${t.textMain} truncate`}>{item.name}</p>
+                      <p className={`caption ${t.textMuted}`}>{item.grams}{item.unit || 'g'} · {Math.round(item.nutrition?.kcal || 0)} kkal</p>
+                    </div>
+                  </label>
+                ))}
+                {(day.meals?.[copySourceSession] || []).length === 0 && (
+                  <p className={`caption text-center p-3 ${t.textMuted}`}>Sesi kosong.</p>
+                )}
+              </div>
+
               {/* Pemilihan Tujuan */}
-              <div>
+              <div className="mt-4">
                 <p className={`caption font-bold ${t.textMain} mb-2`}>Tanggal & Sesi Tujuan:</p>
                 <input type="date" value={copyTargetDate} onChange={(e) => setCopyTargetDate(e.target.value)} 
                   className={`w-full p-3 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md mb-2 outline-none`} />
@@ -1858,19 +2060,20 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                    const target = targets[n.key];
                    const ratio = (totals[n.key] || 0) / target;
                    const s = statusFor(ratio, { invert: MINIMUM_TARGETS.has(n.key) });
-                   const pct = Math.min(100, ratio * 100);
+                   const actualPct = ratio * 100;
+                   const barWidth = Math.min(100, Math.max(0, actualPct));
                    const sources = expandedNutrient === n.key ? nutrientSources(day, n.key) : null;
                    return (
                      <div key={n.key} className="flex flex-col gap-1">
                        <button onClick={() => setExpandedNutrient(expandedNutrient === n.key ? null : n.key)} className="flex justify-between items-baseline text-left">
                          <span className={`caption ${t.textMuted}`}>{n.label}</span>
                          <div className="flex items-center gap-2">
-                            <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(pct)}%</span>
+                            <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(actualPct)}%</span>
                             <span className={`caption ${t.textMain} tabular-nums`}>{(totals[n.key] || 0) < 10 ? Number((totals[n.key] || 0).toFixed(2)) : Math.round(totals[n.key] || 0)}<span className={t.textMuted}>/{target}{n.unit || 'mg'}</span></span>
                          </div>
                        </button>
                        <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
-                         <div className={`h-full rounded-full transition-all duration-500 ${s.bg}`} style={{ width: `${pct}%` }} />
+                         <div className={`h-full rounded-full transition-all duration-500 ${s.bg}`} style={{ width: `${barWidth}%` }} />
                        </div>
                        {/* Dari mana angkanya datang — pertanyaan pertama tiap kali ada nutrisi berlebih. */}
                        {sources && (
@@ -1973,9 +2176,7 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                const newEntry = makeEntry({ name: entry.name, grams: entry.grams, unit: entryUnit(entry.unit, entry.isDrink), nutrition: { ...EMPTY_NUTRITION, ...entry.nutrition }, source: 'picker', time: activeSessions.find(s => s.id === detailSession)?.time || new Date().toTimeString().slice(0, 5) });
                let meals = { ...(day.meals || {}) };
                meals[detailSession] = [...(meals[detailSession] || []), newEntry];
-               let newDay = { ...day, meals };
-               newDay = persistDay(newDay);
-               setDay(newDay);
+               persistDay({ ...day, meals });
                showToast(`${entry.name} langsung ditambahkan ke ${activeSessions.find(s => s.id === detailSession)?.label}.`);
             } else {
                appendAiResult([entry], { source: 'picker' });
@@ -1996,8 +2197,8 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
         open={!!editingPhotoObj}
         imageSrc={editingPhotoObj?.photo?.originalUrl}
         onClose={() => setEditingPhotoObj(null)}
-        onComplete={(croppedBase64) => {
-          replacePhoto(editingPhotoObj.sessionId, editingPhotoObj.photo, croppedBase64);
+        onComplete={(croppedBase64, isNewOriginal) => {
+          replacePhoto(editingPhotoObj.sessionId, editingPhotoObj.photo, croppedBase64, isNewOriginal);
           setEditingPhotoObj(null);
         }}
         onReset={editingPhotoObj?.photo?.url !== editingPhotoObj?.photo?.originalUrl ? () => {
@@ -2013,7 +2214,19 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
             <span className="text-white font-bold body-md">
               {fullscreenPhotos.length > 1 ? `${fullscreenIndex + 1} / ${fullscreenPhotos.length}` : ''}
             </span>
-            <button onClick={() => setFullscreenPhotos(null)} className="p-2 rounded-full bg-white/20 backdrop-blur-md text-white active:scale-95"><X size={20} /></button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const currentPhoto = fullscreenPhotos[fullscreenIndex] || fullscreenPhotos[0];
+                  if (currentPhoto) downloadPhoto(detailSession, currentPhoto);
+                }}
+                className="p-2 rounded-full bg-white/20 backdrop-blur-md text-white active:scale-95"
+                title="Unduh foto"
+              >
+                <Download size={20} />
+              </button>
+              <button onClick={() => setFullscreenPhotos(null)} className="p-2 rounded-full bg-white/20 backdrop-blur-md text-white active:scale-95"><X size={20} /></button>
+            </div>
           </div>
           <div className="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar"
                ref={fullscreenViewerRef}

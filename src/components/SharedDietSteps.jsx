@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, Activity, Clock, Gauge, Ruler, Heart, User, Refrigerator, Sparkles, X, ShieldCheck, Link2 } from 'lucide-react';
+import { Target, Activity, Clock, Gauge, Ruler, Heart, User, Refrigerator, X, ShieldCheck, Link2 } from 'lucide-react';
 import { searchFoods } from '../data/foodDatabase';
 import { DIET_PROFILES, DIET_GOALS, PACES } from '../data/nutrition';
 import { MEDICAL_CONDITIONS } from '../data/medicalConditions';
@@ -565,6 +565,26 @@ export const SharedDietStepRenderer = ({
             </div>
           </div>
         )}
+
+        {/* Input Konsep Masakan */}
+        <div className={`mt-3 p-3.5 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5'} space-y-1.5`}>
+          <div className="flex items-center justify-between">
+            <span className={`caption ${t.textMain}`}>
+              Konsep Masakan (Opsional)
+            </span>
+            <span className={`caption ${(answers.recipePrompt || '').length >= 150 ? 'text-amber-500' : t.textMuted}`}>
+              {(answers.recipePrompt || '').length}/150
+            </span>
+          </div>
+          <textarea
+            maxLength={150}
+            rows={2}
+            placeholder="Misal: aglio e olio, ala Korea, tomyam segar, pasta rendah kalori..."
+            value={answers.recipePrompt || ''}
+            onChange={e => setAnswers(prev => ({ ...prev, recipePrompt: e.target.value.slice(0, 150) }))}
+            className={`w-full px-3 py-2 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none resize-none`}
+          />
+        </div>
 
       </div>
     );

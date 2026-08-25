@@ -38,6 +38,7 @@ const TAB_ORDER = ['dashboard', 'log', 'history', 'program', 'fooddb'];
 
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
+import PwaInstallPrompt from './components/PwaInstallPrompt';
 import AuthPage from './pages/AuthPage';
 import OnboardingFlow from './pages/OnboardingFlow';
 import DashboardTab from './pages/DashboardTab';
@@ -49,7 +50,8 @@ import SocialHub from './pages/SocialHub';
 import SettingsPage from './pages/SettingsPage';
 import NotificationPanel from './components/NotificationPanel';
 import UpdaterAlert from './components/UpdaterAlert';
-import LomyChat from './components/LomyChat';
+import CoachLomyFloat from './components/CoachLomyFloat';
+import LomyAIChat from './components/LomyAIChat';
 import { createCommunityPost } from './utils/communityApi';
 
 const AppContent = ({ user, profile, logymUser, onLogout }) => {
@@ -221,6 +223,11 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [aiResult, setAiResult] = useState(null);
   const [aiTargetSession, setAiTargetSession] = useState('lunch');
 
+  // Coach Lomy Floating AI Chat states
+  const [isLomyChatOpen, setIsLomyChatOpen] = useState(false);
+  const [hasUnreadLomyChat, setHasUnreadLomyChat] = useState(false);
+  const [lomyAvatarOrigin, setLomyAvatarOrigin] = useState(null);
+
   const todayYmd = getLocalYMD();
   const path = location.pathname.substring(1) || 'dashboard';
   const setActiveTab = (tabId, swipeDir = null) => navigate(`/${tabId}`, { state: { swipeDir } });
@@ -339,6 +346,52 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   }, [user]);
 
   const daysMap = useMemo(() => Object.assign({}, ...Object.values(monthsData)), [monthsData]);
+
+  // Proactive Insight kalkulator harian Lomy
+  const nutritionInsight = useMemo(() => {
+    const todayData = daysMap?.[todayYmd];
+    const targets = profile?.targets || {};
+    if (!todayData || !targets.kcal) return null;
+
+    let totalKcal = 0;
+    let totalProtein = 0;
+    let totalWater = Number(todayData.waterMl || 0);
+
+    for (const items of Object.values(todayData.meals || {})) {
+      for (const item of items || []) {
+        totalKcal += Number(item.nutrition?.kcal || 0);
+        totalProtein += Number(item.nutrition?.protein || 0);
+      }
+    }
+
+    const proteinTarget = Number(targets.protein || 0);
+    const kcalTarget = Number(targets.kcal || 0);
+
+    if (proteinTarget > 0 && totalProtein < proteinTarget * 0.7) {
+      const sisa = Math.round(proteinTarget - totalProtein);
+      return {
+        title: 'Target Protein',
+        message: `Hari ini kamu masih butuh ~${sisa}g protein lagi untuk capai target optimalmu!`
+      };
+    }
+
+    if (totalWater > 0 && totalWater < 1500) {
+      return {
+        title: 'Hidrasi Tubuh',
+        message: `Air minummu hari ini baru ${(totalWater / 1000).toFixed(1)}L. Yuk cukupi hidrasi tubuhmu!`
+      };
+    }
+
+    if (kcalTarget > 0 && totalKcal < kcalTarget * 0.6) {
+      const sisaKcal = Math.round(kcalTarget - totalKcal);
+      return {
+        title: 'Energi Hari Ini',
+        message: `Kalorimu masih sisa ~${sisaKcal} kkal hari ini. Mau rekomendasi camilan sehat?`
+      };
+    }
+
+    return null;
+  }, [daysMap, profile, todayYmd]);
 
   // Setelah tiap simpan hari, ikut tulis ke Health Connect (fire-and-forget) kalau tersambung.
   const saveDay = useCallback(async (ymd, dayData) => {
@@ -529,7 +582,13 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     });
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logymUser]);
+  }, [logymUser, todayYmd]);
+
+  useEffect(() => {
+    if (lyfitYearData) {
+      setLyfitToday(extractLyfitDay(lyfitYearData, todayYmd));
+    }
+  }, [lyfitYearData, todayYmd]);
 
   // Sinkronisasi berat/tinggi terbaru dari histori harian Logym (karena Logym 
   // menyimpan data timbangan/progress ke riwayat harian, bukan profil statisnya).
@@ -564,7 +623,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const physicalRef = useRef(profile?.physical);
   physicalRef.current = profile?.physical;
 
-  // Mirror biometrik dari Logym (gender/dob/height/weight) — ARAH DATA doang, delta
+  // Mirror biometrik dari Logym (gender/dob/height/weight/activityLevel) — ARAH DATA doang, delta
   // bulking/cutting (nutritionGoal) sekarang murni milik Lomeal (lihat efek pushTargetsToLogym
   // di bawah) jadi gak perlu lagi dibaca balik/dicek kontradiksinya di sini.
   useEffect(() => {
@@ -572,7 +631,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     return subscribeLyfitProfile(logymUser.uid, (p) => {
       if (!p) return;
       const incoming = {};
-      ['gender', 'dob', 'height', 'weight'].forEach((k) => { if (p[k]) incoming[k] = p[k]; });
+      ['gender', 'dob', 'height', 'weight', 'activityLevel'].forEach((k) => { if (p[k]) incoming[k] = p[k]; });
       if (Object.keys(incoming).length === 0) return;
       const current = physicalRef.current || {};
       const changed = Object.keys(incoming).some((k) => incoming[k] !== current[k]);
@@ -581,31 +640,40 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       const key = JSON.stringify(merged);
       if (key === lastSyncedPhysicalRef.current) return;
       lastSyncedPhysicalRef.current = key;
-      saveProfilePatch({ physical: merged });
+      const patch = { physical: merged };
+      if (incoming.activityLevel && incoming.activityLevel !== profile?.activityLevel) {
+        patch.activityLevel = incoming.activityLevel;
+      }
+      saveProfilePatch(patch);
     });
-  }, [logymUser, saveProfilePatch]);
+  }, [logymUser, profile?.activityLevel, saveProfilePatch]);
 
   useEffect(() => {
     if (!logymUser || !profile?.physical) return;
-    const key = JSON.stringify(profile.physical);
+    const bioToPush = {
+      ...profile.physical,
+      activityLevel: profile?.activityLevel || profile?.physical?.activityLevel
+    };
+    const key = JSON.stringify(bioToPush);
     if (key === lastSyncedPhysicalRef.current) return;
     lastSyncedPhysicalRef.current = key;
-    pushBiometricsToLogym(logymUser.uid, profile.physical);
-  }, [logymUser, profile?.physical]);
+    pushBiometricsToLogym(logymUser.uid, bioToPush);
+  }, [logymUser, profile?.physical, profile?.activityLevel]);
 
-  // Sync Preferences ke Logym (Diet Profile, Allergies)
+  // Sync Preferences ke Logym (Diet Profile, Allergies, Activity Level)
   const lastSyncedPreferencesRef = useRef(null);
   useEffect(() => {
     if (!logymUser) return;
     const prefs = { 
       dietProfile: profile?.dietProfile, 
-      allergies: profile?.allergies 
+      allergies: profile?.allergies,
+      activityLevel: profile?.activityLevel,
     };
     const key = JSON.stringify(prefs);
     if (key === lastSyncedPreferencesRef.current) return;
     lastSyncedPreferencesRef.current = key;
-    pushPreferencesToLogym(logymUser.uid, prefs.dietProfile, prefs.allergies);
-  }, [logymUser, profile?.dietProfile, profile?.allergies]);
+    pushPreferencesToLogym(logymUser.uid, prefs.dietProfile, prefs.allergies, prefs.activityLevel);
+  }, [logymUser, profile?.dietProfile, profile?.allergies, profile?.activityLevel]);
 
   // Target hidup — dihitung ulang tiap fisik/dietGoal/dietProfile/pace berubah (dulu cuma
   // dihitung sekali di onboarding lalu dibekukan selamanya). Nutup celah "ganti Diet Profile
@@ -842,6 +910,18 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     }
   };
 
+
+
+  // Lokasi Domus yang disinkronkan ke Lomeal — diatur langsung dari Domus (`lomealSync: boolean`).
+  // Lokasi lama yang belum pernah di-set eksplisit jatuh balik ke `kind === 'dapur'` atau tebakan nama.
+  const KITCHEN_HINTS = ['kulkas', 'freezer', 'pantry', 'dapur', 'kabinet dapur', 'rak bumbu', 'chiller', 'rak snack'];
+  const isDapurLoc = (loc) => {
+    if (loc.lomealSync !== undefined) return !!loc.lomealSync;
+    const kind = loc.kind || (KITCHEN_HINTS.some(h => (loc.name || '').toLowerCase().includes(h)) ? 'dapur' : 'lain');
+    return kind === 'dapur';
+  };
+  const dapurLocIds = new Set(domusLocations.filter(isDapurLoc).map(l => l.id));
+
   const commonProps = {
     t, theme, user, logymUser, profile, daysMap, todayYmd,
     saveDay, ensureMonth, saveProfilePatch,
@@ -849,7 +929,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     mealPreps, saveMealPrepsFn,
     inboxItems,
     customFoods, saveCustomFoodsFn,
-    domusItems, domusLocations,
+    domusItems: domusItems.filter(i => dapurLocIds.has(i.locationId)),
+    domusLocations: domusLocations.filter(isDapurLoc),
     shareRecipe,
     aiKey: effectiveAiKeys,
     waterGoal: profile?.targets?.waterGoal,
@@ -883,9 +964,30 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
       <BottomNav t={t} activeTab={path} setActiveTab={setActiveTab} />
 
-      <LomyChat
-        t={t} theme={theme} user={user} aiKey={effectiveAiKeys} profile={profile}
-        daysMap={daysMap} ensureMonth={ensureMonth} todayYmd={getLocalYMD()} showAlert={showAlert}
+      <CoachLomyFloat
+        onOpenChat={() => setIsLomyChatOpen(true)}
+        nutritionInsight={nutritionInsight}
+        hasUnreadChat={hasUnreadLomyChat}
+        onPositionChange={setLomyAvatarOrigin}
+      />
+
+      <LomyAIChat
+        isOpen={isLomyChatOpen}
+        onClose={() => setIsLomyChatOpen(false)}
+        user={user}
+        logymUser={logymUser}
+        profile={profile}
+        daysMap={daysMap}
+        ensureMonth={ensureMonth}
+        todayYmd={todayYmd}
+        domusItems={domusItems}
+        aiKey={effectiveAiKeys}
+        onUnreadChange={setHasUnreadLomyChat}
+        avatarOrigin={lomyAvatarOrigin}
+        recipes={recipes}
+        saveRecipesFn={saveRecipesFn}
+        saveDay={saveDay}
+        showToast={showToast}
       />
 
       {/* Overlays / Modals */}
@@ -979,34 +1081,6 @@ function App() {
       if (!user) setProfile(undefined);
     });
     return unsub;
-  }, []);
-
-  // --- PWA INSTALL PROMPT ---
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
-
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      const hasDismissed = localStorage.getItem('__LOMEAL_PWA_PROMPT_DISMISSED');
-      if (!hasDismissed) {
-        setShowInstallPrompt(true);
-      }
-    };
-
-    const handleAppInstalled = () => {
-      setShowInstallPrompt(false);
-      setDeferredPrompt(null);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
   }, []);
 
   // Nama/foto profil (displayName/photoURL) dibaca dari Firebase Auth, sama persis
@@ -1103,42 +1177,8 @@ function App() {
           <AppContent user={authState.user} profile={profile} logymUser={authState.user} onLogout={() => signOut(auth)} />
         )}
 
-        {/* CUSTOM PWA INSTALL PROMPT (Rendered at top-level) */}
-        {showInstallPrompt && (
-          <div className="fixed inset-0 z-[200] flex items-end justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center animate-in slide-in-from-bottom-8 duration-300 ${darkTheme.bgCardSolid} ${darkTheme.border} border`}>
-              <img src="/pwa-192x192.png" className="w-20 h-20 rounded-2xl mb-4 shadow-xl border border-white/10" alt="Lomeal Logo" />
-              <h3 className={`text-xl font-black ${darkTheme.textMain} mb-2`}>Install Lomeal App</h3>
-              <p className={`text-sm ${darkTheme.textMuted} mb-6`}>Install aplikasi Lomeal di perangkatmu untuk akses lebih cepat, fitur asisten harian, dan pengalaman yang lebih mulus.</p>
-              <div className="flex flex-col w-full gap-3">
-                <button 
-                  className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 text-white ${darkTheme.bgAccent} shadow-md`}
-                  onClick={async () => {
-                    if (deferredPrompt) {
-                      deferredPrompt.prompt();
-                      const { outcome } = await deferredPrompt.userChoice;
-                      if (outcome === 'accepted') {
-                        setDeferredPrompt(null);
-                        setShowInstallPrompt(false);
-                      }
-                    }
-                  }}
-                >
-                  <Download size={18} /> Instal Sekarang
-                </button>
-                <button 
-                  className={`w-full py-3.5 rounded-xl font-bold ${darkTheme.textMuted} hover:${darkTheme.textMain} bg-transparent border border-transparent transition-colors`}
-                  onClick={() => {
-                    localStorage.setItem('__LOMEAL_PWA_PROMPT_DISMISSED', 'true');
-                    setShowInstallPrompt(false);
-                  }}
-                >
-                  Nanti Saja
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* PWA INSTALL PROMPT (Rendered at top-level) */}
+        <PwaInstallPrompt />
       </>
     </BrowserRouter>
   );

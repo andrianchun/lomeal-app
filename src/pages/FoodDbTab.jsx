@@ -709,6 +709,9 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         {shelfItems.map(item => {
           const IconComp = SHELF_ICONS[item.icon] || (shelfTab === 'suplemen' ? CupSoda : Pill);
           const bgClass = SHELF_COLORS.find(c => c.id === item.color)?.bg || 'bg-zinc-500';
+          const domusMatch = matchDomusItem(domusItems, item.name);
+          const displayStock = domusMatch ? formatStock(itemStock(domusMatch)) : (typeof item.stock === 'number' ? `${item.stock} ${shelfTab === 'obat' ? 'butir' : 'takaran'}` : null);
+
           return (
             <div key={item.id} className={`rounded-2xl border ${t.border} ${t.bgCard} p-3 flex items-center gap-3`}>
               <button onClick={() => shelfTab === 'suplemen' ? setEditingSupplement(item) : setEditingMedicine(item)}
@@ -717,11 +720,19 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
                   <IconComp size={18} />
                 </span>
                 <span className="flex-1 min-w-0">
-                  <p className={`body-md font-bold truncate ${t.textMain}`}>{item.name}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className={`body-md font-bold truncate ${t.textMain}`}>{item.name}</p>
+                    {domusMatch && (
+                      <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
+                        Domus
+                      </span>
+                    )}
+                  </div>
                   <p className={`caption font-medium truncate ${shelfTab === 'obat' ? 'text-rose-500' : t.textMuted}`}>
                     {shelfTab === 'suplemen'
                       ? `${Math.round(item.nutrition?.kcal || 0)} kkal · P ${Math.round(item.nutrition?.protein || 0)}g`
                       : item.signa}
+                    {displayStock ? ` · sisa ${displayStock}` : ''}
                   </p>
                 </span>
               </button>

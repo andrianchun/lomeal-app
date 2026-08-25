@@ -32,6 +32,19 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Hilangkan icon jam/kalender bawaan browser pada input time & date */
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="date"]::-webkit-calendar-picker-indicator {
+  display: none !important;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+}
+
 /* --- AMBIENT APP BACKGROUND (glassmorphism backdrop) --- */
 /* Dark = nyaris hitam dengan aksen hijau tipis (bukan #000 pekat / abu-abu Android) — Fase 2 blueprint */
 .app-bg-dark {

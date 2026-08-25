@@ -5,12 +5,12 @@ import { Check } from 'lucide-react';
 // Ditaruh di satu tempat supaya tab dan kotak centangnya tidak pelan-pelan jadi beda
 // ukuran/warna di tiap layar — persis masalah yang bikin tampilannya terasa acak.
 
-/** Tab pil — bentuk & warnanya disamakan dengan sub-tab di ProgramTab/FoodDbTab. */
+/** Tab pil — bentuk & warnanya disamakan dengan sub-tab di ProgramTab/FoodDbTab (Solid Green Pill). */
 export const PillTabs = ({ t, theme, tabs, value, onChange }) => (
-  <div className={`flex items-center gap-1.5 p-1.5 rounded-2xl ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'}`}>
+  <div className={`relative flex items-center p-1 rounded-full ${t.btnBg} border ${t.border}`}>
     {tabs.map(([id, label]) => (
       <button key={id} onClick={() => onChange(id)}
-        className={`flex-1 py-2 rounded-xl caption transition-all ${value === id ? `${t.bgCard} shadow-sm ${t.textAccent}` : t.textMuted}`}>
+        className={`flex-1 py-2 rounded-full text-xs sm:text-sm font-bold transition-all relative z-10 ${value === id ? `${t.bgAccent} text-white shadow-sm font-black` : t.textMuted}`}>
         {label}
       </button>
     ))}

@@ -8,6 +8,8 @@ import { URT_DICTIONARY } from '../utils/urtMapping';
 import { uploadRecipePhoto } from '../utils/foodLog';
 import { STATUS } from '../theme';
 import { PillTabs } from './RecipeBits';
+import { matchDomusItem } from '../utils/domusSync';
+import { itemStock, formatStock } from '../utils/stockConverter';
 
 const newId = (p) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
@@ -16,7 +18,7 @@ const newId = (p) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 6
  * memasak yang dikelompokkan per KOMPONEN (Nasi / Ayam / Sambal). Komponen inilah yang
  * bikin mode masak bisa paralel — tiap komponen punya langkah & timernya sendiri.
  */
-const RecipeBuilder = ({ t, theme, user, editing, setEditing, customFoods, onSave, onCancel, showToast }) => {
+const RecipeBuilder = ({ t, theme, user, editing, setEditing, customFoods, domusItems = [], onSave, onCancel, showToast }) => {
   const [expandedS, setExpandedS] = useState({});
   const [detailIng, setDetailIng] = useState(null);
   const [showMicros, setShowMicros] = useState(false);
@@ -166,63 +168,85 @@ const RecipeBuilder = ({ t, theme, user, editing, setEditing, customFoods, onSav
               <input value={ingSearch} onChange={(e) => setIngSearch(e.target.value)} placeholder="Cari bahan (dada ayam, santan…)"
                 className={`flex-1 bg-transparent outline-none body-md ${t.textMain}`} />
             </div>
-            {ingResults.map((f) => (
-              <button key={f.id} onClick={() => {
-                patch((r) => ({ ingredients: [...r.ingredients, { foodId: f.id, name: f.name, grams: f.portion.grams, nutrition: nutritionForAmount(f, f.portion.grams) }] }));
-                setIngSearch('');
-              }} className={`w-full flex justify-between items-center px-3 py-2.5 mt-1 rounded-xl ${t.bgSunken}`}>
-                <span className={`body-md ${t.textMain}`}>{f.name}</span>
-                <span className={`caption ${t.textMuted}`}>{f.portion.label}</span>
-              </button>
-            ))}
+            {ingResults.map((f) => {
+              const domusMatch = matchDomusItem(domusItems, f.name);
+              const domusStock = domusMatch ? formatStock(itemStock(domusMatch)) : null;
+              return (
+                <button key={f.id} onClick={() => {
+                  patch((r) => ({ ingredients: [...r.ingredients, { foodId: f.id, name: f.name, grams: f.portion.grams, nutrition: nutritionForAmount(f, f.portion.grams) }] }));
+                  setIngSearch('');
+                }} className={`w-full flex justify-between items-center px-3 py-2.5 mt-1 rounded-xl ${t.bgSunken}`}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`body-md truncate ${t.textMain}`}>{f.name}</span>
+                    {domusStock && (
+                      <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
+                        Domus: {domusStock}
+                      </span>
+                    )}
+                  </div>
+                  <span className={`caption ${t.textMuted} shrink-0`}>{f.portion.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="space-y-1.5">
-            {editing.ingredients.map((ing, i) => (
-              <div key={i} className={`flex items-center gap-2 p-3 rounded-2xl border ${t.border} ${t.bgCard} cursor-pointer active:scale-[0.98] transition-transform`}
-                onClick={() => setDetailIng(ing)}>
-                <p className={`body-md flex-1 ${t.textMain}`}>{ing.name}</p>
-                <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                  <input type="number" inputMode="numeric" 
-                    value={Math.round((ing.grams / (URT_DICTIONARY[ing.displayUnit || 'g'] || 1)) * 10) / 10 || ''} 
-                    placeholder="0"
-                    onChange={(e) => {
-                      const displayQty = Number(e.target.value) || 0;
-                      const grams = displayQty * (URT_DICTIONARY[ing.displayUnit || 'g'] || 1);
-                      patch((r) => ({
-                        ingredients: r.ingredients.map((x, j) => {
-                          if (j !== i) return x;
-                          const bg = x.baseGrams || (x.grams > 0 ? x.grams : 100);
-                          const bn = x.baseNutrition || x.nutrition;
-                          const factor = bg > 0 ? grams / bg : 0;
-                          return { ...x, grams, baseGrams: bg, baseNutrition: bn, nutrition: Object.fromEntries(Object.entries(bn).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])) };
-                        }),
-                      }));
-                    }}
-                    className={`w-14 text-center px-2 py-1.5 rounded-lg border ${t.border} ${t.inputBg} caption ${t.textMain} no-spinners outline-none focus:border-emerald-500/50 transition-colors`} />
-                  
-                  <div className="relative">
-                    <select
-                      value={ing.displayUnit || 'g'}
+            {editing.ingredients.map((ing, i) => {
+              const domusMatch = matchDomusItem(domusItems, ing.name);
+              const domusStock = domusMatch ? formatStock(itemStock(domusMatch)) : null;
+              return (
+                <div key={i} className={`flex items-center gap-2 p-3 rounded-2xl border ${t.border} ${t.bgCard} cursor-pointer active:scale-[0.98] transition-transform`}
+                  onClick={() => setDetailIng(ing)}>
+                  <div className="flex-1 min-w-0">
+                    <p className={`body-md font-bold truncate ${t.textMain}`}>{ing.name}</p>
+                    {domusStock ? (
+                      <p className="caption text-amber-500 font-medium truncate">Stok Domus: {domusStock}</p>
+                    ) : (
+                      <p className={`caption ${t.textMuted} truncate`}>Belum ada di Domus</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                    <input type="number" inputMode="numeric" 
+                      value={Math.round((ing.grams / (URT_DICTIONARY[ing.displayUnit || 'g'] || 1)) * 10) / 10 || ''} 
+                      placeholder="0"
                       onChange={(e) => {
-                        const newUnit = e.target.value;
+                        const displayQty = Number(e.target.value) || 0;
+                        const grams = displayQty * (URT_DICTIONARY[ing.displayUnit || 'g'] || 1);
                         patch((r) => ({
-                          ingredients: r.ingredients.map((x, j) => j === i ? { ...x, displayUnit: newUnit } : x)
+                          ingredients: r.ingredients.map((x, j) => {
+                            if (j !== i) return x;
+                            const bg = x.baseGrams || (x.grams > 0 ? x.grams : 100);
+                            const bn = x.baseNutrition || x.nutrition;
+                            const factor = bg > 0 ? grams / bg : 0;
+                            return { ...x, grams, baseGrams: bg, baseNutrition: bn, nutrition: Object.fromEntries(Object.entries(bn).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])) };
+                          }),
                         }));
                       }}
-                      className={`pl-2 pr-6 py-1.5 rounded-lg border ${t.border} ${t.inputBg} caption ${t.textMain} appearance-none cursor-pointer outline-none focus:border-emerald-500/50 transition-colors`}
-                    >
-                      {['g','ml','sdm','sdt','cup','gelas','porsi','potong','bungkus','siung','lembar','buah'].map(u => (
-                        <option key={u} value={u} className={isDark ? 'bg-zinc-800 text-white' : 'bg-white text-black'}>{u === 'bungkus' ? 'bks' : u}</option>
-                      ))}
-                    </select>
-                    <ChevronDown size={12} className={`absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${t.textMuted}`} />
+                      className={`w-14 text-center px-2 py-1.5 rounded-lg border ${t.border} ${t.inputBg} caption ${t.textMain} no-spinners outline-none focus:border-emerald-500/50 transition-colors`} />
+                    
+                    <div className="relative">
+                      <select
+                        value={ing.displayUnit || 'g'}
+                        onChange={(e) => {
+                          const newUnit = e.target.value;
+                          patch((r) => ({
+                            ingredients: r.ingredients.map((x, j) => j === i ? { ...x, displayUnit: newUnit } : x)
+                          }));
+                        }}
+                        className={`pl-2 pr-6 py-1.5 rounded-lg border ${t.border} ${t.inputBg} caption ${t.textMain} appearance-none cursor-pointer outline-none focus:border-emerald-500/50 transition-colors`}
+                      >
+                        {['g','ml','sdm','sdt','cup','gelas','porsi','potong','bungkus','siung','lembar','buah'].map(u => (
+                          <option key={u} value={u} className={isDark ? 'bg-zinc-800 text-white' : 'bg-white text-black'}>{u === 'bungkus' ? 'bks' : u}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={12} className={`absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${t.textMuted}`} />
+                    </div>
                   </div>
+                  <button onClick={(e) => { e.stopPropagation(); patch((r) => ({ ingredients: r.ingredients.filter((_, j) => j !== i) })); }}
+                    className={`p-1.5 ${STATUS.danger.text}`}><X size={13} /></button>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); patch((r) => ({ ingredients: r.ingredients.filter((_, j) => j !== i) })); }}
-                  className={`p-1.5 ${STATUS.danger.text}`}><X size={13} /></button>
-              </div>
-            ))}
+              );
+            })}
             {editing.ingredients.length === 0 && <p className={`body-md text-center py-4 ${t.textMuted}`}>Belum ada bahan — cari di atas ⬆️</p>}
           </div>
 

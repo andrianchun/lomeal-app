@@ -15,13 +15,14 @@
 import { db } from '../firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
-export const pushBiometricsToLogym = async (logymUid, { gender, dob, height, weight }) => {
+export const pushBiometricsToLogym = async (logymUid, { gender, dob, height, weight, activityLevel }) => {
   if (!logymUid) return;
   const patch = {};
   if (gender !== undefined) patch.gender = gender;
   if (dob !== undefined) patch.dob = dob;
   if (height !== undefined) patch.height = height;
   if (weight !== undefined) patch.weight = weight;
+  if (activityLevel !== undefined) patch.activityLevel = activityLevel;
   if (Object.keys(patch).length === 0) return;
   try {
     await setDoc(doc(db, 'logym_users', logymUid), { settings: { userProfile: patch } }, { merge: true });
@@ -30,16 +31,20 @@ export const pushBiometricsToLogym = async (logymUid, { gender, dob, height, wei
   }
 };
 
-export const pushPreferencesToLogym = async (logymUid, dietProfile, allergies) => {
+export const pushPreferencesToLogym = async (logymUid, dietProfile, allergies, activityLevel) => {
   if (!logymUid) return;
   try {
     await setDoc(doc(db, 'logym_users', logymUid), {
       lomealSync: {
-        preferences: { dietProfile: dietProfile || null, allergies: allergies || null }
+        preferences: {
+          dietProfile: dietProfile || null,
+          allergies: allergies || null,
+          activityLevel: activityLevel || null,
+        }
       }
     }, { merge: true });
   } catch (e) {
-    console.warn('Gagal push biometrik ke Logym:', e);
+    console.warn('Gagal push preferences ke Logym:', e);
   }
 };
 

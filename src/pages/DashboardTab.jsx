@@ -53,6 +53,21 @@ const DashboardTab = ({
   const [selectedNutrientForBreakdown, setSelectedNutrientForBreakdown] = useState(null);
   const [showTargetSettings, setShowTargetSettings] = useState(false);
   const [showBiometricModal, setShowBiometricModal] = useState(false);
+  const [isLomyHidden, setIsLomyHidden] = useState(() => localStorage.getItem('lomeal_lomy_hidden') === 'true');
+
+  useEffect(() => {
+    const handleToggle = (e) => {
+      if (e.detail?.action === 'show' || e.detail?.action === 'showAndOpen') {
+        setIsLomyHidden(false);
+      } else if (e.detail?.action === 'hide') {
+        setIsLomyHidden(true);
+      } else {
+        setIsLomyHidden(prev => !prev);
+      }
+    };
+    window.addEventListener('toggle-lomy-float', handleToggle);
+    return () => window.removeEventListener('toggle-lomy-float', handleToggle);
+  }, []);
 
   // showTargetSettings/showBiometricModal SENGAJA gak didaftar di sini — udah dihandle
   // sendiri di dalam TargetSettingsModal/BiometricSettingsModal. Dua panggilan di bawah ini
@@ -148,19 +163,20 @@ const DashboardTab = ({
   const MacroBar = ({ mkey }) => {
     const target = targets[mkey] || 1;
     const value = totals[mkey] || 0;
-    const pct = Math.min(100, (value / target) * 100);
+    const actualPct = (value / target) * 100;
+    const barWidth = Math.min(100, Math.max(0, actualPct));
     const mc = MACRO_COLORS[mkey];
     return (
         <div>
           <div className="flex justify-between items-baseline mb-1">
             <span className={`caption ${t.textMuted}`}>{mc.label}</span>
             <div className="flex items-center gap-2">
-              <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(pct)}%</span>
+              <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(actualPct)}%</span>
               <span className={`caption ${t.textMain}`}>{Math.round(value)}<span className={t.textMuted}>/{target}g</span></span>
             </div>
           </div>
           <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: mc.hex }} />
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${barWidth}%`, backgroundColor: mc.hex }} />
           </div>
         </div>
     );
@@ -171,33 +187,51 @@ const DashboardTab = ({
       {/* ===== HEADER: SAPAAN ===== */}
       {/* Nama pakai identitas Logym (logymUser) dulu — itu identitas bersama kedua app;
           jatuh ke nama akun Lomeal sendiri cuma kalau belum connect ke Logym. */}
-      <div className="anim-rise">
-        <h1 className="h1">
-          <span className={t.textMain}>Halo, </span>
-          <span className={`bg-gradient-to-r ${t.gradientText} bg-clip-text text-transparent`}>{logymUser?.displayName || user?.displayName || 'Sobat'}</span>
-        </h1>
-        <p className={`body-md ${t.textMuted} mt-0.5`}>{new Date().toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</p>
-        {dietMeta && (
-          <div className="flex items-center gap-2 mt-3 overflow-x-auto hide-scrollbar">
-            <span className={`shrink-0 px-2.5 py-1 rounded-full caption font-bold border ${t.border} ${t.bgCardSoft} ${t.textMuted}`}>
-              {dietMeta.emoji} {dietMeta.label} {proteinPerKg ? `${proteinPerKg}g/kgBB` : ''}
-            </span>
-            <span className={`shrink-0 px-2.5 py-1 rounded-full caption font-bold border ${programColor}`}>
-              {programLabel}
-            </span>
-          </div>
+      <div className="anim-rise flex items-center justify-between">
+        <div>
+          <h1 className="h1">
+            <span className={t.textMain}>Halo, </span>
+            <span className={`bg-gradient-to-r ${t.gradientText} bg-clip-text text-transparent`}>{logymUser?.displayName || user?.displayName || 'Sobat'}</span>
+          </h1>
+          <p className={`body-md ${t.textMuted} mt-0.5`}>{new Date().toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</p>
+        </div>
+
+        {/* Tombol Konsul saat Floating Coach sedang di-hide */}
+        {isLomyHidden && (
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('toggle-lomy-float', { detail: { action: 'showAndOpen' } }));
+            }}
+            className="flex flex-col items-center justify-center gap-1 bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 border border-emerald-500/30 rounded-2xl px-3 py-1.5 hover:bg-emerald-500/25 transition-all shadow-md shadow-emerald-500/10 animate-in zoom-in-90 duration-300 active:scale-95 shrink-0"
+            title="Buka Coach Lomy"
+          >
+            <div
+              className="w-10 h-10 rounded-full overflow-hidden bg-zinc-900 border-2 border-emerald-400 shadow-sm shrink-0"
+              style={{ backgroundImage: "url('/bg-lomeal-coach.webp')", backgroundSize: '420%', backgroundPosition: '50% 12%' }}
+            />
+            <span className="text-[10px] font-black tracking-wider uppercase whitespace-nowrap leading-none">Konsul</span>
+          </button>
         )}
       </div>
 
       {/* ===== AREA ATAS: HERO WIDGET ===== */}
-      <div id="lomeal-main-card" className="relative anim-rise -mt-1">
-        {/* Latar kartu (kaca blur) — mulai agak turun, sisain celah di atas buat kepala coach */}
-        <div className={`absolute inset-x-0 top-5 bottom-0 rounded-3xl border ${t.border} ${t.bgCard} ${t.glow} z-0`} />
+      <div id="lomeal-main-card" className="relative anim-rise pt-2">
+        {/* Tombol target settings & pensil biometrik — naik ke luar kartu */}
+        <div className="absolute top-0 right-2 z-30 flex items-center gap-2">
+          <button onClick={() => setShowTargetSettings(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all active:scale-95`} aria-label="Target & preferensi">
+            <Settings size={15} />
+          </button>
+          <button onClick={() => setShowBiometricModal(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all active:scale-95`} aria-label="Profil Biometrik">
+            <Pencil size={15} />
+          </button>
+        </div>
 
-        {/* Coach: di ATAS latar kartu (gak keblur kaca) — ring di layer konten (z-20) yang nutupin
-            sebagian kalau overlap, pola sama kayak ring SCORE Komposisi Tubuh Logym. Digeser dikit ke kiri (right-2) agar tidak menutupi tombol biometrik */}
+        {/* Latar kartu (kaca blur) — ada jarak padding 12px di bawah tombol, dan padding 10px tipis di atas lingkaran */}
+        <div className={`absolute inset-x-0 top-[44px] bottom-0 rounded-3xl border ${t.border} ${t.bgCard} ${t.glow} z-0`} />
+
+        {/* Coach: di ATAS latar kartu — muncul menembus batas atas kartu */}
         <div
-          className="absolute left-[-1rem] -top-6 w-72 h-[22rem] z-10 pointer-events-none overflow-hidden"
+          className="absolute left-[-1rem] -top-8 w-72 h-[23rem] z-10 pointer-events-none overflow-hidden"
           style={{
             maskImage: 'linear-gradient(to bottom, black 70%, transparent 95%)',
             WebkitMaskImage: 'linear-gradient(to bottom, black 70%, transparent 95%)',
@@ -206,17 +240,8 @@ const DashboardTab = ({
           <img src="/bg-dashboard.webp" alt="" className={`w-full h-full object-cover object-top origin-top transition-transform duration-500 ease-out ${isChartExpanded ? 'scale-[1.45]' : 'scale-[1.25]'}`} />
         </div>
 
-        <div className="relative z-20 p-5">
-          <div className="absolute top-5 right-5 z-30 flex items-center gap-2">
-            <button onClick={() => setShowTargetSettings(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`} aria-label="Target & preferensi">
-              <Settings size={15} />
-            </button>
-            <button onClick={() => setShowBiometricModal(true)} className={`p-2 rounded-full bg-green-500/10 dark:bg-green-500/20 backdrop-blur-md shadow-sm ${t.textMuted} hover:${t.textMain} border ${t.border} transition-all`} aria-label="Profil Biometrik">
-              <Pencil size={15} />
-            </button>
-          </div>
-
-          <div className="flex flex-col items-end gap-4 mt-10">
+        <div className="relative z-20 px-5 pb-5 pt-[54px]">
+          <div className="flex flex-col items-end gap-4">
             <RingChart size={148} stroke={12} progress={ringProgress} color={ringColor} glass>
               <span className={`text-3xl font-black tabular-nums ${t.textMain}`}>{Math.abs(remaining).toLocaleString('id-ID')}</span>
               <span className={`caption ${t.textMuted}`}>{remainingText}</span>
@@ -318,18 +343,19 @@ const DashboardTab = ({
                       const target = targets[n.key];
                       const ratio = (totals[n.key] || 0) / target;
                       const s = statusFor(ratio, { invert: MINIMUM_TARGETS.has(n.key) });
-                      const pct = Math.min(100, ratio * 100);
+                      const actualPct = ratio * 100;
+                      const barWidth = Math.min(100, Math.max(0, actualPct));
                       return (
                         <div key={n.key} className="flex flex-col gap-1">
                           <div className="flex justify-between items-baseline">
                             <span className={`caption ${t.textMuted}`}>{n.label}</span>
                             <div className="flex items-center gap-2">
-                               <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(pct)}%</span>
+                               <span className={`caption font-black ${s.text} bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded`}>{Math.round(actualPct)}%</span>
                                <span className={`caption ${t.textMain} tabular-nums`}>{(totals[n.key] || 0) < 10 ? Number((totals[n.key] || 0).toFixed(2)) : Math.round(totals[n.key] || 0)}<span className={t.textMuted}>/{target}{n.unit || 'mg'}</span></span>
                             </div>
                           </div>
                           <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
-                            <div className={`h-full rounded-full transition-all duration-500 ${s.bg}`} style={{ width: `${pct}%` }} />
+                            <div className={`h-full rounded-full transition-all duration-500 ${s.bg}`} style={{ width: `${barWidth}%` }} />
                           </div>
                         </div>
                       );
@@ -363,7 +389,6 @@ const DashboardTab = ({
              <div className="p-4 flex items-center justify-between">
                  <div className="flex flex-col">
                      <span className={`h2 ${t.textMain}`}>Tren Kalori</span>
-                     <span className={`caption ${t.textMuted}`}> & surplus kalori harian</span>
                  </div>
              </div>
              <div className="pt-0 pb-4 no-swipe">

@@ -2,14 +2,14 @@
 // (Fase 9 blueprint): 3 sub-tab Feed / Studio / Profil, persis pola ProfileModal.jsx
 // Lyfit (yang jadi wadah CommunityTab+ShareCardGenerator+SharedProfileView).
 import React, { useState, useRef } from 'react';
-import { X, Newspaper, Sparkles, UserCircle2 } from 'lucide-react';
+import { X, Newspaper, Palette, UserCircle2 } from 'lucide-react';
 import SocialFeed from '../components/SocialFeed';
 import ProfilePage from '../components/ProfilePage';
 import useBackClose from '../hooks/useBackClose';
 
 const TABS = [
   { id: 'feed', label: 'Feed', icon: Newspaper },
-  { id: 'studio', label: 'Studio', icon: Sparkles },
+  { id: 'studio', label: 'Studio', icon: Palette },
   { id: 'profil', label: 'Profil', icon: UserCircle2 },
 ];
 
@@ -79,7 +79,7 @@ const SocialHub = ({ t, theme, logymUser, profile, daysMap, saveProfilePatch, on
         )}
         {tab === 'studio' && (
           <div className={`flex flex-col items-center gap-2 py-16 text-center ${t.textMuted}`}>
-            <Sparkles size={32} className="opacity-40" />
+            <Palette size={32} className="opacity-40" />
             <p className="text-sm font-bold">Share Studio — Segera Hadir</p>
             <p className="text-xs px-8">Generator kartu rapor mingguan & piring makro yang siap dibagikan ke Instagram/Twitter.</p>
           </div>

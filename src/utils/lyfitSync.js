@@ -9,6 +9,26 @@
 import { db } from '../firebase';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
+const mapActivityLevel = (val) => {
+  if (!val) return null;
+  if (typeof val === 'string') {
+    const s = val.toLowerCase();
+    if (['sedentary', 'light', 'moderate', 'active', 'very_active'].includes(s)) return s;
+    if (s.includes('sedentary') || s.includes('sangat jarang')) return 'sedentary';
+    if (s.includes('light') || s.includes('jarang') || s.includes('ringan')) return 'light';
+    if (s.includes('moderate') || s.includes('sedang')) return 'moderate';
+    if (s.includes('very') || s.includes('sangat')) return 'very_active';
+    if (s.includes('active') || s.includes('sering') || s.includes('berat')) return 'active';
+  }
+  const n = Number(val);
+  if (n <= 1.25) return 'sedentary';
+  if (n <= 1.45) return 'light';
+  if (n <= 1.65) return 'moderate';
+  if (n <= 1.8) return 'active';
+  if (n > 1.8) return 'very_active';
+  return null;
+};
+
 // Susun profil Logym dari raw doc data — dipakai fetchLyfitProfile (one-shot) &
 // subscribeLyfitProfile (terus-menerus, buat sinkron biometrik 2 arah).
 const parseLyfitProfile = (data) => {
@@ -29,10 +49,12 @@ const parseLyfitProfile = (data) => {
     if (settings.userGeminiApiKey && settings.userGeminiApiKey !== settings.userApiKey) userApiKeys.push(settings.userGeminiApiKey);
   }
   userApiKeys = userApiKeys.filter((k) => k && k.trim());
+  const rawAct = p.activityLevel || bio.activityLevel || settings.activityLevel || settings.activity || data.activityLevel || data.lomealSync?.preferences?.activityLevel;
   return {
     weight: bio.weight || null,
     height: bio.height || null,
     gender: p.gender || bio.gender || null,
+    activityLevel: mapActivityLevel(rawAct),
     dob,
     age,
     bmr: bio.bmr || null,
@@ -71,25 +93,54 @@ export const extractLyfitDay = (yearDays, ymd) => {
   const day = yearDays?.[ymd];
   if (!day) return null;
   const bio = day.bioData || {};
-  const workouts = Array.isArray(day.workouts) ? day.workouts : [];
-  const completed = workouts.filter(w => w.status === 'completed');
+
+  // Dukung array maupun map/object workouts
+  let workouts = [];
+  if (Array.isArray(day.workouts)) {
+    workouts = day.workouts;
+  } else if (typeof day.workouts === 'object' && day.workouts !== null) {
+    workouts = Object.values(day.workouts);
+  } else if (day.programId || day.log || day.exercises || day.exerciseLogs) {
+    workouts = [day];
+  }
+
+  // Hitung jumlah gerakan latihan (exercises) dari semua sesi hari ini
+  let totalExercises = 0;
+  workouts.forEach((w) => {
+    if (!w) return;
+    if (w.log && typeof w.log === 'object' && Object.keys(w.log).length > 0) {
+      totalExercises += Object.keys(w.log).length;
+    } else if (Array.isArray(w.exercises) && w.exercises.length > 0) {
+      totalExercises += w.exercises.length;
+    } else if (Array.isArray(w.overriddenExercises) && w.overriddenExercises.length > 0) {
+      totalExercises += w.overriddenExercises.length;
+    } else if (w.exerciseLogs && typeof w.exerciseLogs === 'object' && Object.keys(w.exerciseLogs).length > 0) {
+      totalExercises += Object.keys(w.exerciseLogs).length;
+    } else if (w.status === 'completed' || w.programId || w.duration) {
+      totalExercises += 1;
+    }
+  });
+
+  // Fallback: Jika tidak ditemukan di w.log per-sesi, cek langsung di tingkat hari
+  if (totalExercises === 0) {
+    if (day.exerciseLogs && typeof day.exerciseLogs === 'object' && Object.keys(day.exerciseLogs).length > 0) {
+      totalExercises += Object.keys(day.exerciseLogs).length;
+    } else if (Array.isArray(day.exercises) && day.exercises.length > 0) {
+      totalExercises += day.exercises.length;
+    } else if (day.log && typeof day.log === 'object' && Object.keys(day.log).length > 0) {
+      totalExercises += Object.keys(day.log).length;
+    } else if (workouts.length > 0) {
+      totalExercises = workouts.length;
+    }
+  }
+
   return {
     burnedKcal: Number(bio.activityCalories) || 0,
-    // Lantai BMR+langkah+workout internal Logym HARI ITU — dipakai buat clamp input koreksi
-    // manual dari Lomeal (lihat DashboardTab.jsx#handleSaveBurnOverride), biar koreksi dari
-    // Lomeal gak bisa "menghapus" pencatatan internal Logym, sama kayak proteksi di Logym sendiri.
     floorKcal: Number(bio.activityCaloriesFloor) || 0,
     steps: Number(bio.steps) || 0,
     weight: Number(bio.weight) || null,
-    workoutCount: completed.reduce((sum, w) => {
-        if (w.exercises && Array.isArray(w.exercises)) return sum + w.exercises.length;
-        if (w.log && typeof w.log === 'object') return sum + Object.keys(w.log).length;
-        return sum + 1;
-    }, 0),
-    workoutNames: completed.map(w => w.programName).filter(Boolean),
-    // Simetris sama burnedKcal: kalau user isi manual "Kalori Makanan" langsung di Logym
-    // (bukan lewat Lomeal), Lomeal ikut baca angka itu buat ring/remaining — murni override
-    // tampilan, log makanan asli di Lomeal (Log tab, lengkap makronya) tetap gak disentuh.
+    workoutCount: totalExercises,
+    workoutNames: workouts.map((w) => w.programName || w.name).filter(Boolean),
     nutritionOverride: bio._manualFlags?.nutritionCalories ? (Number(bio.nutritionCalories) || null) : null,
   };
 };
