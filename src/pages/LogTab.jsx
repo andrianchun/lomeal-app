@@ -1594,11 +1594,7 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                           <p className={`caption font-medium ${t.textMuted}`}>
                             {Math.round(f.nutrition?.kcal || 0)} kkal · P {Math.round(f.nutrition?.protein || 0)}g · K {Math.round(f.nutrition?.carbs || 0)}g · L {Math.round(f.nutrition?.fat || 0)}g
                           </p>
-                          {/* Lomy sudah lama ngasih penanda ini tapi belum pernah ditampilkan:
-                              tebakannya ragu, atau kalorinya gak nyambung sama makronya. */}
-                          {f.lowConfidence && (
-                            <p className="caption font-bold text-amber-500 mt-0.5">Estimasi kasar — cek angkanya</p>
-                          )}
+
                         </div>
                         <div className="shrink-0 flex flex-col items-center gap-0.5">
                           <div className={`px-3 py-1.5 rounded-xl ${t.bgSunken}`}>
