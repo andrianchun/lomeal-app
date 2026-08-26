@@ -20,6 +20,18 @@ export const computeAge = (dob) => {
 export const DAY_NAMES_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 export const MONTH_NAMES_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
+export const weekStripDates = (baseDate, weekStartDay = 0, jumlahMinggu = 1) => {
+  const n = Math.max(1, Math.floor(Number(jumlahMinggu) || 1));
+  const dasar = baseDate instanceof Date && !Number.isNaN(baseDate.getTime()) ? baseDate : new Date();
+  const geser = (dasar.getDay() - weekStartDay + 7) % 7;
+  const mulai = new Date(dasar.getFullYear(), dasar.getMonth(), dasar.getDate() - geser - (n - 1) * 7);
+  const keluar = [];
+  for (let i = 0; i < n * 7; i++) {
+    keluar.push(new Date(mulai.getFullYear(), mulai.getMonth(), mulai.getDate() + i));
+  }
+  return keluar;
+};
+
 // Sesi makan default; snack bisa bertambah dinamis di Meal Grid
 export const MEAL_SESSIONS = [
   { id: 'breakfast', label: 'Sarapan',      emoji: '🍳' },
