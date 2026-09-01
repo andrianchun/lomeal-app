@@ -162,6 +162,51 @@ export const calcBMR = ({ weight, height, age, gender }) => {
   return Math.round(gender === 'female' ? base - 161 : base + 5);
 };
 
+// TEF (Thermic Effect of Food / Efek Termik Makanan) — pilar ke-4 metabolisme:
+// 1. Berdasarkan makronutrisi aktual:
+//    - Protein TEF ~25% (4 kkal/g x 25% = 1.0 kkal/g)
+//    - Karbohidrat TEF ~7.5% (4 kkal/g x 7.5% = 0.3 kkal/g)
+//    - Lemak TEF ~2% (9 kkal/g x 2% = 0.18 kkal/g)
+// 2. Fallback jika hanya ada total kalori makanan: 10% x kalori makanan (standar mixed diet)
+// 3. Fallback jika belum ada makanan: 10% x BMR (basal fallback)
+export const calcTEF = ({ protein = 0, carbs = 0, fat = 0, kcal = 0, bmr = 0 } = {}) => {
+  const p = Number(protein) || 0;
+  const c = Number(carbs) || 0;
+  const f = Number(fat) || 0;
+  const k = Number(kcal) || 0;
+  const b = Number(bmr) || 0;
+  const hasMacros = p > 0 || c > 0 || f > 0;
+  if (hasMacros) {
+    const tefP = p * 4 * 0.25;
+    const tefC = c * 4 * 0.075;
+    const tefF = f * 9 * 0.02;
+    return {
+      total: Math.round(tefP + tefC + tefF),
+      hasMacros: true,
+      macros: { protein: p, carbs: c, fat: f },
+      breakdown: {
+        protein: Math.round(tefP),
+        carbs: Math.round(tefC),
+        fat: Math.round(tefF),
+      },
+    };
+  }
+  if (k > 0) {
+    return {
+      total: Math.round(k * 0.10),
+      hasMacros: false,
+      macros: { protein: 0, carbs: 0, fat: 0 },
+      breakdown: { protein: 0, carbs: 0, fat: 0 },
+    };
+  }
+  return {
+    total: Math.round(b * 0.10),
+    hasMacros: false,
+    macros: { protein: 0, carbs: 0, fat: 0 },
+    breakdown: { protein: 0, carbs: 0, fat: 0 },
+  };
+};
+
 // Batas aman minimum asupan kalori harian — dipotong ke sini APAPUN delta-nya (custom
 // atau preset), karena bahaya diet ekstrem itu soal HASIL AKHIR (TDEE - delta), bukan
 // besar angka delta-nya doang. -2000kkal buat TDEE 4000 masih wajar (sisa 2000kkal),
@@ -183,10 +228,12 @@ export const calcTargets = (profile) => {
   // Arah kalori dari dietGoal (fase cutting/maintenance/bulk) — TERPISAH dari dietProfile
   // (gaya makan di bawah cuma ngatur rasio makro, gak lagi nentuin defisit/surplus).
   // customDeltaKcal (kalau diisi) menang atas preset pace — delta APAPUN yang mau diisi.
+  const isCut = dietGoal === 'cutting' || dietGoal === 'cut';
+  const isBulk = dietGoal === 'bulk' || dietGoal === 'bulking';
   let kcal = tdee;
-  if (dietGoal === 'cutting') {
+  if (isCut) {
     kcal = customDeltaKcal != null ? tdee - Math.abs(customDeltaKcal) : Math.round(tdee * (1 - paceFactor));
-  } else if (dietGoal === 'bulk') {
+  } else if (isBulk) {
     kcal = customDeltaKcal != null ? tdee + Math.abs(customDeltaKcal) : Math.round(tdee * (1 + paceFactor * 0.6));
   }
 

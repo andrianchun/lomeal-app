@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
-import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import { getLocalYMD } from '../data/constants';
 import { formatNumber } from '../utils/numberFormat';
-import { computeDayTotals } from '../data/nutrition';
+import { computeDayTotals, calcTEF } from '../data/nutrition';
+import { extractLyfitDay } from '../utils/lyfitSync';
 
 const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
   const chartMetricsList = [
@@ -12,7 +13,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
             { key: 'activityCalories', label: 'Dibakar', color: theme === 'dark' ? '#5090d4' : '#2563eb' }
         ]
       },
-      { key: 'delta', label: 'Delta', color: theme === 'dark' ? '#b84a5a' : '#e11d48', type: 'single' },
+      { key: 'delta', label: 'Delta', color: theme === 'dark' ? '#3daa5c' : '#059669', type: 'single' },
       { key: 'protein', label: 'Protein', color: theme === 'dark' ? '#c98920' : '#f59e0b', type: 'single' },
       { key: 'fat', label: 'Lemak', color: theme === 'dark' ? '#cd4a4a' : '#dc2626', type: 'single' },
       { key: 'carbs', label: 'Karbo', color: theme === 'dark' ? '#3a8fbf' : '#0ea5e9', type: 'single' }
@@ -39,32 +40,47 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
       bioEntries.forEach(entry => {
           const d = new Date(entry.dateStr);
           const totals = computeDayTotals(entry.dayData);
-          const burned = Number(lyfitYearData?.[entry.dateStr]?.bioData?.activityCalories) || 0;
+          const lyfitDay = extractLyfitDay(lyfitYearData, entry.dateStr);
           const eaten = totals.kcal || 0;
           
-          let dayTargets = entry.dayData?.targetSnapshot || targets;
+          let dayTargets = (entry.dateStr >= todayStr ? targets : entry.dayData?.targetSnapshot) || targets;
           const baseTdee = dayTargets?.tdee || dayTargets?.kcal || 0;
-          const actualTdee = Math.max(baseTdee, burned);
+          const bmrBase = lyfitDay?.bmr || dayTargets?.bmr || 1600;
+
+          // Hitung TEF hari itu
+          const tefDay = calcTEF({
+            protein: totals.protein,
+            carbs: totals.carbs,
+            fat: totals.fat,
+            kcal: eaten,
+            bmr: bmrBase,
+          }).total;
+
+          // Total kalori dibakar riil hari itu
+          const burnedActual = lyfitDay?.burnedKcal || (bmrBase + tefDay);
+          const tdeeEffective = lyfitDay?.burnedKcal ? burnedActual : (baseTdee || burnedActual);
           
+          const targetDeltaVal = (dayTargets?.kcal || baseTdee) - baseTdee; // 0=maint, neg=cut, pos=bulk
+          const allowanceDay = lyfitDay?.burnedKcal 
+            ? Math.max(0, lyfitDay.burnedKcal + targetDeltaVal) 
+            : (dayTargets?.kcal || baseTdee);
+
           let delta = null;
-          let targetDeltaVal = 0;
-          if (eaten > 0 && dayTargets?.kcal) {
-             delta = Math.round(eaten - actualTdee);
-          }
-          if (dayTargets?.kcal) {
-             targetDeltaVal = dayTargets.kcal - baseTdee;
+          if (eaten > 0 && tdeeEffective > 0) {
+             // Net metabolisme nyata: Kalori Dimakan - Kalori Dibakar Aktual
+             delta = Math.round(eaten - tdeeEffective);
           }
 
           data.push({
               name: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
               dateFull: entry.dateStr,
               nutritionCalories: eaten > 0 ? eaten : null,
-              activityCalories: burned > 0 ? burned : null,
+              activityCalories: burnedActual > 0 ? burnedActual : null,
               delta: delta,
               protein: totals.protein > 0 ? totals.protein : null,
               fat: totals.fat > 0 ? totals.fat : null,
               carbs: totals.carbs > 0 ? totals.carbs : null,
-              targetCalories: dayTargets?.kcal || dayTargets?.tdee || null,
+              targetCalories: allowanceDay || null,
               targetProtein: dayTargets?.protein || null,
               targetFat: dayTargets?.fat || null,
               targetCarbs: dayTargets?.carbs || null,
@@ -150,26 +166,28 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
              if (activeMetric === 'protein' && d.targetProtein > maxTargetInView) maxTargetInView = d.targetProtein;
              if (activeMetric === 'fat' && d.targetFat > maxTargetInView) maxTargetInView = d.targetFat;
              if (activeMetric === 'carbs' && d.targetCarbs > maxTargetInView) maxTargetInView = d.targetCarbs;
+             const tVal = d[`target${activeMetric.charAt(0).toUpperCase() + activeMetric.slice(1)}`];
+             if (tVal > maxTargetInView) maxTargetInView = tVal;
           });
 
-          const diff = max - min;
           if (activeMetric === 'delta') {
               let maxAbsTargetDelta = 0;
               visibleData.forEach(d => {
-                 if (Math.abs(d.targetDelta) > maxAbsTargetDelta) maxAbsTargetDelta = Math.abs(d.targetDelta);
+                 if (d.targetDelta != null && Math.abs(d.targetDelta) > maxAbsTargetDelta) maxAbsTargetDelta = Math.abs(d.targetDelta);
               });
-              const absMax = Math.max(Math.abs(min), Math.abs(max), maxAbsTargetDelta);
-              setYDomain([-(absMax * 1.15), absMax * 1.15]);
+              const visibleDeltas = visibleData.map(d => d.delta).filter(v => v !== null && v !== undefined);
+              const maxVisible = visibleDeltas.length > 0 ? Math.max(...visibleDeltas.map(Math.abs)) : 0;
+              const absMax = Math.max(maxVisible, maxAbsTargetDelta, 100);
+              const upper = Math.ceil((absMax * 1.35) / 50) * 50;
+              setYDomain([-upper, upper]);
           } else {
               const effectiveMax = Math.max(max, maxTargetInView);
-              const effectiveDiff = effectiveMax - min;
+              const effectiveDiff = effectiveMax - (min < 0 ? 0 : min);
               const upper = effectiveMax + effectiveDiff * 0.15 || effectiveMax * 1.1;
               setYDomain([0, upper === 0 ? 100 : upper]);
           }
-      } else {
-          setYDomain(activeMetric === 'delta' ? [-100, 100] : [0, 100]);
       }
-  }, [multiChartData, activeMetric]);
+  }, [multiChartData, activeMetric, pointWidth]);
 
   const handleScroll = () => {
       if (!rafRef.current) {
@@ -182,7 +200,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
 
   useEffect(() => {
       updateYDomain();
-  }, [updateYDomain, pointWidth]);
+  }, [updateYDomain]);
 
   const handleTouchStart = (e) => {
       if (e.touches.length === 2) {
@@ -190,46 +208,31 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
               e.touches[0].clientX - e.touches[1].clientX,
               e.touches[0].clientY - e.touches[1].clientY
           );
-          
-          const pinchCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-          const rect = scrollRef.current.getBoundingClientRect();
-          const scrollRelCenterX = pinchCenterX - rect.left;
-          
-          const currentScrollLeft = scrollRef.current.scrollLeft;
-          const currentChartWidth = Math.max(multiChartData.length * pointWidth, window.innerWidth - 64);
-          
-          const pinchRatio = (scrollRelCenterX + currentScrollLeft) / currentChartWidth;
-          
-          touchState.current = { initialDist: dist, initialPointWidth: pointWidth, pinchRatio, scrollRelCenterX };
+          pinchStartDistRef.current = dist;
+          initialPointWidthRef.current = pointWidth;
       }
   };
 
   const handleTouchMove = (e) => {
-      if (e.touches.length === 2) {
+      if (e.touches.length === 2 && pinchStartDistRef.current) {
           const dist = Math.hypot(
               e.touches[0].clientX - e.touches[1].clientX,
               e.touches[0].clientY - e.touches[1].clientY
           );
-          const scale = dist / touchState.current.initialDist;
-          let newWidth = touchState.current.initialPointWidth * scale;
-          if (newWidth < 25) newWidth = 25;
-          if (newWidth > 200) newWidth = 200;
+          const scale = dist / pinchStartDistRef.current;
+          const newWidth = Math.min(100, Math.max(20, initialPointWidthRef.current * scale));
           setPointWidth(newWidth);
-          
-          const nextChartWidth = Math.max(multiChartData.length * newWidth, window.innerWidth - 64);
-          const newPinchAbsX = touchState.current.pinchRatio * nextChartWidth;
-          scrollTarget.current = newPinchAbsX - touchState.current.scrollRelCenterX;
       }
   };
 
-  useEffect(() => {
-     if (scrollTarget.current !== null && scrollRef.current) {
-         scrollRef.current.scrollLeft = scrollTarget.current;
-         scrollTarget.current = null;
-     }
-  }, [pointWidth]);
+  const chartWidth = Math.max(multiChartData.length * pointWidth, 300);
 
-  const chartWidth = Math.max(multiChartData.length * pointWidth, window.innerWidth - 64);
+  useEffect(() => {
+      if (scrollRef.current) {
+          scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+      }
+  }, [multiChartData.length]);
+
   const activeObj = chartMetricsList.find(m => m.key === activeMetric);
 
   return (
@@ -240,7 +243,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
               onTouchMoveCapture={handleTouchMove}
               className="w-full overflow-x-auto scrollbar-hide mb-4 touch-pan-x pt-2" 
               style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
-             <div style={{ width: `${chartWidth}px`, height: '224px' }} className="cursor-crosshair relative">
+             <div style={{ width: `${chartWidth}px`, height: '280px' }} className="cursor-crosshair relative">
                  <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" style={{ padding: '10px 0 30px 0' }}>
                      {[0, 25, 50, 75, 100].map((pct, i) => (
                          <line key={i} x1="0" y1={`${pct}%`} x2="100%" y2={`${pct}%`} stroke={theme === 'dark' ? '#3f3f46' : '#cbd5e1'} strokeDasharray="3 3" strokeWidth="1" />
@@ -249,7 +252,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
 
                  <ComposedChart 
                     width={chartWidth}
-                    height={224}
+                    height={280}
                     data={multiChartData} 
                     style={{ outline: 'none' }}
                     onClick={(e) => {
@@ -277,16 +280,28 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                     </defs>
                     <Tooltip 
                        formatter={(value, name, props) => {
-                           let unit = '';
-                           if (props.dataKey === 'sleep') unit = ' h';
-                           else if (props.dataKey === 'nutritionCalories' || props.dataKey === 'activityCalories') unit = ' kcal';
-                           else if (props.dataKey === 'activeMinutes') unit = ' m';
+                           if (props.dataKey === 'delta') {
+                             return [`${value > 0 ? '+' : ''}${formatNumber(value, language)} kkal`, 'Delta'];
+                           }
+                           if (props.dataKey === 'targetDelta') {
+                             return [`${value > 0 ? '+' : ''}${formatNumber(value, language)} kkal`, 'Target Delta'];
+                           }
+                           if (props.dataKey === 'nutritionCalories') {
+                             return [`${formatNumber(value, language)} kkal`, 'Dimakan'];
+                           }
+                           if (props.dataKey === 'activityCalories') {
+                             return [`${formatNumber(value, language)} kkal`, 'Dibakar'];
+                           }
+                           if (props.dataKey === 'targetCalories') {
+                             return [`${formatNumber(value, language)} kkal`, 'Target Kalori'];
+                           }
+                           let unit = (activeMetric === 'calories' || activeMetric === 'delta') ? ' kkal' : ' g';
                            return [`${formatNumber(value, language)}${unit}`, name];
                        }}
                        cursor={{ fill: theme === 'dark' ? '#27272a' : '#f4f4f5' }} 
-                       contentStyle={{ backgroundColor: theme === 'dark' ? '#18181b' : '#ffffff', borderRadius: '12px', border: '1px solid ' + t.border, padding: '8px 12px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} 
+                       contentStyle={{ backgroundColor: theme === 'dark' ? '#18181b' : '#ffffff', borderRadius: '16px', border: '1px solid ' + t.border, padding: '10px 14px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.2)' }} 
                        itemStyle={{ padding: 0, margin: 0, marginTop: '4px' }} 
-                       labelStyle={{ color: theme === 'dark' ? '#a1a1aa' : '#71717a', marginBottom: '4px', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em' }} 
+                       labelStyle={{ color: theme === 'dark' ? '#a1a1aa' : '#71717a', marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }} 
                     />
                     <XAxis dataKey="name" stroke={theme === 'dark' ? '#a1a1aa' : '#64748b'} fontSize={10} tickLine={false} axisLine={false} />
                     <YAxis domain={yDomain} hide={true} />
@@ -310,7 +325,24 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                         </>
                     )}
 
-                    {activeObj.type === 'single' ? (
+                    {activeMetric === 'delta' ? (
+                        <Bar 
+                            dataKey="delta" 
+                            name="Delta" 
+                            radius={[50, 50, 50, 50]}
+                            isAnimationActive={false} 
+                            maxBarSize={28}
+                        >
+                            {multiChartData.map((entry, index) => (
+                                <Cell 
+                                    key={`cell-${index}`} 
+                                    fill={entry.delta >= 0 
+                                      ? (theme === 'dark' ? '#3daa5c' : '#059669') 
+                                      : (theme === 'dark' ? '#cd4a4a' : '#dc2626')} 
+                                />
+                            ))}
+                        </Bar>
+                    ) : activeObj.type === 'single' ? (
                         <Bar 
                             dataKey={activeMetric} 
                             name={activeObj.label} 

@@ -88,7 +88,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
     // gak ada UI buat balikin ngisi lagi. Makanya wajib dicek di sini juga.
     if (s.key === 'identity') return answers.name?.trim().length > 0 && answers.gender && isValidAge(answers.dob);
     if (s.key === 'biometrics') return isValidAge(answers.dob) && answers.height > 0 && answers.weight > 0;
-    if (s.key === 'activityLevel') return !!answers.activityLevel;
+    if (s.key === 'activityLevel') return !!answers.activityLevel || fromLogym || !!logymUser;
     if (s.key === 'diet') return !!answers.dietProfile;
     if (s.key === 'dietGoal') return !!answers.dietGoal;
     if (s.key === 'pace') return true; // preset default 'normal' udah kepilih, gak wajib diubah
@@ -103,6 +103,7 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
     // Profile map for calcTargets matches logic in SharedDietSteps
     const profileForTargets = {
       ...answers,
+      activityLevel: answers.activityLevel || (fromLogym || logymUser ? 'light' : 'sedentary'),
       age,
       height: Number(answers.height),
       weight: Number(answers.weight),
@@ -216,8 +217,9 @@ const OnboardingFlow = ({ t, theme, logymUser, onComplete }) => {
                     handleNext={handleNext}
                     onHealthConnect={handleHealthConnect}
                     onAppleHealth={handleAppleHealth}
-                    fromLogym={fromLogym}
-                      onSyncDomus={async () => {
+                    fromLogym={fromLogym || !!logymUser}
+                    logymConnected={fromLogym || !!logymUser}
+                    onSyncDomus={async () => {
                         if (!auth.currentUser) return [];
                         try {
                           const items = await fetchDomusItems(auth.currentUser.uid);

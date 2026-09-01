@@ -7,7 +7,8 @@ import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS, MONTH_NAMES_ID, getMonthKey } from '../data/constants';
-import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS } from '../data/nutrition';
+import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR } from '../data/nutrition';
+import { extractLyfitDay } from '../utils/lyfitSync';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
 import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, toDataUrl, PHOTO_KEEPSAKE, PHOTO_THUMB } from '../utils/aiFood';
@@ -21,12 +22,8 @@ import { nutrientSources } from '../utils/nutrientSources';
 import AttachmentMenu from '../components/AttachmentMenu';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
-import { URT_DICTIONARY, normalizeUnit, entryUnit } from '../utils/urtMapping';
+import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS } from '../utils/urtMapping';
 import useBackClose from '../hooks/useBackClose';
-
-// Satuan yang bisa dipilih user di sheet hasil Lomy — dikonversi otomatis ke gram
-// lewat URT_DICTIONARY (tabel ukuran rumah tangga generik, lihat urtMapping.js).
-const UNIT_OPTIONS = ['g', 'sdt', 'sdm', 'centong', 'gelas', 'cangkir', 'mangkok', 'piring', 'porsi', 'potong', 'iris', 'lembar', 'tusuk', 'ekor', 'butir', 'biji', 'buah', 'bungkus', 'kepal', 'genggam', 'batang', 'siung'];
 
 // Simpan baseline (gram & gizi) tetap di tiap item hasil Lomy begitu muncul di preview —
 // tanpa ini, edit gramasi dihitung sebagai rasio ke NILAI SEBELUMNYA (bukan ke baseline
@@ -67,7 +64,7 @@ const COLORS = [
  * Date strip → quick stats + water tracker → Meal Grid 2 kolom (piring + ring
  * makro) → Smart Input Bar (chat NL / kamera / voice / manual presisi).
  */
-const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, domusItems, domusLocations, aiKey, showAlert, showConfirm, showToast, waterGoal,
+const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile, saveProfilePatch, daysMap, saveDay, customFoods, saveCustomFoodsFn, recipes, mealPreps, saveMealPrepsFn, domusItems, domusLocations, aiKey, showAlert, showConfirm, showToast, waterGoal,
   chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession, ensureMonth }) => {
 
   const todayYmd = getLocalYMD();
@@ -368,11 +365,31 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
     }
   };
 
+  const isToday = selectedYmd === todayYmd;
   const isFuture = selectedYmd > todayYmd;
   const totals = useMemo(() => computeDayTotals(day, !isFuture), [day, isFuture]);
-  const targets = day.targetSnapshot || profile?.targets || {};
-  const dietGoal = targets.dietGoal || '';
-  const kcalDiff = (targets.kcal || 0) - (targets.tdee || targets.kcal || 0);
+  
+  // Base targets: Untuk hari ini (live) & tanggal depan, selalu pakai profile.targets terbaru.
+  // Untuk tanggal lampau, pakai day.targetSnapshot (arsip target hari itu).
+  const targets = (isToday || isFuture ? profile?.targets : (day.targetSnapshot || profile?.targets)) || {};
+  const dietGoal = targets.dietGoal || profile?.dietGoal || 'maintenance';
+  const baseTdee = targets.tdee || targets.kcal || 0;
+  const kcalDiff = (targets.kcal || 0) - baseTdee;
+
+  // Hitung allowance kalori dinamis (sinkron dengan DashboardTab)
+  const selectedLyfitDay = extractLyfitDay(lyfitYearData, selectedYmd) || (isToday ? lyfitToday : null);
+  const bmrBase = selectedLyfitDay?.bmr || targets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
+  const tefDay = calcTEF({
+    protein: totals.protein,
+    carbs: totals.carbs,
+    fat: totals.fat,
+    kcal: totals.kcal,
+    bmr: bmrBase
+  }).total;
+  const burnedTotal = logymUser ? (selectedLyfitDay?.burnedKcal || (bmrBase + tefDay)) : (baseTdee || 0);
+  const allowanceKcal = (logymUser && burnedTotal > 0)
+    ? Math.max(0, burnedTotal + kcalDiff)
+    : (targets.kcal || 0);
 
   // ---------- Date Strip horizontal (±30 hari) ----------
   const dates = useMemo(() => {
@@ -1145,12 +1162,15 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
   };
 
   const MacroBar = ({ mkey, showSources = false }) => {
-    const target = targets[mkey] || 1;
+    const target = mkey === 'kcal' ? (allowanceKcal || targets.kcal || 1) : (targets[mkey] || 1);
     const value = totals[mkey] || 0;
     const actualPct = (value / target) * 100;
     const barWidth = Math.min(100, Math.max(0, actualPct));
     const mc = mkey === 'kcal' ? { label: 'Kalori', hex: value > (target || Infinity) ? '#cd4a4a' : '#3daa5c' } : MACRO_COLORS[mkey];
     const sources = showSources && expandedNutrient === mkey ? nutrientSources(day, mkey) : null;
+    const isCut = dietGoal === 'cutting' || dietGoal === 'cut';
+    const isBulk = dietGoal === 'bulk' || dietGoal === 'bulking';
+
     return (
         <div>
           <div onClick={() => showSources && setExpandedNutrient(expandedNutrient === mkey ? null : mkey)}
@@ -1159,8 +1179,8 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
               <div className="flex items-center gap-2">
                 <span className={`caption ${t.textMuted}`}>Kalori</span>
                 {dietGoal && (
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${dietGoal === 'cut' ? 'bg-amber-500/20 text-amber-500' : dietGoal === 'bulk' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>
-                    {dietGoal === 'cut' ? `Cut (${kcalDiff > 0 ? '+' : ''}${kcalDiff} kcal)` : dietGoal === 'bulk' ? `Bulk (+${kcalDiff} kcal)` : 'Maintenance'}
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isCut ? 'bg-amber-500/20 text-amber-500' : isBulk ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>
+                    {isCut ? `Cut (${kcalDiff > 0 ? '+' : ''}${kcalDiff} kcal)` : isBulk ? `Bulk (${kcalDiff > 0 ? '+' : ''}${kcalDiff} kcal)` : 'Maintenance'}
                   </span>
                 )}
               </div>
@@ -1246,7 +1266,6 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
     );
   };
 
-  const isToday = selectedYmd === todayYmd;
   const water = day.water || 0;
 
   return (
@@ -1505,9 +1524,70 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                 <img src={aiResult.photoDataUrl} alt="foto" className="w-full h-full object-cover" />
               </div>
             )}
+
+            {/* TOTAL KALORI & PKL (Desain identik dengan rincian sesi) */}
+            {(() => {
+              const aiTotals = aiResult.foods.reduce((acc, f) => addNutrition(acc, f.nutrition), { ...EMPTY_NUTRITION });
+              const aiKcal = Math.round(aiTotals.kcal || 0);
+              const aiP = Math.round((aiTotals.protein || 0) * 10) / 10;
+              const aiC = Math.round((aiTotals.carbs || 0) * 10) / 10;
+              const aiF = Math.round((aiTotals.fat || 0) * 10) / 10;
+              const totalAiMacroKcal = (aiP * 4) + (aiC * 4) + (aiF * 9);
+              const aiPPct = totalAiMacroKcal > 0 ? ((aiP * 4) / totalAiMacroKcal) * 100 : 0;
+              const aiCPct = totalAiMacroKcal > 0 ? ((aiC * 4) / totalAiMacroKcal) * 100 : 0;
+              const aiFPct = totalAiMacroKcal > 0 ? ((aiF * 9) / totalAiMacroKcal) * 100 : 0;
+
+              if (aiResult.foods.length === 0) return null;
+
+              return (
+                <div className={`mb-4 p-4 rounded-2xl border ${t.border} ${t.bgSunken} space-y-2`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-baseline gap-1">
+                      <span className={`text-2xl font-black tabular-nums ${t.textMain}`}>{aiKcal}</span>
+                      <span className={`text-xs font-semibold ${t.textMuted}`}>kkal</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs font-bold tabular-nums">
+                      <span className="flex items-center gap-1 text-green-500">
+                        <span className="text-[10px] uppercase font-semibold text-green-500/70">P</span> {aiP}g
+                      </span>
+                      <span className="flex items-center gap-1 text-amber-500">
+                        <span className="text-[10px] uppercase font-semibold text-amber-500/70">K</span> {aiC}g
+                      </span>
+                      <span className="flex items-center gap-1 text-red-400">
+                        <span className="text-[10px] uppercase font-semibold text-red-400/70">L</span> {aiF}g
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Horizontal Macro Bar */}
+                  <div className={`h-2 rounded-full overflow-hidden flex w-full ${t.bgCard}`}>
+                    {totalAiMacroKcal > 0 ? (
+                      <>
+                        <div
+                          style={{ width: `${aiPPct}%` }}
+                          className="h-full bg-green-500 transition-all duration-300 first:rounded-l-full last:rounded-r-full"
+                        />
+                        <div
+                          style={{ width: `${aiCPct}%` }}
+                          className="h-full bg-amber-500 transition-all duration-300 first:rounded-l-full last:rounded-r-full"
+                        />
+                        <div
+                          style={{ width: `${aiFPct}%` }}
+                          className="h-full bg-red-400 transition-all duration-300 first:rounded-l-full last:rounded-r-full"
+                        />
+                      </>
+                    ) : (
+                      <div className="h-full w-full bg-white/5" />
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="space-y-1.5 mb-3">
               {aiResult.foods.map((f, i) => {
-                const unit = URT_DICTIONARY[normalizeUnit(f.unit)] ? normalizeUnit(f.unit) : 'g';
+                const rawUnit = f.unit || 'g';
+                const unit = URT_DICTIONARY[normalizeUnit(rawUnit)] ? normalizeUnit(rawUnit) : (rawUnit === 'ml' ? 'ml' : 'g');
                 const isGram = unit === 'g' || unit === 'ml';
                 return (
                 <div key={i} className={`flex items-start gap-2 p-3 rounded-2xl border ${t.border} ${t.bgCard}`}>
@@ -1571,16 +1651,18 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                        })()}
                     </div>
                   ) : (() => {
-                    const unitWeight = isGram ? 1 : URT_DICTIONARY[unit];
-                    const qty = Math.round((f.grams / unitWeight) * 10) / 10;
-                    const applyGrams = (grams) => {
+                    const unitWeight = isGram ? 1 : (URT_DICTIONARY[unit] || 1);
+                    const qty = Math.round(((f.grams || 0) / unitWeight) * 10) / 10;
+                    const applyGrams = (grams, nextUnit = unit) => {
                       const baseGrams = f.baseGrams || f.grams || 1;
-                      const baseNutrition = f.baseNutrition || f.nutrition;
-                      const factor = grams / baseGrams;
+                      const baseNutrition = f.baseNutrition || f.nutrition || EMPTY_NUTRITION;
+                      const factor = baseGrams > 0 ? grams / baseGrams : 1;
                       setAiResult(r => ({
                         ...r,
                         foods: r.foods.map((x, j) => j === i ? {
-                          ...x, grams,
+                          ...x,
+                          grams,
+                          unit: nextUnit,
                           baseGrams,
                           baseNutrition,
                           nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000])),
@@ -1598,13 +1680,15 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                         </div>
                         <div className="shrink-0 flex flex-col items-center gap-0.5">
                           <div className={`px-3 py-1.5 rounded-xl ${t.bgSunken}`}>
-                            <SwipeInput value={qty} min={0} onChange={(newQty) => applyGrams(Math.round(newQty * unitWeight))}
-                              className={`w-10 bg-transparent body-lg outline-none no-spinners ${t.textMain}`} />
+                            <SwipeInput value={qty} min={0} onChange={(newQty) => applyGrams(Math.round(newQty * unitWeight), unit)}
+                              className={`w-10 bg-transparent body-lg outline-none no-spinners font-bold text-center ${t.textMain}`} />
                           </div>
                           <select value={unit} onChange={(e) => {
                             const newUnit = e.target.value;
-                            setAiResult(r => ({ ...r, foods: r.foods.map((x, j) => j === i ? { ...x, unit: newUnit } : x) }));
-                          }} className={`bg-transparent text-[10px] font-bold outline-none text-center ${t.textMuted}`}>
+                            const newUnitWeight = (newUnit === 'g' || newUnit === 'ml') ? 1 : (URT_DICTIONARY[newUnit] || 1);
+                            const newGrams = Math.round(qty * newUnitWeight);
+                            applyGrams(newGrams, newUnit);
+                          }} className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}>
                             {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
                           </select>
                         </div>
@@ -1876,6 +1960,31 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                            {slide.items.map((e) => {
                              const isMealPrep = e.isMealPrep || e.source === 'recipe';
                              const isEaten = e.isEaten !== undefined ? e.isEaten : !isMealPrep;
+                             const rawUnit = e.unit || (detailSession === 'drink' ? 'ml' : 'g');
+                             const unit = URT_DICTIONARY[normalizeUnit(rawUnit)] ? normalizeUnit(rawUnit) : (rawUnit === 'ml' ? 'ml' : 'g');
+                             const isGram = unit === 'g' || unit === 'ml';
+                             const unitWeight = isGram ? 1 : (URT_DICTIONARY[unit] || 1);
+                             const qty = Math.round(((e.grams || 0) / unitWeight) * 10) / 10;
+
+                             const updateItemGrams = (grams, nextUnit = unit) => {
+                               const meals = { ...(day.meals || {}) };
+                               meals[detailSession] = meals[detailSession].map(x => {
+                                 if (x.id !== e.id) return x;
+                                 const baseGrams = x.baseGrams || x.grams || 1;
+                                 const baseNutrition = x.baseNutrition || x.nutrition || EMPTY_NUTRITION;
+                                 const factor = baseGrams > 0 ? grams / baseGrams : 1;
+                                 return {
+                                   ...x,
+                                   grams,
+                                   unit: nextUnit,
+                                   baseGrams,
+                                   baseNutrition,
+                                   nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
+                                 };
+                               });
+                               persistDay({ ...day, meals });
+                             };
+
                              return (
                                <div key={e.id} className={`flex items-center justify-between p-3.5 rounded-2xl border ${t.border} ${t.bgCard} ${!isEaten ? 'opacity-50' : ''}`}>
                                  <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -1902,33 +2011,44 @@ const LogTab = ({ t, theme, user, profile, saveProfilePatch, daysMap, saveDay, c
                                            />
                                          </div>
                                        )}
-                                       <span className="truncate flex items-center gap-1">
-                                         <input type="number" inputMode="numeric" value={Math.round(e.grams) || ''} placeholder="0" onChange={(ev) => {
-                                           const grams = Number(ev.target.value) || 0;
-                                           const meals = { ...(day.meals || {}) };
-                                           meals[detailSession] = meals[detailSession].map(x => {
-                                             if (x.id !== e.id) return x;
-                                             const baseGrams = x.baseGrams || x.grams || 1;
-                                             const baseNutrition = x.baseNutrition || x.nutrition || EMPTY_NUTRITION;
-                                             const factor = baseGrams > 0 ? grams / baseGrams : 1;
-                                             return {
-                                               ...x,
-                                               grams,
-                                               baseGrams,
-                                               baseNutrition,
-                                               nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
-                                             };
-                                           });
-                                           persistDay({ ...day, meals });
-                                         }} className={`w-14 bg-transparent border-b border-dashed ${t.border} outline-none no-spinners text-center font-bold ${t.textMain}`} />
-                                         {e.unit || (detailSession === 'drink' ? 'mL' : 'g')} · {Math.round(e.nutrition?.kcal || 0)} kkal
-                                       </span>
+                                       <span className="truncate flex items-center gap-1.5">
+                                          <span className={`text-xs font-bold ${t.textMain}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
+                                          <span className="text-[10px] text-green-500 font-semibold">P {Math.round(e.nutrition?.protein || 0)}g</span>
+                                          <span className="text-[10px] text-amber-500 font-semibold">K {Math.round(e.nutrition?.carbs || 0)}g</span>
+                                          <span className="text-[10px] text-red-400 font-semibold">L {Math.round(e.nutrition?.fat || 0)}g</span>
+                                          {!isGram && <span className={`text-[10px] ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
+                                        </span>
                                        {e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}{e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500">· <Box size={14} strokeWidth={2.5} /></span>}
                                        {e.isMealPrep && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border shrink-0 ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>Meal Prep</span>}
                                      </div>
                                    </div>
                                  </div>
-                                 <button onClick={() => removeEntry(detailSession, e.id)} className="p-2 rounded-xl text-red-400 shrink-0"><X size={14} /></button>
+
+                                 <div className="shrink-0 flex items-center gap-2">
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken}`}>
+                                        <SwipeInput
+                                          value={qty}
+                                          min={0}
+                                          onChange={(newQty) => updateItemGrams(Math.round(newQty * unitWeight), unit)}
+                                          className={`w-10 bg-transparent body-md outline-none no-spinners font-bold text-center ${t.textMain}`}
+                                        />
+                                      </div>
+                                      <select
+                                        value={unit}
+                                        onChange={(ev) => {
+                                          const newUnit = ev.target.value;
+                                          const newUnitWeight = (newUnit === 'g' || newUnit === 'ml') ? 1 : (URT_DICTIONARY[newUnit] || 1);
+                                          const newGrams = Math.round(qty * newUnitWeight);
+                                          updateItemGrams(newGrams, newUnit);
+                                        }}
+                                        className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}
+                                      >
+                                        {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
+                                      </select>
+                                    </div>
+                                    <button onClick={() => removeEntry(detailSession, e.id)} className="p-2 rounded-xl text-red-400 shrink-0 hover:bg-red-500/10 transition-colors"><X size={15} /></button>
+                                 </div>
                                </div>
                              );
                            })}

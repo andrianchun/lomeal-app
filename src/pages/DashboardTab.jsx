@@ -7,7 +7,7 @@ import TargetSettingsModal from '../components/TargetSettingsModal';
 import BiometricSettingsModal from '../components/BiometricSettingsModal';
 import LabResultsCard from '../components/LabResultsCard';
 import { nutrientSources } from '../utils/nutrientSources';
-import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS } from '../data/nutrition';
+import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS, calcTEF } from '../data/nutrition';
 import { STATUS, statusFor, MACRO_COLORS } from '../theme';
 import { MEAL_SESSIONS, getLocalYMD, getMonthKey } from '../data/constants';
 import { pushActivityOverrideToLogym } from '../utils/biometricSync';
@@ -24,6 +24,7 @@ const DashboardTab = ({
 }) => {
   const [showAiModal, setShowAiModal] = useState(false);
   const [showProfileInfo, setShowProfileInfo] = useState(false);
+  const [showCalorieModal, setShowCalorieModal] = useState(false);
 
   // === Pastikan data 7 hari terakhir dimuat ===
   useEffect(() => {
@@ -75,6 +76,7 @@ const DashboardTab = ({
   // back pertama mundur ke daftar peringatan, back kedua baru nutup modalnya.
   useBackClose(showWarnings, () => setShowWarnings(false));
   useBackClose(!!selectedNutrientForBreakdown, () => setSelectedNutrientForBreakdown(null));
+  useBackClose(showCalorieModal, () => setShowCalorieModal(false));
 
   // Chip profil makanan di header
   const dietMeta = DIET_PROFILES.find(d => d.id === dietProfile) || null;
@@ -95,10 +97,33 @@ const DashboardTab = ({
   const today = daysMap[todayYmd];
   const totals = useMemo(() => computeDayTotals(today), [today]);
   const bmrFloor = targets?.bmr || 0;
+  const bmrBase = bmrFloor || 1600;
+
+  // TEF (Thermic Effect of Food) dihitung dari makronutrisi makanan yang dicatat hari ini
+  const tefCalc = useMemo(() => {
+    return calcTEF({
+      protein: totals.protein,
+      carbs: totals.carbs,
+      fat: totals.fat,
+      kcal: totals.kcal,
+      bmr: bmrBase,
+    });
+  }, [totals, bmrBase]);
+
   const manualBurn = profile?.settings?.manualBurnKcal || 0;
-  // FIX SINKRONISASI: Jika ada Logym, percaya 100% pada data dari Logym (karena Logym 
-  // sudah hitung BMR dan lantai minimumnya sendiri). Jika tidak, pakai manualBurn atau bmrFloor.
-  const burnedTotal = logymUser ? (lyfitToday?.burnedKcal || bmrFloor) : Math.max(bmrFloor, manualBurn);
+  const stepsCount = lyfitToday?.steps || 0;
+  const neatKcal = lyfitToday?.stepsKcal ?? Math.round(stepsCount * 0.04);
+  const workoutCount = lyfitToday?.workoutCount || 0;
+  const sessionCount = lyfitToday?.sessionCount || (workoutCount > 0 ? 1 : 0);
+  const bmrDisplay = lyfitToday?.bmr || bmrFloor || 1600;
+
+  // FIX SINKRONISASI: Jika ada Logym, gunakan total pembakaran nyata dari Logym (BMR + langkah + workout + TEF).
+  // Jika tidak ada data Logym, gunakan BMR + TEF lokal makanan (atau manualBurn jika diisi).
+  const burnedTotal = logymUser 
+    ? (lyfitToday?.burnedKcal || (bmrFloor + tefCalc.total))
+    : Math.max(bmrFloor + tefCalc.total, manualBurn);
+
+  const eatKcal = Math.max(0, burnedTotal - bmrDisplay - neatKcal - tefCalc.total);
 
   // Kalori Dimakan selalu ditarik dari "Tab Catat" (totals.kcal dari rekam makanan lokal Lomeal).
   const displayKcal = totals.kcal;
@@ -112,7 +137,7 @@ const DashboardTab = ({
   // Kalau tidak ada data Logym, fallback ke targets.kcal (behavior lama).
   const baseTdee = targets.tdee || targets.kcal || 0;
   const programDelta = (targets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
-  const actualTdee = Math.max(baseTdee, burnedTotal);
+  const actualTdee = logymUser ? burnedTotal : Math.max(baseTdee, burnedTotal);
   const allowance = actualTdee > 0
     ? Math.max(0, actualTdee + programDelta)
     : (targets.kcal || 0);
@@ -207,7 +232,7 @@ const DashboardTab = ({
           >
             <div
               className="w-10 h-10 rounded-full overflow-hidden bg-zinc-900 border-2 border-emerald-400 shadow-sm shrink-0"
-              style={{ backgroundImage: "url('/bg-lomeal-coach.webp')", backgroundSize: '420%', backgroundPosition: '50% 12%' }}
+              style={{ backgroundImage: "url('/bg-dashboard.webp')", backgroundSize: '240%', backgroundPosition: '45% 10%' }}
             />
             <span className="text-[10px] font-black tracking-wider uppercase whitespace-nowrap leading-none">Konsul</span>
           </button>
@@ -255,7 +280,7 @@ const DashboardTab = ({
                   <p className={`h3 ${t.textMuted}`}>Kalori Dimakan</p>
                   <p className={`text-xl font-black tabular-nums ${t.textAccent} mt-0.5`}>
                     {Math.round(displayKcal).toLocaleString('id-ID')}
-                    <span className={`caption ${t.textMuted} ml-1`}>/ {Math.round(targets.kcal || 0).toLocaleString('id-ID')} kkal</span>
+                    <span className={`caption ${t.textMuted} ml-1`}>/ {Math.round(allowance || targets.kcal || 0).toLocaleString('id-ID')} kkal</span>
                   </p>
                   <div className={`caption ${t.textMuted} mt-0.5 flex items-center gap-1.5`}>
                     <span className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-500 text-[8px] uppercase font-bold tracking-wider">LOMEAL</span>
@@ -266,17 +291,23 @@ const DashboardTab = ({
                 {/* Garis Pemisah Tengah */}
                 <div className="w-[1px] bg-black/5 dark:bg-white/5 my-1"></div>
 
-                {/* Kanan: Kalori Dibakar */}
-                <div className="flex flex-col items-end w-[48%] text-right">
-                  <p className={`h3 ${t.textMuted}`}>Kalori Dibakar</p>
+                {/* Kanan: Kalori Dibakar (Interaktif -> Buka Modal 4 Pilar) */}
+                <div 
+                  onClick={() => setShowCalorieModal(true)}
+                  className="flex flex-col items-end w-[48%] text-right cursor-pointer group active:scale-[0.98] transition-all select-none"
+                  title="Klik untuk melihat rincian 4 Pilar Kalori Dibakar (BMR, NEAT, EAT, TEF)"
+                >
+                  <p className={`h3 ${t.textMuted} group-hover:text-sky-400 transition-colors`}>
+                    Kalori Dibakar
+                  </p>
                   <p className="text-xl font-black tabular-nums text-sky-400 mt-0.5">{Number(burnedTotal).toLocaleString('id-ID')}</p>
                   {logymUser ? (
                     <div className={`caption ${t.textMuted} mt-0.5 flex items-center justify-end gap-1.5`}>
                       <span className="px-1 py-0.5 rounded bg-sky-500/20 text-sky-500 text-[8px] uppercase font-bold tracking-wider">LOGYM</span>
-                      {lyfitToday?.workoutCount || 0} latihan
+                      {workoutCount > 0 ? `${workoutCount} latihan` : '0 latihan'}
                     </div>
                   ) : (
-                    <p className={`caption ${t.textMuted} mt-0.5`}>Logym: {lyfitToday?.workoutCount || 0} latihan</p>
+                    <p className={`caption ${t.textMuted} mt-0.5`}>Logym: {workoutCount > 0 ? `${workoutCount} latihan` : '0 latihan'}</p>
                   )}
                 </div>
               </div>
@@ -386,12 +417,7 @@ const DashboardTab = ({
 
              {/* Konten Kartu */}
              <div className="relative z-20">
-             <div className="p-4 flex items-center justify-between">
-                 <div className="flex flex-col">
-                     <span className={`h2 ${t.textMain}`}>Tren Kalori</span>
-                 </div>
-             </div>
-             <div className="pt-0 pb-4 no-swipe">
+             <div className="pt-2 pb-4 no-swipe">
                  <NutritionChart
                      t={t} theme={theme} daysMap={daysMap} targets={targets}
                      lyfitYearData={lyfitToday === null && lyfitToday === undefined ? null : lyfitYearData} 
@@ -477,6 +503,141 @@ const DashboardTab = ({
                 );
               })()
             )}
+          </div>
+        </div>
+      )}
+      {/* ===== MODAL METABOLISME HARIAN (TDEE) ===== */}
+      {showCalorieModal && (
+        <div 
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm no-swipe"
+          onClick={() => setShowCalorieModal(false)}
+        >
+          <div
+            className={`relative w-full sm:max-w-md rounded-[2rem] border ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shadow-[0_8px_32px_-10px_rgba(16,185,129,0.35)] ${theme === 'dark' ? 'bg-zinc-900/95' : 'bg-white/95'} backdrop-blur-2xl max-h-[88vh] flex flex-col overflow-hidden shadow-2xl`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Modal */}
+            <div className={`flex items-center justify-between px-5 py-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0`}>
+              <div>
+                <h2 className={`h3 ${t.textMain}`}>
+                  Metabolisme Harian (TDEE)
+                </h2>
+                <p className={`caption ${t.textMuted} mt-0.5`}>
+                  Total seluruh energi yang dibakar tubuh dalam 24 jam.
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowCalorieModal(false)} 
+                className={`p-1.5 rounded-full bg-black/5 dark:bg-white/5 ${t.textMuted} hover:${t.textMain} transition-colors`}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content List */}
+            <div className="p-5 overflow-y-auto space-y-3 flex-1">
+              {/* Total Banner */}
+              <div className={`p-4 rounded-2xl border ${theme === 'dark' ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-500/20 bg-emerald-50'} flex items-baseline justify-between`}>
+                <span className={`body-md font-bold ${theme === 'dark' ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                  Total Kalori Dibakar
+                </span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-black text-emerald-500 dark:text-emerald-400">
+                    {Number(burnedTotal).toLocaleString('id-ID')}
+                  </span>
+                  <span className={`caption ${t.textMuted}`}>kkal</span>
+                </div>
+              </div>
+
+              {/* 4 Pilar List */}
+              <div className="divide-y divide-black/5 dark:divide-white/10 pt-1">
+                {/* 1. BMR */}
+                <div className="py-3 flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="body-md font-bold text-blue-400 flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0"></span>
+                      BMR (Basal Metabolic Rate)
+                    </div>
+                    <p className={`caption ${t.textMuted} mt-0.5 leading-snug`}>
+                      Energi dasar organ vital saat istirahat (Mifflin-St Jeor).
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className={`body-lg font-black ${t.textMain} whitespace-nowrap`}>
+                      {Number(bmrDisplay).toLocaleString('id-ID')}{' '}
+                      <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. NEAT */}
+                <div className="py-3 flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="body-md font-bold text-indigo-400 flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 shrink-0"></span>
+                      NEAT (Aktivitas Spontan)
+                    </div>
+                    <p className={`caption ${t.textMuted} mt-0.5 leading-snug`}>
+                      Gerak spontan harian ({Number(stepsCount).toLocaleString('id-ID')} langkah) non-olahraga.
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className={`body-lg font-black ${t.textMain} whitespace-nowrap`}>
+                      {Number(neatKcal).toLocaleString('id-ID')}{' '}
+                      <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. EAT */}
+                <div className="py-3 flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="body-md font-bold text-teal-400 flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-teal-400 shrink-0"></span>
+                      EAT (Olahraga & Latihan)
+                    </div>
+                    <p className={`caption ${t.textMuted} mt-0.5 leading-snug`}>
+                      {workoutCount > 0 
+                        ? `Latihan beban & kardio terencana di Logym (${workoutCount} latihan).`
+                        : 'Belum ada catatan latihan Logym hari ini.'}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className={`body-lg font-black ${t.textMain} whitespace-nowrap`}>
+                      {Number(eatKcal).toLocaleString('id-ID')}{' '}
+                      <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4. TEF */}
+                <div className="py-3 flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="body-md font-bold text-emerald-400 flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0"></span>
+                      TEF (Efek Termik Makanan)
+                    </div>
+                    {tefCalc.hasMacros ? (
+                      <div className={`caption ${t.textMuted} mt-1 space-y-0.5 leading-snug`}>
+                        <div>• Protein ({tefCalc.macros.protein}g × 25% = ~{tefCalc.breakdown.protein} kkal)</div>
+                        <div>• Karbo ({tefCalc.macros.carbs}g × 7.5% = ~{tefCalc.breakdown.carbs} kkal)</div>
+                        <div>• Lemak ({tefCalc.macros.fat}g × 2% = ~{tefCalc.breakdown.fat} kkal)</div>
+                      </div>
+                    ) : (
+                      <p className={`caption ${t.textMuted} mt-0.5 leading-snug`}>
+                        Energi memproses & mencerna nutrisi makanan (~10%).
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className={`body-lg font-black ${t.textMain} whitespace-nowrap`}>
+                      {Number(tefCalc.total).toLocaleString('id-ID')}{' '}
+                      <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

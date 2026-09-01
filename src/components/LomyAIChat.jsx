@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, setDoc, deleteDoc, getDocs, collection } from 'firebase/firestore';
 import { Send, X, Loader2, Menu, Plus, Trash2, Bookmark, ChevronRight, ChefHat, Utensils, Clock, Check, ChevronDown } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { streamLomyChat, buildAiRecipe } from '../utils/aiFood';
 import { makeEntry } from '../utils/foodLog';
 import renderMiniMarkdown from '../utils/renderMiniMarkdown';
@@ -8,6 +10,43 @@ import { db } from '../firebase';
 import useWakeLock from '../hooks/useWakeLock';
 import { EMPTY_NUTRITION, NUTRIENTS } from '../data/nutrition';
 import { getLocalYMD, getMonthKey } from '../data/constants';
+
+const sendBackgroundNotification = async (title, body) => {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: Math.floor(Math.random() * 100000) + 4000,
+            title: title || 'Coach Lomy',
+            body: body ? (body.length > 120 ? body.slice(0, 117) + '...' : body) : 'Jawaban analisismu sudah siap!',
+            schedule: { at: new Date(Date.now() + 100) },
+            sound: 'beep.wav',
+            extra: { type: 'lomy_chat' },
+          },
+        ],
+      });
+    } else if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification(title || 'Coach Lomy', {
+          body: body ? (body.length > 120 ? body.slice(0, 117) + '...' : body) : 'Jawaban analisismu sudah siap!',
+          icon: '/bg-dashboard.webp',
+        });
+      } else if (Notification.permission === 'default') {
+        Notification.requestPermission().then((perm) => {
+          if (perm === 'granted') {
+            new Notification(title || 'Coach Lomy', {
+              body: body ? (body.length > 120 ? body.slice(0, 117) + '...' : body) : 'Jawaban analisismu sudah siap!',
+              icon: '/bg-dashboard.webp',
+            });
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Gagal kirim notifikasi AI background:', e);
+  }
+};
 
 const THINKING_PHASES = [
   'Membaca riwayat makananmu...',
@@ -82,13 +121,25 @@ export default function LomyAIChat({
     clearTimeout(phaseTimer.current);
     if (isOpen) {
       setPhase('opening');
+      setIsSidebarOpen(false);
+      // Selalu langsung muat sesi aktif atau sesi terakhir (selesaikan problem klik sesi)
+      if (sessions.length > 0) {
+        const target = sessions.find((s) => s.id === activeSessionId) || sessions[0];
+        if (target) {
+          if (target.id !== activeSessionId) setActiveSessionId(target.id);
+          setMessages(target.messages || []);
+          if (target.unread) {
+            setSessions((prev) => prev.map((s) => (s.id === target.id ? { ...s, unread: false } : s)));
+          }
+        }
+      }
       phaseTimer.current = setTimeout(() => {
         setPhase('open');
         setTimeout(() => scrollToBottom('auto'), 50);
       }, 20);
     } else {
       setPhase('closing');
-      phaseTimer.current = setTimeout(() => setPhase('closed'), 360);
+      phaseTimer.current = setTimeout(() => setPhase('closed'), 320);
     }
     return () => clearTimeout(phaseTimer.current);
   }, [isOpen]);
@@ -392,11 +443,17 @@ export default function LomyAIChat({
       );
 
       const aiMsg = { role: 'assistant', content: reply, timestamp: Date.now() };
-      const stillViewing = isStillViewing();
+      const stillViewing = isStillViewing() && (typeof document !== 'undefined' ? !document.hidden : true);
       if (stillViewing) {
         setMessages(prev => prev.map(m => m.id === tempId ? aiMsg : m));
       }
       setSessions(prev => prev.map(s => s.id === currentSessionId ? { ...s, messages: [...s.messages, aiMsg], updatedAt: Date.now(), unread: !stillViewing } : s));
+
+      // Kirim notifikasi status bar jika user sedang minimize atau buka tab/aplikasi lain
+      if (!stillViewing) {
+        const plainSnippet = reply.replace(/[*_#`[\]()]/g, '').trim();
+        sendBackgroundNotification('Coach Lomy', plainSnippet || 'Jawaban pertanyaanmu sudah selesai disusun!');
+      }
     } catch (err) {
       console.error('Lomy Chat Error:', err);
       if (isOpenRef.current && activeSessionIdRef.current === currentSessionId) {
@@ -678,12 +735,11 @@ export default function LomyAIChat({
 
   if (phase === 'closed') return null;
 
-  const ox = avatarOrigin?.x ?? window.innerWidth / 2;
-  const oy = avatarOrigin?.y ?? window.innerHeight;
+  const ox = avatarOrigin?.x ?? (typeof window !== 'undefined' ? window.innerWidth - 44 : 200);
+  const oy = avatarOrigin?.y ?? (typeof window !== 'undefined' ? 100 : 100);
 
   const isAnimatingIn = phase === 'open';
   const isAnimatingOut = phase === 'closing';
-  const scaleVal = isAnimatingIn ? 'scale(1)' : 'scale(0)';
 
   return (
     <>
@@ -698,18 +754,19 @@ export default function LomyAIChat({
         onClick={onClose}
       />
 
-      {/* Chat Panel — Spring scaled from avatar position */}
+      {/* Chat Panel — Spring scaled directly from/to avatar position */}
       <div
         className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 pointer-events-none"
         style={{
-          transform: scaleVal,
           transformOrigin: `${ox}px ${oy}px`,
+          transform: isAnimatingIn ? 'scale(1)' : 'scale(0.05)',
+          opacity: isAnimatingIn ? 1 : 0,
           transition: isAnimatingOut
-            ? 'transform 0.3s cubic-bezier(0.4,0,1,1)'
-            : 'transform 0.38s cubic-bezier(0.34,1.15,0.64,1)',
+            ? 'transform 0.32s cubic-bezier(0.32, 1, 0.23, 1), opacity 0.26s ease'
+            : 'transform 0.38s cubic-bezier(0.34, 1.15, 0.64, 1), opacity 0.3s ease',
         }}
       >
-        <div className="pointer-events-auto flex flex-col w-full max-w-md h-[85vh] max-h-[800px] bg-[#0a1510]/80 backdrop-blur-2xl border border-white/10 rounded-[2rem] shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden relative">
+        <div className="pointer-events-auto flex flex-col w-full max-w-md h-[85vh] max-h-[800px] bg-[#0a1510]/95 backdrop-blur-2xl border border-white/10 rounded-[2rem] shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden relative">
           {isSidebarOpen && <div className="absolute inset-0 bg-black/60 z-[110] transition-opacity cursor-pointer" onClick={() => setIsSidebarOpen(false)} />}
 
           {/* SIDEBAR SESI */}
@@ -757,7 +814,7 @@ export default function LomyAIChat({
               <div className="flex items-center gap-3">
                 <div
                   className="w-10 h-10 rounded-full border-2 border-emerald-400 shadow-md bg-zinc-900 shrink-0"
-                  style={{ backgroundImage: 'url(/bg-lomeal-coach.webp)', backgroundSize: '450%', backgroundPosition: '50% 12%' }}
+                  style={{ backgroundImage: 'url(/bg-dashboard.webp)', backgroundSize: '240%', backgroundPosition: '45% 10%' }}
                 />
                 <div>
                   <h3 className="font-bold text-white leading-tight">Coach Lomy</h3>
@@ -778,7 +835,7 @@ export default function LomyAIChat({
                 <div className="flex flex-col items-center justify-center text-center space-y-4 mt-8 mb-4">
                   <div
                     className="w-16 h-16 rounded-full border-2 border-emerald-500 shadow-lg bg-zinc-900 shrink-0"
-                    style={{ backgroundImage: 'url(/bg-lomeal-coach.webp)', backgroundSize: '450%', backgroundPosition: '50% 12%' }}
+                    style={{ backgroundImage: 'url(/bg-dashboard.webp)', backgroundSize: '240%', backgroundPosition: '45% 10%' }}
                   />
                   <div>
                     <p className="text-white font-bold text-base">Tanya Seputar Nutrisi &amp; Gizi!</p>
@@ -807,7 +864,7 @@ export default function LomyAIChat({
                     {msg.role !== 'user' && (
                       <div
                         className="w-8 h-8 rounded-full border border-white/20 shadow-md shrink-0 mb-1"
-                        style={{ backgroundImage: 'url(/bg-lomeal-coach.webp)', backgroundSize: '450%', backgroundPosition: '50% 12%' }}
+                        style={{ backgroundImage: 'url(/bg-dashboard.webp)', backgroundSize: '240%', backgroundPosition: '45% 10%' }}
                       />
                     )}
                     {msg.role === 'user' && (

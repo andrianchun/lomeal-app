@@ -156,8 +156,7 @@ export const SharedDietStepRenderer = ({
             <div className="w-12 h-12 mx-auto mb-3 bg-black rounded-xl flex items-center justify-center shadow-lg">
               <img src="/logym-icon.webp" alt="Logym" className="w-8 h-8 object-contain" onError={(e) => e.target.style.display = 'none'} />
             </div>
-            <p className={`body-md font-bold ${t.textMain}`}>Data Profil Terhubung!</p>
-            <p className={`caption font-medium mt-1 ${t.textMuted}`}>Semua data yang tersedia di ekosistem Hexa-Life sudah ditarik otomatis — cek di langkah berikutnya.</p>
+            <p className={`body-md font-bold ${t.textMain}`}>Data Profil Terhubung dengan Logym</p>
           </div>
         ) : (
           <div className={`p-4 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5'} text-center`}>
@@ -172,7 +171,7 @@ export const SharedDietStepRenderer = ({
         
         <div className="w-full h-px bg-black/5 my-1" />
         
-        <p className={`caption font-bold text-center ${t.textMuted}`}>Atau hubungkan dengan sumber lain:</p>
+        <p className={`caption font-bold text-center ${t.textMuted}`}>Hubungkan dengan aplikasi lain:</p>
         
         <div className="flex flex-col gap-2">
           <button onClick={hcConnected ? null : onHealthConnect} className={`flex items-center gap-3 p-4 rounded-2xl border ${isDark ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-black/5 bg-white hover:bg-black/5'} transition-colors text-left ${hcConnected ? 'opacity-80' : 'active:scale-[0.98]'}`}>
@@ -330,22 +329,44 @@ export const SharedDietStepRenderer = ({
   }
 
   if (stepKey === 'activityLevel') {
+    const isSynced = fromLogym || logymConnected;
+
     return (
       <div className="w-full flex flex-col gap-3">
-        {[
-          { id: 'sedentary', label: 'Sangat Jarang', desc: 'Hampir tidak ada aktivitas fisik.' },
-          { id: 'light', label: 'Jarang', desc: 'Aktivitas ringan 1-3 hari/minggu.' },
-          { id: 'moderate', label: 'Sedang', desc: 'Aktivitas sedang 3-5 hari/minggu.' },
-          { id: 'active', label: 'Sering', desc: 'Aktivitas berat 6-7 hari/minggu.' },
-          { id: 'very_active', label: 'Sangat Sering', desc: 'Aktivitas/pekerjaan fisik sangat berat.' }
-        ].map((opt) => (
-          <OptionCard key={opt.id} t={t} isDark={isDark} selected={answers.activityLevel === opt.id} onClick={() => { setAnswers(prev => ({ ...prev, activityLevel: opt.id })); if(handleNext) handleNext(); }}>
-            <div>
-              <p className="body-md font-bold">{opt.label}</p>
-              <p className={`caption mt-0.5 ${answers.activityLevel === opt.id ? 'text-white/80' : t.textMuted}`}>{opt.desc}</p>
-            </div>
-          </OptionCard>
-        ))}
+        {isSynced && (
+          <div className={`p-3.5 rounded-2xl border ${isDark ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-500/20 bg-emerald-50'} text-center mb-1`}>
+            <p className={`text-xs sm:text-sm font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-800'}`}>
+              Aktivitas fisik sudah dinilai langsung dari Logym dan Health Connect.
+            </p>
+          </div>
+        )}
+
+        <div className={`w-full flex flex-col gap-3 ${isSynced ? 'opacity-35 pointer-events-none select-none' : ''}`}>
+          {[
+            { id: 'sedentary', label: 'Sangat Jarang', desc: 'Hampir tidak ada aktivitas fisik.' },
+            { id: 'light', label: 'Jarang', desc: 'Aktivitas ringan 1-3 hari/minggu.' },
+            { id: 'moderate', label: 'Sedang', desc: 'Aktivitas sedang 3-5 hari/minggu.' },
+            { id: 'active', label: 'Sering', desc: 'Aktivitas berat 6-7 hari/minggu.' },
+            { id: 'very_active', label: 'Sangat Sering', desc: 'Aktivitas/pekerjaan fisik sangat berat.' }
+          ].map((opt) => (
+            <OptionCard 
+              key={opt.id} 
+              t={t} 
+              isDark={isDark} 
+              selected={!isSynced && answers.activityLevel === opt.id} 
+              onClick={() => { 
+                if (isSynced) return;
+                setAnswers(prev => ({ ...prev, activityLevel: opt.id })); 
+                if(handleNext) handleNext(); 
+              }}
+            >
+              <div>
+                <p className="body-md font-bold">{opt.label}</p>
+                <p className={`caption mt-0.5 ${!isSynced && answers.activityLevel === opt.id ? 'text-white/80' : t.textMuted}`}>{opt.desc}</p>
+              </div>
+            </OptionCard>
+          ))}
+        </div>
       </div>
     );
   }

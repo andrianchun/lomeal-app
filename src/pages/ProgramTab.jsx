@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ChefHat, Plus, X, Clock, CalendarPlus, Warehouse, ClipboardList, Send, Trash2, Utensils, Calculator, Coins, Loader2 } from 'lucide-react';
+import { ChefHat, Plus, X, Clock, CalendarPlus, Warehouse, ClipboardList, Send, Trash2, Utensils, Calculator, Coins, Loader2, Search, Box, Check } from 'lucide-react';
 import { EMPTY_NUTRITION, DIET_PROFILES, DIET_GOALS, ACTIVITY_LEVELS } from '../data/nutrition';
 import { MEAL_SESSIONS, DEFAULT_SESSION_TIMES, macroText, getLocalYMD, DAY_NAMES_ID, heroForRecipe, formatDuration } from '../data/constants';
 import { STATUS } from '../theme';
@@ -96,24 +96,38 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
     }
   }, [showQuickAiModal, profile?.kulkas]);
 
-  // Semua bahan yang tersedia dari Domus, custom foods, dan database pangan
-  const allAvailableIngredients = useMemo(() => {
-    const fromDomus = (domusItems || []).map((i) => i.name).filter(Boolean);
+  // Bahan yang dikelompokkan: Domus (atas) & Database/Umum
+  const { domusList, dbList } = useMemo(() => {
+    const q = ingredientSearch.trim().toLowerCase();
+
+    // 1. Group Domus (di atas sendiri):
+    const dList = (domusItems || [])
+      .filter((it) => it && it.name && !it.discardedAt)
+      .map((it) => ({
+        name: it.name,
+        stock: it.qtyValue ? `${it.qtyValue} ${it.qtyUnit || ''}`.trim() : null,
+        isDomus: true,
+      }))
+      .filter((it) => !q || it.name.toLowerCase().includes(q));
+
+    // Deduplicate Domus by name
+    const seenNames = new Set(dList.map((d) => d.name.toLowerCase()));
+
+    // 2. Group Database & Makanan Populer:
     const fromCustom = (customFoods || []).map((f) => f.name).filter(Boolean);
     const commonStaples = [
       'Dada Ayam', 'Telur', 'Tahu', 'Tempe', 'Daging Sapi', 'Ikan Salmon', 'Udang',
       'Bayam', 'Brokoli', 'Nasi Merah', 'Nasi Putih', 'Kentang', 'Oatmeal', 'Wortel',
-      'Tomat', 'Alpukat', 'Bawang Putih', 'Bawang Merah', 'Minyak Zaitun'
+      'Tomat', 'Alpukat', 'Bawang Putih', 'Bawang Merah', 'Minyak Zaitun', 'Cabai', 'Keju'
     ];
-    const set = new Set([...fromDomus, ...fromCustom, ...commonStaples]);
-    return Array.from(set);
-  }, [domusItems, customFoods]);
 
-  const suggestedIngredients = useMemo(() => {
-    const q = ingredientSearch.trim().toLowerCase();
-    if (!q) return allAvailableIngredients.slice(0, 16);
-    return allAvailableIngredients.filter((item) => item.toLowerCase().includes(q)).slice(0, 16);
-  }, [allAvailableIngredients, ingredientSearch]);
+    const generalNames = Array.from(new Set([...fromCustom, ...commonStaples]))
+      .filter((name) => !seenNames.has(name.toLowerCase()))
+      .filter((name) => !q || name.toLowerCase().includes(q))
+      .map((name) => ({ name, isDomus: false }));
+
+    return { domusList: dList, dbList: generalNames };
+  }, [domusItems, customFoods, ingredientSearch]);
 
   const handleAddIngredient = (name) => {
     const trimmed = (name || '').trim();
@@ -742,49 +756,131 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
 
                 {/* Search & Add Input */}
                 <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="Cari atau tambah bahan (Domus / Database)..."
-                    value={ingredientSearch}
-                    onChange={(e) => setIngredientSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && ingredientSearch.trim()) {
-                        e.preventDefault();
-                        handleAddIngredient(ingredientSearch);
-                      }
-                    }}
-                    className={`flex-1 px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none focus:ring-1 focus:ring-purple-500`}
-                  />
+                  <div className={`flex items-center gap-2 flex-1 px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} transition-all focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/30`}>
+                    <Search size={15} className={`shrink-0 ${t.textMuted}`} />
+                    <input
+                      type="text"
+                      placeholder="Cari / tambah bahan..."
+                      value={ingredientSearch}
+                      onChange={(e) => setIngredientSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && ingredientSearch.trim()) {
+                          e.preventDefault();
+                          handleAddIngredient(ingredientSearch);
+                        }
+                      }}
+                      className={`w-full bg-transparent ${t.textMain} body-md outline-none placeholder:opacity-40 placeholder:${t.textMuted}`}
+                    />
+                    {ingredientSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setIngredientSearch('')}
+                        className={`p-0.5 ${t.textMuted} hover:${t.textMain} transition-colors`}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
                   {ingredientSearch.trim() && (
                     <button
                       type="button"
                       onClick={() => handleAddIngredient(ingredientSearch)}
-                      className={`px-3.5 py-2.5 rounded-xl ${t.bgAccent} text-white caption font-bold shrink-0 active:scale-95 transition-transform`}
+                      className={`px-3.5 py-2.5 rounded-xl ${t.bgAccent} text-white caption font-bold shrink-0 active:scale-95 transition-transform shadow-sm`}
                     >
                       + Tambah
                     </button>
                   )}
                 </div>
 
-                {/* Quick suggestions chips */}
-                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto hide-scrollbar pt-1">
-                  {suggestedIngredients.map((name) => {
-                    const isSelected = selectedIngredients.includes(name);
-                    return (
-                      <button
-                        type="button"
-                        key={name}
-                        onClick={() => handleToggleIngredient(name)}
-                        className={`px-2.5 py-1 rounded-xl caption transition-all ${
-                          isSelected
-                            ? `${t.bgAccent} text-white font-bold`
-                            : `${isDark ? 'bg-white/5 hover:bg-white/10 text-white/70' : 'bg-black/5 hover:bg-black/10 text-black/70'}`
-                        }`}
-                      >
-                        {isSelected ? '✓ ' : '+ '}{name}
-                      </button>
-                    );
-                  })}
+                {/* Grouped Dropdown List (Domus di atas sendiri, lalu Database/Populer) */}
+                <div className={`max-h-48 overflow-y-auto hide-scrollbar rounded-2xl border ${t.border} ${theme === 'dark' ? 'bg-black/30' : 'bg-black/5'} p-2 space-y-2.5`}>
+                  {/* Tambah bahan custom jika belum ada di database */}
+                  {ingredientSearch.trim() && !domusList.some(d => d.name.toLowerCase() === ingredientSearch.trim().toLowerCase()) && !dbList.some(d => d.name.toLowerCase() === ingredientSearch.trim().toLowerCase()) && (
+                    <div
+                      onClick={() => handleAddIngredient(ingredientSearch)}
+                      className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold ${t.bgAccent} text-white cursor-pointer active:scale-[0.98] transition-all`}
+                    >
+                      <span>+ Tambah &ldquo;{ingredientSearch.trim()}&rdquo;</span>
+                      <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-medium">Bahan Baru</span>
+                    </div>
+                  )}
+
+                  {/* Group 1: Stok Dapur Domus (di atas sendiri) */}
+                  {domusList.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 px-2 py-1 mb-1">
+                        <Box size={12} className="text-sky-400 shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-sky-400">
+                          Stok Dapur Domus ({domusList.length})
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {domusList.map((item) => {
+                          const isSelected = selectedIngredients.includes(item.name);
+                          return (
+                            <div
+                              key={`domus-${item.name}`}
+                              onClick={() => handleToggleIngredient(item.name)}
+                              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                                  : theme === 'dark' ? 'bg-white/5 hover:bg-white/10 text-neutral-200' : 'bg-white hover:bg-black/5 text-neutral-800 shadow-sm'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 truncate pr-2">
+                                <span className="truncate">{item.name}</span>
+                                {item.stock && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${theme === 'dark' ? 'bg-sky-500/20 text-sky-300' : 'bg-sky-50 text-sky-700'}`}>
+                                    {item.stock}
+                                  </span>
+                                )}
+                              </div>
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${isSelected ? 'bg-emerald-500 text-white' : theme === 'dark' ? 'bg-white/10 text-neutral-400' : 'bg-black/5 text-neutral-600'}`}>
+                                {isSelected ? <Check size={12} /> : <Plus size={12} />}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Group 2: Database Bahan & Populer */}
+                  {dbList.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 px-2 py-1 mb-1">
+                        <Utensils size={12} className="text-emerald-400 shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                          Database & Populer
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {dbList.map((item) => {
+                          const isSelected = selectedIngredients.includes(item.name);
+                          return (
+                            <div
+                              key={`db-${item.name}`}
+                              onClick={() => handleToggleIngredient(item.name)}
+                              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                                  : theme === 'dark' ? 'bg-white/5 hover:bg-white/10 text-neutral-200' : 'bg-white hover:bg-black/5 text-neutral-800 shadow-sm'
+                              }`}
+                            >
+                              <span className="truncate pr-2">{item.name}</span>
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${isSelected ? 'bg-emerald-500 text-white' : theme === 'dark' ? 'bg-white/10 text-neutral-400' : 'bg-black/5 text-neutral-600'}`}>
+                                {isSelected ? <Check size={12} /> : <Plus size={12} />}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {domusList.length === 0 && dbList.length === 0 && !ingredientSearch.trim() && (
+                    <p className={`text-xs ${t.textMuted} text-center py-3 italic`}>Belum ada bahan dalam daftar.</p>
+                  )}
                 </div>
               </div>
 
@@ -802,7 +898,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                   placeholder="Misal: aglio e olio, ala Korea, tomyam segar, pasta rendah kalori..."
                   value={quickPrompt}
                   onChange={(e) => setQuickPrompt(e.target.value.slice(0, 150))}
-                  className={`w-full px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none resize-none focus:ring-1 focus:ring-purple-500`}
+                  className={`w-full px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none resize-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 placeholder:opacity-35 placeholder:${t.textMuted}`}
                 />
               </div>
             </div>

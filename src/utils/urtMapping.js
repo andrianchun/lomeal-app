@@ -118,10 +118,16 @@ export const calculateGramsFromURT = (qty, unit) => {
   if (normUnit === 'g' || normUnit === 'gram' || normUnit === 'ml') {
     return Number(qty);
   }
-  
   if (URT_DICTIONARY[normUnit]) {
     return Number(qty) * URT_DICTIONARY[normUnit];
   }
   
   return null;
 };
+
+export const UNIT_OPTIONS = [
+  'g', 'ml', 'porsi', 'potong', 'centong', 'sdm', 'sdt', 'butir', 'buah',
+  'mangkok', 'piring', 'gelas', 'cangkir', 'botol', 'kaleng', 'cup',
+  'bungkus', 'iris', 'lembar', 'tusuk', 'ekor', 'biji', 'kepal', 'genggam', 'batang', 'siung'
+];
+

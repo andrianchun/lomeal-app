@@ -297,9 +297,9 @@ export default function CoachLomyFloat({
             shadow-xl shadow-emerald-500/30 overflow-hidden relative
             cursor-grab active:cursor-grabbing"
           style={{
-            backgroundImage: "url('/bg-lomeal-coach.webp')",
-            backgroundSize: '450%',
-            backgroundPosition: '50% 12%',
+            backgroundImage: "url('/bg-dashboard.webp')",
+            backgroundSize: '240%',
+            backgroundPosition: '45% 10%',
             touchAction: 'none',
           }}
           onPointerDown={onPointerDown}

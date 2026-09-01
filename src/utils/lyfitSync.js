@@ -92,56 +92,101 @@ export const subscribeLyfitProfile = (uid, cb) =>
 export const extractLyfitDay = (yearDays, ymd) => {
   const day = yearDays?.[ymd];
   if (!day) return null;
-  const bio = day.bioData || {};
+  const bio = day.bioData || day.biometrics || {};
 
-  // Dukung array maupun map/object workouts
+  // Dukung array maupun map/object workouts dari seluruh format & variasi penamaan Logym
+  const rawWorkouts = day.workouts ?? day.workout ?? day.history ?? day.sessions ?? day.session ?? day.activities ?? day.activity;
   let workouts = [];
-  if (Array.isArray(day.workouts)) {
-    workouts = day.workouts;
-  } else if (typeof day.workouts === 'object' && day.workouts !== null) {
-    workouts = Object.values(day.workouts);
-  } else if (day.programId || day.log || day.exercises || day.exerciseLogs) {
+  if (Array.isArray(rawWorkouts)) {
+    workouts = rawWorkouts;
+  } else if (typeof rawWorkouts === 'object' && rawWorkouts !== null) {
+    workouts = Object.values(rawWorkouts);
+  } else if (day.programId || day.log || day.exercises || day.exerciseLogs || day.workoutLog || day.logs || day.completedExercises) {
     workouts = [day];
   }
 
   // Hitung jumlah gerakan latihan (exercises) dari semua sesi hari ini
   let totalExercises = 0;
+  let completedSessions = 0;
+
   workouts.forEach((w) => {
-    if (!w) return;
-    if (w.log && typeof w.log === 'object' && Object.keys(w.log).length > 0) {
-      totalExercises += Object.keys(w.log).length;
+    if (!w || typeof w !== 'object') return;
+    const logObj = w.log || w.exerciseLogs || w.workoutLog || w.logs || w.records;
+    const hasLogs = logObj && typeof logObj === 'object' && Object.keys(logObj).length > 0;
+    const isCompleted = w.status === 'completed' || w.completed === true || w.programId === 'adhoc' || hasLogs;
+    if (isCompleted || w.isWorkout) completedSessions += 1;
+
+    if (hasLogs) {
+      totalExercises += Object.keys(logObj).length;
     } else if (Array.isArray(w.exercises) && w.exercises.length > 0) {
       totalExercises += w.exercises.length;
+    } else if (typeof w.exercises === 'object' && w.exercises !== null && Object.keys(w.exercises).length > 0) {
+      totalExercises += Object.keys(w.exercises).length;
     } else if (Array.isArray(w.overriddenExercises) && w.overriddenExercises.length > 0) {
       totalExercises += w.overriddenExercises.length;
-    } else if (w.exerciseLogs && typeof w.exerciseLogs === 'object' && Object.keys(w.exerciseLogs).length > 0) {
-      totalExercises += Object.keys(w.exerciseLogs).length;
-    } else if (w.status === 'completed' || w.programId || w.duration) {
+    } else if (Array.isArray(w.completedExercises) && w.completedExercises.length > 0) {
+      totalExercises += w.completedExercises.length;
+    } else if (Array.isArray(w.exerciseList) && w.exerciseList.length > 0) {
+      totalExercises += w.exerciseList.length;
+    } else if (Array.isArray(w.items) && w.items.length > 0) {
+      totalExercises += w.items.length;
+    } else if (w.exerciseCount && Number(w.exerciseCount) > 0) {
+      totalExercises += Number(w.exerciseCount);
+    } else if (w.workoutCount && Number(w.workoutCount) > 0) {
+      totalExercises += Number(w.workoutCount);
+    } else if (isCompleted || w.duration || w.activeMinutes || w.caloriesBurned || w.burnedKcal) {
       totalExercises += 1;
     }
   });
 
-  // Fallback: Jika tidak ditemukan di w.log per-sesi, cek langsung di tingkat hari
+  // Fallback: Jika tidak ditemukan di per-sesi, periksa langsung di tingkat root hari (day)
   if (totalExercises === 0) {
-    if (day.exerciseLogs && typeof day.exerciseLogs === 'object' && Object.keys(day.exerciseLogs).length > 0) {
-      totalExercises += Object.keys(day.exerciseLogs).length;
+    const rootLogs = day.exerciseLogs || day.log || day.workoutLog || day.logs || day.records;
+    if (rootLogs && typeof rootLogs === 'object' && Object.keys(rootLogs).length > 0) {
+      totalExercises += Object.keys(rootLogs).length;
+      if (completedSessions === 0) completedSessions = 1;
     } else if (Array.isArray(day.exercises) && day.exercises.length > 0) {
       totalExercises += day.exercises.length;
-    } else if (day.log && typeof day.log === 'object' && Object.keys(day.log).length > 0) {
-      totalExercises += Object.keys(day.log).length;
-    } else if (workouts.length > 0) {
+      if (completedSessions === 0) completedSessions = 1;
+    } else if (typeof day.exercises === 'object' && day.exercises !== null && Object.keys(day.exercises).length > 0) {
+      totalExercises += Object.keys(day.exercises).length;
+      if (completedSessions === 0) completedSessions = 1;
+    } else if (Array.isArray(day.completedExercises) && day.completedExercises.length > 0) {
+      totalExercises += day.completedExercises.length;
+      if (completedSessions === 0) completedSessions = 1;
+    } else if (day.exerciseCount && Number(day.exerciseCount) > 0) {
+      totalExercises += Number(day.exerciseCount);
+      if (completedSessions === 0) completedSessions = 1;
+    } else if (bio.workoutCount && Number(bio.workoutCount) > 0) {
+      totalExercises += Number(bio.workoutCount);
+      if (completedSessions === 0) completedSessions = 1;
+    } else if (bio.exerciseCount && Number(bio.exerciseCount) > 0) {
+      totalExercises += Number(bio.exerciseCount);
+      if (completedSessions === 0) completedSessions = 1;
+    } else if (workouts.length > 0 && workouts.some(w => typeof w === 'object' && Object.keys(w).length > 0)) {
       totalExercises = workouts.length;
+      if (completedSessions === 0) completedSessions = workouts.length;
     }
   }
 
+  const steps = Number(bio.steps) || 0;
+  const stepsKcal = Math.round(steps * 0.04);
+  const burnedKcal = Number(bio.activityCalories) || 0;
+  const floorKcal = Number(bio.activityCaloriesFloor) || 0;
+
   return {
-    burnedKcal: Number(bio.activityCalories) || 0,
-    floorKcal: Number(bio.activityCaloriesFloor) || 0,
-    steps: Number(bio.steps) || 0,
+    burnedKcal,
+    floorKcal,
+    steps,
+    stepsKcal,
+    bmr: Number(bio.bmr) || null,
     weight: Number(bio.weight) || null,
+    height: Number(bio.height) || null,
     workoutCount: totalExercises,
-    workoutNames: workouts.map((w) => w.programName || w.name).filter(Boolean),
+    sessionCount: completedSessions || (totalExercises > 0 ? 1 : 0),
+    workoutNames: workouts.map((w) => w.programName || w.name || w.title || w.workoutName || w.programId).filter(Boolean),
     nutritionOverride: bio._manualFlags?.nutritionCalories ? (Number(bio.nutritionCalories) || null) : null,
+    workouts,
   };
 };
 

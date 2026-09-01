@@ -38,8 +38,8 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
     const physical = profile?.physical;
     if (!physical?.weight || !physical?.height || !physical?.dob || !physical?.gender) return null;
     const age = computeAge(physical.dob);
-    return calcTargets({ ...physical, age, dietGoal, dietProfile, pace, waterGoal, customDeltaKcal: customDeltaNum, customProteinPerKg: customProteinNum, medicalHistory });
-  }, [profile?.physical, dietGoal, dietProfile, pace, waterGoal, customDeltaNum, customProteinNum, medicalHistory]);
+    return calcTargets({ ...physical, age, activityLevel: profile?.activityLevel || physical?.activityLevel || 'light', dietGoal, dietProfile, pace, waterGoal, customDeltaKcal: customDeltaNum, customProteinPerKg: customProteinNum, medicalHistory });
+  }, [profile?.physical, profile?.activityLevel, dietGoal, dietProfile, pace, waterGoal, customDeltaNum, customProteinNum, medicalHistory]);
 
   React.useEffect(() => {
     if (!waterCalcOpen) return;
@@ -163,33 +163,42 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
 
           <div>
             <p className={`h3 ${t.textMuted} mb-2`}>Profil Makanan</p>
-            <div className="grid grid-cols-2 gap-2">
-              {DIET_PROFILES.map((dp) => (
-                <Card key={dp.id} selected={dietProfile === dp.id} onClick={() => setDietProfile(dp.id)}>
-                  <span className="text-xl">{dp.emoji}</span>
-                  <p className={`caption font-bold mt-1 ${t.textMain}`}>{dp.label}</p>
-                </Card>
-              ))}
+            <div className="flex flex-col gap-2">
+              {Array.from({ length: Math.ceil(DIET_PROFILES.length / 2) }, (_, rowIdx) => {
+                const row = DIET_PROFILES.slice(rowIdx * 2, rowIdx * 2 + 2);
+                const rowHasHiProtein = row.some(dp => dp.id === 'muscle_gain');
+                return (
+                  <React.Fragment key={rowIdx}>
+                    <div className="grid grid-cols-2 gap-2">
+                      {row.map((dp) => (
+                        <Card key={dp.id} selected={dietProfile === dp.id} onClick={() => setDietProfile(dp.id)}>
+                          <span className="text-xl">{dp.emoji}</span>
+                          <p className={`caption font-bold mt-1 ${t.textMain}`}>{dp.label}</p>
+                        </Card>
+                      ))}
+                    </div>
+                    {rowHasHiProtein && dietProfile === 'muscle_gain' && (
+                      <div className={`p-3 rounded-2xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'} backdrop-blur-xl animate-in fade-in slide-in-from-top-2 duration-300`}>
+                        <p className={`h3 ${t.textMuted} mb-2`}>Target Protein (g/kg BB)</p>
+                        <div className="relative">
+                          <SwipeInput
+                            value={customProteinPerKg === '' ? 2.0 : Number(customProteinPerKg)}
+                            onChange={(v) => setCustomProteinPerKg(v === '' ? '' : Number(v))}
+                            min={1.0} max={3.0} step={0.1}
+                            className={`w-full ${t.inputBg} ${t.textMain} p-3 rounded-xl outline-none font-black text-lg pr-16`}
+                          />
+                          <span className={`absolute right-4 top-1/2 -translate-y-1/2 caption font-bold ${t.textMuted}`}>g/kg</span>
+                        </div>
+                        <p className={`caption ${t.textMuted} mt-1.5`}>
+                          Normalnya: <span className={t.textMain}>1.6 – 2.2 g/kg</span> untuk hipertrofi otot.
+                        </p>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </div>
           </div>
-
-          {dietProfile === 'muscle_gain' && (
-            <div>
-              <p className={`h3 ${t.textMuted} mb-2`}>Target Protein (g/kg BB)</p>
-              <div className="relative">
-                <SwipeInput
-                  value={customProteinPerKg === '' ? 2.0 : Number(customProteinPerKg)}
-                  onChange={(v) => setCustomProteinPerKg(v === '' ? '' : Number(v))}
-                  min={1.0} max={3.0} step={0.1}
-                  className={`w-full ${t.inputBg} ${t.textMain} p-3 rounded-xl outline-none font-black text-lg pr-16`}
-                />
-                <span className={`absolute right-4 top-1/2 -translate-y-1/2 caption font-bold ${t.textMuted}`}>g/kg</span>
-              </div>
-              <p className={`caption ${t.textMuted} mt-1.5`}>
-                Normalnya: <span className={t.textMain}>1.6 – 2.2 g/kg</span> untuk hipertrofi otot.
-              </p>
-            </div>
-          )}
 
           <div>
             <p className={`h3 ${t.textMuted} mb-2`}>Target Air Minum / Hari</p>

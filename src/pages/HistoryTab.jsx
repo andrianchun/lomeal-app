@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { 
   ChevronLeft, ChevronRight, CalendarDays, CalendarRange, 
   Activity, HeartPulse, Plus, X, Bell, BellOff, Clock, 
@@ -13,8 +13,10 @@ import {
   MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, 
   getMonthKey, DEFAULT_SESSION_TIMES, weekStripDates, WATER_STEP_ML 
 } from '../data/constants';
-import { computeDayTotals, NUTRIENTS } from '../data/nutrition';
+import { computeDayTotals, NUTRIENTS, calcTEF, calcBMR } from '../data/nutrition';
+import { extractLyfitDay } from '../utils/lyfitSync';
 import { STATUS } from '../theme';
+import { URT_DICTIONARY, normalizeUnit, UNIT_OPTIONS } from '../utils/urtMapping';
 import useBackClose from '../hooks/useBackClose';
 
 const shiftYmd = (ymd, days) => {
@@ -45,7 +47,7 @@ const formatShortDate = (ymd) => {
  * - Bottom Sheet interaktif dengan drag handle & swipe ganti hari.
  */
 const HistoryTab = ({ 
-  t, theme, profile, daysMap = {}, saveDay, ensureMonth, 
+  t, theme, logymUser, lyfitToday, lyfitYearData, profile, daysMap = {}, saveDay, ensureMonth, 
   recipes = [], mealPreps = [], saveMealPrepsFn, customFoods = [], 
   domusItems = [], showAlert, showToast, saveProfilePatch 
 }) => {
@@ -281,7 +283,7 @@ const HistoryTab = ({
     showToast?.('Makanan dihapus');
   };
 
-  const editEntryGrams = (ymd, sessionId, entryId, grams) => {
+  const editEntryGrams = (ymd, sessionId, entryId, grams, nextUnit) => {
     patchMeals(ymd, (meals) => ({
       ...meals,
       [sessionId]: (meals[sessionId] || []).map((e) => {
@@ -292,6 +294,7 @@ const HistoryTab = ({
         return { 
           ...e, 
           grams, 
+          unit: nextUnit !== undefined ? nextUnit : e.unit,
           baseGrams: bg, 
           baseNutrition: bn, 
           nutrition: Object.fromEntries(Object.entries(bn).map(([k, v]) => [k, Math.round(v * factor * 10) / 10])) 
@@ -360,13 +363,43 @@ const HistoryTab = ({
     }
   };
 
+  // Single Source of Truth untuk kalkulasi Target Harian (Dinamis dengan Logym jika terhubung)
+  const getEffectiveDayTarget = useCallback((ymd, dayData) => {
+    const isToday = ymd === todayStr;
+    const isFuture = ymd > todayStr;
+    const baseTargets = (isToday || isFuture ? profile?.targets : (dayData?.targetSnapshot || profile?.targets)) || {};
+    const baseTdee = baseTargets?.tdee || baseTargets?.kcal || 0;
+    const kcalDiff = (baseTargets?.kcal || 0) - baseTdee;
+
+    const lyfitDay = extractLyfitDay(lyfitYearData, ymd) || (isToday ? lyfitToday : null);
+    const totals = computeDayTotals(dayData || {});
+    const bmrBase = lyfitDay?.bmr || baseTargets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
+    const tefDay = calcTEF({
+      protein: totals.protein,
+      carbs: totals.carbs,
+      fat: totals.fat,
+      kcal: totals.kcal,
+      bmr: bmrBase
+    }).total;
+
+    const burnedTotal = logymUser ? (lyfitDay?.burnedKcal || (bmrBase + tefDay)) : (baseTdee || 0);
+    const allowanceKcal = (logymUser && burnedTotal > 0)
+      ? Math.max(0, burnedTotal + kcalDiff)
+      : (baseTargets.kcal || 2000);
+
+    return {
+      ...baseTargets,
+      kcal: allowanceKcal,
+    };
+  }, [todayStr, profile?.targets, profile?.physical, lyfitYearData, lyfitToday, logymUser]);
+
   // Helper Dots Status Kepatuhan Kalori
   const getDayDot = (ymd) => {
     const dayData = daysMap[ymd];
     if (!dayData) return null;
     const totals = computeDayTotals(dayData);
     if (!totals.kcal) return null;
-    const dayTargets = dayData.targetSnapshot || targets;
+    const dayTargets = getEffectiveDayTarget(ymd, dayData);
     const ratio = totals.kcal / (dayTargets.kcal || 2000);
     return ratio > 1.05 ? STATUS.danger : ratio >= 0.7 ? STATUS.ok : STATUS.warn;
   };
@@ -447,7 +480,7 @@ const HistoryTab = ({
   // Data hari yang dipilih
   const currentDayData = daysMap[selectedDate] || { meals: {}, water: 0 };
   const currentDayTotals = computeDayTotals(currentDayData);
-  const currentDayTargets = currentDayData.targetSnapshot || targets;
+  const currentDayTargets = getEffectiveDayTarget(selectedDate, currentDayData);
   const isFutureDate = selectedDate > todayStr;
 
   return (
@@ -741,38 +774,60 @@ const HistoryTab = ({
                                   <p className={`text-xs ${t.textMuted} italic py-1`}>Belum ada menu dicatat.</p>
                                 ) : (
                                   <div className="space-y-1.5 mt-2">
-                                    {entries.map((e) => (
-                                      <div key={e.id} className={`flex items-center justify-between px-3 py-2 rounded-xl ${t.bgSunken}`}>
-                                        <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
-                                          <p className={`text-xs font-semibold truncate ${t.textMain}`}>
-                                            {e.name}
-                                          </p>
-                                          {e.source === 'recipe' && <ChefHat size={12} className="text-emerald-500 shrink-0" />}
-                                          {e.source === 'domus' && <Box size={12} className="text-sky-500 shrink-0" />}
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                          <div className="flex items-center">
-                                            <input
-                                              type="number"
-                                              inputMode="numeric"
-                                              value={e.grams || ''}
-                                              onChange={(ev) => editEntryGrams(selectedDate, s.id, e.id, Number(ev.target.value) || 0)}
-                                              className={`w-11 text-right text-xs bg-transparent border-b ${t.border} outline-none no-spinners ${t.textMain} font-bold`}
-                                            />
-                                            <span className={`text-[10px] ${t.textMuted} ml-0.5`}>g</span>
+                                    {entries.map((e) => {
+                                      const rawUnit = e.unit || (s.id === 'drink' ? 'ml' : 'g');
+                                      const unit = URT_DICTIONARY[normalizeUnit(rawUnit)] ? normalizeUnit(rawUnit) : (rawUnit === 'ml' ? 'ml' : 'g');
+                                      const isGram = unit === 'g' || unit === 'ml';
+                                      const unitWeight = isGram ? 1 : (URT_DICTIONARY[unit] || 1);
+                                      const qty = Math.round(((e.grams || 0) / unitWeight) * 10) / 10;
+
+                                      return (
+                                        <div key={e.id} className={`flex items-center justify-between px-3 py-2 rounded-xl ${t.bgSunken}`}>
+                                          <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
+                                            <p className={`text-xs font-semibold truncate ${t.textMain}`}>
+                                              {e.name}
+                                            </p>
+                                            {e.source === 'recipe' && <ChefHat size={12} className="text-emerald-500 shrink-0" />}
+                                            {e.source === 'domus' && <Box size={12} className="text-sky-500 shrink-0" />}
                                           </div>
-                                          <span className={`text-xs font-bold ${t.textMuted} w-14 text-right`}>
-                                            {Math.round(e.nutrition?.kcal || 0)} kkal
-                                          </span>
-                                          <button
-                                            onClick={() => removeEntry(selectedDate, s.id, e.id)}
-                                            className="p-1 text-red-400 hover:text-red-500 transition-colors"
-                                          >
-                                            <X size={13} />
-                                          </button>
+                                          <div className="flex items-center gap-2 shrink-0">
+                                            <div className="flex items-center gap-1">
+                                              <input
+                                                type="number"
+                                                inputMode="numeric"
+                                                value={qty || ''}
+                                                onChange={(ev) => {
+                                                  const newQty = Number(ev.target.value) || 0;
+                                                  editEntryGrams(selectedDate, s.id, e.id, Math.round(newQty * unitWeight), unit);
+                                                }}
+                                                className={`w-9 text-right text-xs bg-transparent border-b ${t.border} outline-none no-spinners ${t.textMain} font-bold`}
+                                              />
+                                              <select
+                                                value={unit}
+                                                onChange={(ev) => {
+                                                  const newUnit = ev.target.value;
+                                                  const newUnitWeight = (newUnit === 'g' || newUnit === 'ml') ? 1 : (URT_DICTIONARY[newUnit] || 1);
+                                                  const newGrams = Math.round(qty * newUnitWeight);
+                                                  editEntryGrams(selectedDate, s.id, e.id, newGrams, newUnit);
+                                                }}
+                                                className={`bg-transparent text-[10px] font-bold outline-none cursor-pointer ${t.textMuted}`}
+                                              >
+                                                {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
+                                              </select>
+                                            </div>
+                                            <span className={`text-xs font-bold ${t.textMuted} w-14 text-right`}>
+                                              {Math.round(e.nutrition?.kcal || 0)} kkal
+                                            </span>
+                                            <button
+                                              onClick={() => removeEntry(selectedDate, s.id, e.id)}
+                                              className="p-1 text-red-400 hover:text-red-500 transition-colors"
+                                            >
+                                              <X size={13} />
+                                            </button>
+                                          </div>
                                         </div>
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
                                   </div>
                                 )}
                               </div>

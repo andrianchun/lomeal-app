@@ -94,7 +94,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, o
     // wajib dicek di sini juga (lihat komentar sama di OnboardingFlow.jsx).
     if (s.key === 'identity') return answers.name?.trim().length > 0 && answers.gender && isValidAge(answers.dob);
     if (s.key === 'biometrics') return isValidAge(answers.dob) && answers.height > 0 && answers.weight > 0;
-    if (s.key === 'activityLevel') return !!answers.activityLevel;
+    if (s.key === 'activityLevel') return !!answers.activityLevel || !!logymUser;
     if (s.key === 'diet') return !!answers.dietProfile;
     if (s.key === 'dietGoal') return !!answers.dietGoal;
     if (s.key === 'pace') return true; // preset default 'normal' udah kepilih, gak wajib diubah
@@ -149,7 +149,7 @@ const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, o
         ...profile,
         dob: answers.dob, gender: answers.gender, age, 
         height: Number(answers.height), weight: Number(answers.weight), 
-        activityLevel: answers.activityLevel,
+        activityLevel: answers.activityLevel || (logymUser ? 'light' : 'sedentary'),
         dietProfile: answers.dietProfile, 
         dietGoal: answers.dietGoal,
         pace: answers.pace,
@@ -315,7 +315,8 @@ const DietQuestionnaireModal = ({ t, theme, profile, user, logymUser, onClose, o
                               }}
                               onHealthConnect={handleHealthConnect}
                               onAppleHealth={handleAppleHealth}
-                              fromLogym={false}
+                              fromLogym={!!logymUser}
+                              logymConnected={!!logymUser}
                             />
                             </div>{/* end scrollable content */}
 

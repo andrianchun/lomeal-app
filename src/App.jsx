@@ -684,6 +684,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     const age = computeAge(physical.dob);
     const newTargets = calcTargets({ 
       ...physical, age, 
+      activityLevel: profile?.activityLevel || physical?.activityLevel || 'light',
       dietGoal: profile?.dietGoal, 
       dietProfile: profile?.dietProfile, 
       pace: profile?.pace, 
@@ -694,7 +695,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     });
     if (JSON.stringify(newTargets) === JSON.stringify(profile?.targets)) return;
     saveProfilePatch({ targets: newTargets });
-  }, [profile?.physical, profile?.dietGoal, profile?.dietProfile, profile?.pace, profile?.customDeltaKcal, profile?.customProteinPerKg, profile?.medicalHistory, profile?.targets?.waterGoal]);
+  }, [profile?.physical, profile?.activityLevel, profile?.dietGoal, profile?.dietProfile, profile?.pace, profile?.customDeltaKcal, profile?.customProteinPerKg, profile?.medicalHistory, profile?.targets?.waterGoal]);
 
   // Target kalori/makro → Logym, biar kartu "Kalori Dimakan" Logym baca target dari sini
   // langsung (Logym gak lagi punya preset delta cutting/bulking sendiri).

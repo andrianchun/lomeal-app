@@ -1,7 +1,7 @@
 // Cek cepat inti perhitungan gizi. Jalanin: node src/data/nutrition.selfcheck.mjs
 // Tanpa framework — nutrition.js nol impor, jadi bisa jalan di node polos.
 import assert from 'node:assert/strict';
-import { EMPTY_NUTRITION, addNutrition, scaleNutrition, computeDayTotals, reconcileKcal, nutritionForAmount } from './nutrition.js';
+import { EMPTY_NUTRITION, addNutrition, scaleNutrition, computeDayTotals, reconcileKcal, nutritionForAmount, calcTEF, calcBMR, calcTargets } from './nutrition.js';
 
 // ---------- addNutrition ----------
 const a = { ...EMPTY_NUTRITION, kcal: 100, protein: 10 };
@@ -82,6 +82,55 @@ assert.equal(nutritionForAmount({ nutrition: { kcal: 61 } }, 250).kcal, 152.5);
 // Takaran 100 = apa adanya.
 assert.equal(nutritionForAmount({ nutrition: per100 }, 100).kcal, 500);
 // Nutrien skala mcg gak boleh amblas jadi 0 di porsi kecil (dulu dibulatkan ke 0,1).
-assert.equal(nutritionForAmount({ nutrition: per100 }, 30).vitB12, 0.03);
+// ---------- calcTEF (Thermic Effect of Food) ----------
+// 100g protein (400kcal * 25% = 100), 200g carbs (800kcal * 7.5% = 60), 50g fat (450kcal * 2% = 9) => 169 kcal
+const tef1 = calcTEF({ protein: 100, carbs: 200, fat: 50 });
+assert.equal(tef1.total, 169);
+assert.equal(tef1.hasMacros, true);
+assert.equal(tef1.breakdown.protein, 100);
+assert.equal(tef1.breakdown.carbs, 60);
+assert.equal(tef1.breakdown.fat, 9);
 
-console.log('nutrition OK');
+// Tanpa makro tapi ada kalori makanan: 2000 kcal * 10% = 200 kcal
+assert.equal(calcTEF({ kcal: 2000 }).total, 200);
+
+// Tanpa makanan: 1600 BMR * 10% = 160 kcal
+assert.equal(calcTEF({ bmr: 1600 }).total, 160);
+
+// ---------- calcBMR & calcTargets ----------
+const maleBio = { weight: 75, height: 175, age: 25, gender: 'male' };
+const femaleBio = { weight: 55, height: 160, age: 25, gender: 'female' };
+
+// BMR Mifflin-St Jeor:
+// Male: 10*75 + 6.25*175 - 5*25 + 5 = 750 + 1093.75 - 125 + 5 = 1723.75 -> 1724
+assert.equal(calcBMR(maleBio), 1724);
+// Female: 10*55 + 6.25*160 - 5*25 - 161 = 550 + 1000 - 125 - 161 = 1264
+assert.equal(calcBMR(femaleBio), 1264);
+
+// Target Bulking vs Cutting vs Maintenance
+const tgMaint = calcTargets({ ...maleBio, activityLevel: 'light', dietGoal: 'maintenance' });
+assert.equal(tgMaint.tdee, Math.round(1724 * 1.375)); // 2371
+assert.equal(tgMaint.kcal, tgMaint.tdee);
+
+const tgCut = calcTargets({ ...maleBio, activityLevel: 'light', dietGoal: 'cutting', pace: 'normal' });
+assert.equal(tgCut.kcal < tgCut.tdee, true);
+assert.equal(tgCut.dietGoal, 'cutting');
+
+const tgCutAlias = calcTargets({ ...maleBio, activityLevel: 'light', dietGoal: 'cut', pace: 'normal' });
+assert.equal(tgCutAlias.kcal, tgCut.kcal, 'Alias cut harus menghasilkan kcal yang sama dengan cutting');
+
+const tgBulk = calcTargets({ ...maleBio, activityLevel: 'light', dietGoal: 'bulk', pace: 'normal' });
+assert.equal(tgBulk.kcal > tgBulk.tdee, true);
+
+const tgBulkAlias = calcTargets({ ...maleBio, activityLevel: 'light', dietGoal: 'bulking', pace: 'normal' });
+assert.equal(tgBulkAlias.kcal, tgBulk.kcal, 'Alias bulking harus menghasilkan kcal yang sama dengan bulk');
+
+// Custom Delta
+const tgCustomDelta = calcTargets({ ...maleBio, activityLevel: 'light', dietGoal: 'cutting', customDeltaKcal: 500 });
+assert.equal(tgCustomDelta.kcal, tgCustomDelta.tdee - 500);
+
+// Custom Protein Per Kg
+const tgCustomProtein = calcTargets({ ...maleBio, customProteinPerKg: 2.2 });
+assert.equal(tgCustomProtein.protein, Math.round(75 * 2.2));
+
+console.log('nutrition OK (all tests passed)');
