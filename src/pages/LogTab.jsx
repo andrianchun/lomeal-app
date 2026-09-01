@@ -68,7 +68,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession, ensureMonth }) => {
 
   const todayYmd = getLocalYMD();
-  const [selectedYmd, setSelectedYmd] = useState(todayYmd);
+  const routeState = useLocation().state;
+  const [selectedYmd, setSelectedYmd] = useState(() => routeState?.selectedDate || routeState?.targetDate || todayYmd);
 
   // === Pastikan bulan dari tanggal yang dipilih dimuat ===
   useEffect(() => {
@@ -81,11 +82,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
   const [detailSlide, setDetailSlide] = useState(0);
 
-  // Datang dari tombol "Makan" di stok Meal Prep: langsung buka sheet sesi tujuannya.
-  const routeState = useLocation().state;
+  // Datang dari tombol "Makan" di stok Meal Prep / Calendar: langsung buka tanggal & sheet sesi tujuannya.
   useEffect(() => {
+    if (routeState?.selectedDate) setSelectedYmd(routeState.selectedDate);
     if (routeState?.openSession) setDetailSession(routeState.openSession);
-  }, [routeState?.openSession]);
+  }, [routeState?.selectedDate, routeState?.openSession]);
 
   useEffect(() => {
     setDetailSlide(0);

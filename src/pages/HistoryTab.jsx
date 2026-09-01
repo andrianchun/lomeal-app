@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   ChevronLeft, ChevronRight, CalendarDays, CalendarRange, 
   Activity, HeartPulse, Plus, X, Bell, BellOff, Clock, 
-  ChefHat, Box, Droplets, Droplet, Pill, Check, Sparkles, AlertCircle
+  ChefHat, Box, Droplets, Droplet, Pill, Check, Sparkles, AlertCircle, Pencil, Utensils
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import SwipeInput from '../components/SwipeInput';
 import PanoramicSlider from '../components/PanoramicSlider';
-import FoodPickerModal from '../components/FoodPickerModal';
 import { 
   MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, 
   getMonthKey, DEFAULT_SESSION_TIMES, weekStripDates, WATER_STEP_ML 
@@ -51,6 +51,7 @@ const HistoryTab = ({
   recipes = [], mealPreps = [], saveMealPrepsFn, customFoods = [], 
   domusItems = [], showAlert, showToast, saveProfilePatch 
 }) => {
+  const navigate = useNavigate();
   const todayStr = getLocalYMD(new Date());
   const [selectedDate, setSelectedDate] = useState(todayStr);
 
@@ -83,7 +84,6 @@ const HistoryTab = ({
 
   // Sub-tab di bottom sheet saat mode Makan (makan / nutrisi)
   const [sheetSubTab, setSheetSubTab] = useState('makan'); // 'makan' | 'nutrisi'
-  const [picker, setPicker] = useState(null);
 
   const targets = profile?.targets || {};
   const medicines = profile?.medicines || [];
@@ -393,12 +393,17 @@ const HistoryTab = ({
     };
   }, [todayStr, profile?.targets, profile?.physical, lyfitYearData, lyfitToday, logymUser]);
 
-  // Helper Dots Status Kepatuhan Kalori
+  // Helper Dots Status Kepatuhan Kalori (Tercatat vs Direncanakan)
   const getDayDot = (ymd) => {
     const dayData = daysMap[ymd];
     if (!dayData) return null;
     const totals = computeDayTotals(dayData);
     if (!totals.kcal) return null;
+    const isFuture = ymd > todayStr;
+    const hasPlanned = Object.values(dayData.meals || {}).some(arr => (arr || []).some(e => e.planned || e.isMealPrep));
+    if (isFuture || hasPlanned) {
+      return '#f59e0b'; // Amber dot untuk meal prep / direncanakan
+    }
     const dayTargets = getEffectiveDayTarget(ymd, dayData);
     const ratio = totals.kcal / (dayTargets.kcal || 2000);
     return ratio > 1.05 ? STATUS.danger : ratio >= 0.7 ? STATUS.ok : STATUS.warn;
@@ -698,17 +703,8 @@ const HistoryTab = ({
                 >
                   {/* Header Detail Tanggal */}
                   <div className="flex items-center justify-between pb-3 border-b border-black/5 dark:border-white/5 shrink-0">
-                    <div>
+                    <div className="flex items-center gap-2">
                       <p className={`text-base font-black ${t.textMain}`}>{formatPrettyDate(selectedDate)}</p>
-                      <p className={`text-xs font-semibold ${t.textMuted} mt-0.5`}>
-                        {showHealthMode ? (
-                          <span>Ringkasan Kesehatan &amp; Kebugaran</span>
-                        ) : (
-                          <span>
-                            {isFutureDate ? '📅 Rencana Meal Prep' : '📖 Riwayat Makan'} · {Math.round(currentDayTotals.kcal)} / {Math.round(currentDayTargets.kcal || 2000)} kkal
-                          </span>
-                        )}
-                      </p>
                     </div>
 
                     {!showHealthMode && (
@@ -731,50 +727,58 @@ const HistoryTab = ({
 
                   {/* KONTEN TAMPILAN: MODE MAKAN / NUTRISI */}
                   {!showHealthMode && (
-                    <div className="pt-4 space-y-4">
+                    <div className="pt-3 space-y-3">
                       {sheetSubTab === 'makan' && (
                         <>
-                          {/* Sesi Makan */}
+                          {/* Ringkasan Singkat Total Kalori & Makro */}
+                          <div className={`p-3 rounded-2xl border ${t.border} ${t.bgCard} flex items-center justify-between`}>
+                            <div>
+                              <span className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Total Asupan</span>
+                              <p className={`text-sm font-black ${t.textMain}`}>
+                                {Math.round(currentDayTotals.kcal)} <span className="text-xs font-semibold text-neutral-400">/ {Math.round(currentDayTargets.kcal || 2000)} kkal</span>
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2.5 text-[11px] font-bold">
+                              <span className="text-rose-500">P {Math.round(currentDayTotals.protein)}g</span>
+                              <span className="text-amber-500">K {Math.round(currentDayTotals.carbs)}g</span>
+                              <span className="text-blue-500">L {Math.round(currentDayTotals.fat)}g</span>
+                            </div>
+                          </div>
+
+                          {/* Sesi Makan (Minimalis & Read-Only) */}
                           {MEAL_SESSIONS.filter(s => s.id !== 'drink').map((s) => {
                             const entries = currentDayData.meals?.[s.id] || [];
-                            const sessionTime = currentDayData.sessionTimes?.[s.id] || DEFAULT_SESSION_TIMES[s.id] || '12:00';
-                            const reminderOn = currentDayData.reminders?.[s.id] ?? (profile?.settings?.reminderEnabled ?? false);
+                            const sessionKcal = entries.reduce((sum, e) => sum + (Number(e.nutrition?.kcal) || 0), 0);
+                            const hasPlanned = entries.some(e => e.planned || e.isMealPrep || isFutureDate);
 
                             return (
-                              <div key={s.id} className={`p-3.5 rounded-2xl border ${t.border} ${t.bgCard}`}>
-                                <div className="flex items-center justify-between mb-2">
+                              <div key={s.id} className={`p-3.5 rounded-2xl border ${t.border} ${t.bgCard} space-y-2`}>
+                                <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
                                     <span className="text-sm font-bold">{s.emoji} {s.label}</span>
-                                    <div className={`flex items-center border ${t.border} rounded-lg px-2 py-0.5 ${t.bgSunken}`}>
-                                      <Clock size={10} className={`${t.textMuted} mr-1`} />
-                                      <input
-                                        type="time"
-                                        value={sessionTime}
-                                        onChange={(e) => setSessionTime(selectedDate, s.id, e.target.value)}
-                                        className={`bg-transparent outline-none text-[11px] font-bold ${t.textMain} w-[42px] p-0 border-none no-spinners`}
-                                      />
-                                    </div>
-                                    <button
-                                      onClick={() => toggleReminder(selectedDate, s.id)}
-                                      className={`p-1.5 rounded-lg transition-colors ${reminderOn ? 'bg-sky-500/15 text-sky-500' : t.textMuted}`}
-                                    >
-                                      {reminderOn ? <Bell size={13} /> : <BellOff size={13} />}
-                                    </button>
+                                    {entries.length > 0 && (
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${hasPlanned ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400' : 'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400'}`}>
+                                        {hasPlanned ? 'Direncanakan' : 'Tercatat'}
+                                      </span>
+                                    )}
                                   </div>
-
-                                  <button
-                                    onClick={() => setPicker({ ymd: selectedDate, session: s.id })}
-                                    className={`p-1.5 rounded-xl ${t.bgAccent} text-white hover:opacity-90 transition-opacity`}
-                                  >
-                                    <Plus size={14} />
-                                  </button>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`text-xs font-black ${sessionKcal > 0 ? t.textMain : t.textMuted}`}>
+                                      {Math.round(sessionKcal)} kkal
+                                    </span>
+                                    {entries.length > 0 && (
+                                      <span className={`text-[11px] ${t.textMuted}`}>
+                                        ({entries.length})
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {entries.length === 0 ? (
                                   <p className={`text-xs ${t.textMuted} italic py-1`}>Belum ada menu dicatat.</p>
                                 ) : (
-                                  <div className="space-y-1.5 mt-2">
-                                    {entries.map((e) => {
+                                  <div className="space-y-1.5 pt-0.5">
+                                    {entries.map((e, idx) => {
                                       const rawUnit = e.unit || (s.id === 'drink' ? 'ml' : 'g');
                                       const unit = URT_DICTIONARY[normalizeUnit(rawUnit)] ? normalizeUnit(rawUnit) : (rawUnit === 'ml' ? 'ml' : 'g');
                                       const isGram = unit === 'g' || unit === 'ml';
@@ -782,48 +786,26 @@ const HistoryTab = ({
                                       const qty = Math.round(((e.grams || 0) / unitWeight) * 10) / 10;
 
                                       return (
-                                        <div key={e.id} className={`flex items-center justify-between px-3 py-2 rounded-xl ${t.bgSunken}`}>
+                                        <div key={e.id || idx} className={`flex items-center justify-between px-3 py-2 rounded-xl ${t.bgSunken}`}>
                                           <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
                                             <p className={`text-xs font-semibold truncate ${t.textMain}`}>
                                               {e.name}
                                             </p>
-                                            {e.source === 'recipe' && <ChefHat size={12} className="text-emerald-500 shrink-0" />}
+                                            {e.isMealPrep && (
+                                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 shrink-0">
+                                                Meal Prep
+                                              </span>
+                                            )}
+                                            {e.source === 'recipe' && !e.isMealPrep && <ChefHat size={12} className="text-emerald-500 shrink-0" />}
                                             {e.source === 'domus' && <Box size={12} className="text-sky-500 shrink-0" />}
                                           </div>
-                                          <div className="flex items-center gap-2 shrink-0">
-                                            <div className="flex items-center gap-1">
-                                              <input
-                                                type="number"
-                                                inputMode="numeric"
-                                                value={qty || ''}
-                                                onChange={(ev) => {
-                                                  const newQty = Number(ev.target.value) || 0;
-                                                  editEntryGrams(selectedDate, s.id, e.id, Math.round(newQty * unitWeight), unit);
-                                                }}
-                                                className={`w-9 text-right text-xs bg-transparent border-b ${t.border} outline-none no-spinners ${t.textMain} font-bold`}
-                                              />
-                                              <select
-                                                value={unit}
-                                                onChange={(ev) => {
-                                                  const newUnit = ev.target.value;
-                                                  const newUnitWeight = (newUnit === 'g' || newUnit === 'ml') ? 1 : (URT_DICTIONARY[newUnit] || 1);
-                                                  const newGrams = Math.round(qty * newUnitWeight);
-                                                  editEntryGrams(selectedDate, s.id, e.id, newGrams, newUnit);
-                                                }}
-                                                className={`bg-transparent text-[10px] font-bold outline-none cursor-pointer ${t.textMuted}`}
-                                              >
-                                                {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
-                                              </select>
-                                            </div>
-                                            <span className={`text-xs font-bold ${t.textMuted} w-14 text-right`}>
+                                          <div className="flex items-center gap-2.5 shrink-0">
+                                            <span className={`text-[11px] font-medium ${t.textMuted}`}>
+                                              {qty} {unit}
+                                            </span>
+                                            <span className={`text-xs font-bold ${t.textMain} w-14 text-right tabular-nums`}>
                                               {Math.round(e.nutrition?.kcal || 0)} kkal
                                             </span>
-                                            <button
-                                              onClick={() => removeEntry(selectedDate, s.id, e.id)}
-                                              className="p-1 text-red-400 hover:text-red-500 transition-colors"
-                                            >
-                                              <X size={13} />
-                                            </button>
                                           </div>
                                         </div>
                                       );
@@ -833,6 +815,17 @@ const HistoryTab = ({
                               </div>
                             );
                           })}
+
+                          {/* Tombol Aksi Utama: Edit / Catat di Tab Catat */}
+                          <div className="pt-2">
+                            <button
+                              onClick={() => navigate('/log', { state: { selectedDate } })}
+                              className={`w-full py-3.5 rounded-2xl ${t.bgAccent} text-white text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/15 active:scale-[0.98] transition-transform`}
+                            >
+                              <Pencil size={15} />
+                              <span>{isFutureDate ? 'Atur & Jadwalkan Menu di Tab Catat' : 'Edit Riwayat Makan di Tab Catat'}</span>
+                            </button>
+                          </div>
 
                           {/* Rekomendasi Stok Meal Prep untuk Hari Depan */}
                           {isFutureDate && mealPreps?.filter(b => b.remainingPortions > 0).length > 0 && (
@@ -986,12 +979,6 @@ const HistoryTab = ({
                               Minuman &amp; Suplemen
                             </span>
                           </div>
-                          <button
-                            onClick={() => setPicker({ ymd: selectedDate, session: 'drink' })}
-                            className={`p-1 rounded-lg ${t.textAccent} hover:${t.bgAccentSoft}`}
-                          >
-                            <Plus size={15} />
-                          </button>
                         </div>
 
                         {(!currentDayData.meals?.drink || currentDayData.meals.drink.length === 0) ? (
@@ -1003,12 +990,7 @@ const HistoryTab = ({
                             {currentDayData.meals.drink.map((e) => (
                               <div key={e.id} className={`flex items-center justify-between px-3 py-2 rounded-xl ${t.bgSunken}`}>
                                 <span className={`text-xs font-semibold ${t.textMain}`}>{e.name}</span>
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-xs ${t.textMuted}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
-                                  <button onClick={() => removeEntry(selectedDate, 'drink', e.id)} className="p-1 text-red-400">
-                                    <X size={12} />
-                                  </button>
-                                </div>
+                                <span className={`text-xs font-bold ${t.textMain}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
                               </div>
                             ))}
                           </div>
@@ -1093,19 +1075,6 @@ const HistoryTab = ({
           />
         </div>
       </div>
-
-      {/* Modal Picker Tambah Makanan */}
-      <FoodPickerModal
-        t={t}
-        theme={theme}
-        open={!!picker}
-        onClose={() => setPicker(null)}
-        customFoods={customFoods}
-        recipes={recipes}
-        domusItems={domusItems}
-        favoriteFoods={profile?.favoriteFoods || []}
-        onAdd={(entry) => picker && addEntry(picker.ymd, picker.session, entry)}
-      />
     </div>
   );
 };
