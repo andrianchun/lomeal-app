@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  ChevronLeft, ChevronRight, CalendarDays, CalendarRange, 
+  ChevronLeft, ChevronRight, CalendarDays, CalendarRange, Calendar,
   Activity, HeartPulse, Plus, X, Bell, BellOff, Clock, 
   ChefHat, Box, Droplets, Droplet, Pill, Check, Sparkles, AlertCircle, Pencil, Utensils
 } from 'lucide-react';
@@ -13,10 +13,10 @@ import {
   MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, 
   getMonthKey, DEFAULT_SESSION_TIMES, weekStripDates, WATER_STEP_ML 
 } from '../data/constants';
-import { computeDayTotals, NUTRIENTS, calcTEF, calcBMR } from '../data/nutrition';
+import { computeDayTotals, NUTRIENTS, EMPTY_NUTRITION, addNutrition, calcTEF, calcBMR } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 import { STATUS } from '../theme';
-import { URT_DICTIONARY, normalizeUnit, UNIT_OPTIONS } from '../utils/urtMapping';
+import { URT_DICTIONARY, normalizeUnit, UNIT_OPTIONS, getItemUnitWeight } from '../utils/urtMapping';
 import useBackClose from '../hooks/useBackClose';
 
 const shiftYmd = (ymd, days) => {
@@ -82,8 +82,6 @@ const HistoryTab = ({
     localStorage.setItem('Lomeal_calendar_health_mode', String(showHealthMode));
   }, [showHealthMode]);
 
-  // Sub-tab di bottom sheet saat mode Makan (makan / nutrisi)
-  const [sheetSubTab, setSheetSubTab] = useState('makan'); // 'makan' | 'nutrisi'
 
   const targets = profile?.targets || {};
   const medicines = profile?.medicines || [];
@@ -186,12 +184,178 @@ const HistoryTab = ({
     }
   }, [calendarMode, bottomNavClearance]);
 
-  // Drag State untuk Bottom Sheet
+  // Drag State & Gesture Universal untuk Bottom Sheet (Swipe atas/bawah di sembarang lokasi)
+  const sheetTouchRef = useRef({
+    startY: 0,
+    startX: 0,
+    startTranslate: 0,
+    isDragging: false,
+    direction: null,
+    startScrollTop: 0,
+  });
   const sheetDragStartRef = useRef({ y: 0, translate: 0 });
   const sheetVelocityRef = useRef({ lastY: 0, lastT: 0, v: 0 });
   const [sheetDragY, setSheetDragY] = useState(null);
+  const sheetDragYRef = useRef(null);
+  const calendarModeRef = useRef(calendarMode);
+  const [showMealPrepModalDate, setShowMealPrepModalDate] = useState(null);
 
+  // Keep refs in sync
+  useEffect(() => { sheetDragYRef.current = sheetDragY; }, [sheetDragY]);
+  useEffect(() => { calendarModeRef.current = calendarMode; }, [calendarMode]);
+
+  const handleTouchStartSheet = (e) => {
+    if (!e.touches || e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const mode = calendarModeRef.current;
+    const maxH = sheetRef.current?.offsetHeight || 500;
+    const currentTranslate = mode === 'monthly' ? (maxH - peekHeight) : 0;
+    const scrollTop = scrollContainerRef.current ? scrollContainerRef.current.scrollTop : 0;
+
+    sheetTouchRef.current = {
+      startY: touch.clientY,
+      startX: touch.clientX,
+      startTranslate: currentTranslate,
+      isDragging: mode === 'monthly',
+      direction: null,
+      startScrollTop: scrollTop,
+    };
+    sheetVelocityRef.current = { lastY: touch.clientY, lastT: performance.now(), v: 0 };
+    if (mode === 'monthly') {
+      setSheetDragY(currentTranslate);
+    }
+  };
+
+  const handleTouchMoveSheet = (e) => {
+    if (!e.touches || e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const state = sheetTouchRef.current;
+    if (!state.startY) return;
+
+    const deltaY = touch.clientY - state.startY;
+    const deltaX = touch.clientX - state.startX;
+
+    if (!state.direction) {
+      if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
+        state.direction = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
+      }
+    }
+
+    if (state.direction === 'horizontal') {
+      return;
+    }
+
+    if (state.direction === 'vertical') {
+      const mode = calendarModeRef.current;
+      const isMinimized = mode === 'monthly';
+      const currentScrollTop = scrollContainerRef.current ? scrollContainerRef.current.scrollTop : 0;
+
+      if (isMinimized) {
+        if (!state.isDragging) {
+          state.isDragging = true;
+          setSheetDragY(state.startTranslate);
+        }
+      } else {
+        // Weekly mode: mulai drag ke bawah kalau scroll sudah di puncak (toleransi 3px)
+        const atTop = state.startScrollTop <= 3 && currentScrollTop <= 3;
+        if (atTop && deltaY > 0) {
+          if (!state.isDragging) {
+            state.isDragging = true;
+            state.startY = touch.clientY;
+            state.startTranslate = 0;
+            setSheetDragY(0);
+            // Paksa scroll container ke 0 supaya tidak bouncing
+            if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = 0;
+          }
+        }
+      }
+
+      if (state.isDragging) {
+        if (e.cancelable) {
+          try {
+            e.preventDefault();
+          } catch (_) {}
+        }
+        const maxH = sheetRef.current?.offsetHeight || 500;
+        const currentDelta = touch.clientY - state.startY;
+        const newY = Math.min(maxH - peekHeight, Math.max(0, state.startTranslate + currentDelta));
+        setSheetDragY(newY);
+
+        const now = performance.now();
+        const { lastY, lastT } = sheetVelocityRef.current;
+        const dt = now - lastT;
+        if (dt > 0) {
+          const instantV = (touch.clientY - lastY) / dt;
+          sheetVelocityRef.current = { lastY: touch.clientY, lastT: now, v: sheetVelocityRef.current.v * 0.5 + instantV * 0.5 };
+        }
+      }
+    }
+  };
+
+  const handleTouchEndSheet = () => {
+    const state = sheetTouchRef.current;
+    if (!state.startY) return;
+
+    const mode = calendarModeRef.current;
+    const dragY = sheetDragYRef.current;
+
+    if (state.isDragging && dragY !== null) {
+      const maxH = sheetRef.current?.offsetHeight || 500;
+      const targetTravel = maxH - peekHeight;
+      const moved = dragY - state.startTranslate; // positif = ke bawah, negatif = ke atas
+      const velocity = sheetVelocityRef.current.v; // px/ms
+      const FLICK_VELOCITY = 0.15;
+
+      let nextMode = mode;
+      if (mode === 'weekly') {
+        if (velocity > FLICK_VELOCITY || moved > 30) {
+          nextMode = 'monthly';
+        } else {
+          nextMode = 'weekly';
+        }
+      } else if (mode === 'monthly') {
+        if (velocity < -FLICK_VELOCITY || moved < -30 || Math.abs(moved) < 8) {
+          nextMode = 'weekly';
+        } else {
+          nextMode = 'monthly';
+        }
+      }
+
+      if (nextMode !== mode) {
+        setCalendarMode(nextMode);
+      }
+    } else if (mode === 'monthly' && state.direction !== 'horizontal') {
+      setCalendarMode('weekly');
+    }
+
+    sheetTouchRef.current = { startY: 0, startX: 0, startTranslate: 0, isDragging: false, direction: null, startScrollTop: 0 };
+    setSheetDragY(null);
+  };
+
+  // Pasang native touch listener dengan { passive: false } pada sheetRef agar preventDefault tidak memicu warning
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) return;
+    const onTouchStart = (e) => handleTouchStartSheet(e);
+    const onTouchMove = (e) => handleTouchMoveSheet(e);
+    const onTouchEnd = (e) => handleTouchEndSheet(e);
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [peekHeight]);
+
+  // Pointer drag fallback untuk Desktop / Mouse pada drag handle
   const handleSheetPointerDown = (e) => {
+    if (e.pointerType === 'touch') return;
     const maxH = sheetRef.current?.offsetHeight || 500;
     const startTranslate = calendarMode === 'monthly' ? (maxH - peekHeight) : 0;
     sheetDragStartRef.current = { y: e.clientY, translate: startTranslate };
@@ -201,6 +365,7 @@ const HistoryTab = ({
   };
 
   const handleSheetPointerMove = (e) => {
+    if (e.pointerType === 'touch') return;
     if (sheetDragY === null) return;
     const { y, translate } = sheetDragStartRef.current;
     const maxH = sheetRef.current?.offsetHeight || 500;
@@ -216,7 +381,8 @@ const HistoryTab = ({
     }
   };
 
-  const handleSheetPointerUp = () => {
+  const handleSheetPointerUp = (e) => {
+    if (e && e.pointerType === 'touch') return;
     if (sheetDragY === null) return;
     const maxH = sheetRef.current?.offsetHeight || 500;
     const { translate: startTranslate } = sheetDragStartRef.current;
@@ -346,14 +512,19 @@ const HistoryTab = ({
   // Jadwalkan porsi meal prep ke sesi makan
   const useMealPrepForSession = (batch, sessionId) => {
     if (!batch || batch.remainingPortions <= 0) return;
+    const recipeName = batch.name || batch.recipeName || 'Resep';
+    const grams = batch.gramsPerPortion || (batch.initialPortions ? Math.round((batch.totalGrams || 0) / batch.initialPortions) : 200) || 200;
     const entry = {
       id: `mp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      name: batch.recipeName || 'Meal Prep',
-      grams: batch.gramsPerPortion || 200,
-      baseGrams: batch.gramsPerPortion || 200,
+      name: `${recipeName} (1 porsi)`,
+      grams: grams,
+      baseGrams: grams,
       baseNutrition: batch.perPortion || {},
       nutrition: batch.perPortion || {},
+      recipeId: batch.recipeId,
       batchId: batch.id,
+      isMealPrep: true,
+      planned: true,
       source: 'recipe'
     };
     addEntry(selectedDate, sessionId, entry);
@@ -361,6 +532,31 @@ const HistoryTab = ({
     if (saveMealPrepsFn && mealPreps) {
       saveMealPrepsFn(mealPreps.map(b => b.id === batch.id ? { ...b, remainingPortions: Math.max(0, b.remainingPortions - 1) } : b));
     }
+    if (showToast) showToast(`1 porsi ${recipeName} dijadwalkan.`);
+  };
+
+  // Batalkan jadwal makan / meal prep dan kembalikan stok
+  const cancelMealEntry = (ymd, sessionId, entryId) => {
+    const day = daysMap[ymd];
+    if (!day || !day.meals || !day.meals[sessionId]) return;
+    const entry = day.meals[sessionId].find(e => e.id === entryId);
+    if (!entry) return;
+
+    // Kembalikan 1 porsi ke wadah Meal Prep jika berasal dari batch
+    if ((entry.batchId || entry.isMealPrep) && saveMealPrepsFn && mealPreps) {
+      saveMealPrepsFn(mealPreps.map(b => {
+        if (b.id === entry.batchId || (b.name && entry.name && (entry.name.includes(b.name) || b.name.includes(entry.name)))) {
+          const maxP = b.initialPortions || b.totalPortions || 99;
+          return { ...b, remainingPortions: Math.min(maxP, (b.remainingPortions || 0) + 1) };
+        }
+        return b;
+      }));
+    }
+
+    const newSessionEntries = day.meals[sessionId].filter(e => e.id !== entryId);
+    const newMeals = { ...day.meals, [sessionId]: newSessionEntries };
+    patchDay(ymd, { meals: newMeals });
+    if (showToast) showToast('Rencana makan dibatalkan & stok dikembalikan.');
   };
 
   // Single Source of Truth untuk kalkulasi Target Harian (Dinamis dengan Logym jika terhubung)
@@ -397,15 +593,20 @@ const HistoryTab = ({
   const getDayDot = (ymd) => {
     const dayData = daysMap[ymd];
     if (!dayData) return null;
-    const totals = computeDayTotals(dayData);
-    if (!totals.kcal) return null;
-    const isFuture = ymd > todayStr;
-    const hasPlanned = Object.values(dayData.meals || {}).some(arr => (arr || []).some(e => e.planned || e.isMealPrep));
-    if (isFuture || hasPlanned) {
-      return '#f59e0b'; // Amber dot untuk meal prep / direncanakan
+    let totalKcal = 0;
+    let hasPlanned = ymd > todayStr;
+    Object.values(dayData.meals || {}).forEach(arr => {
+      (arr || []).forEach(e => {
+        totalKcal += (Number(e.nutrition?.kcal) || 0);
+        if (e.planned || e.isMealPrep) hasPlanned = true;
+      });
+    });
+    if (!totalKcal) return null;
+    if (hasPlanned) {
+      return { bg: 'bg-amber-500', hex: '#f59e0b' };
     }
     const dayTargets = getEffectiveDayTarget(ymd, dayData);
-    const ratio = totals.kcal / (dayTargets.kcal || 2000);
+    const ratio = totalKcal / (dayTargets.kcal || 2000);
     return ratio > 1.05 ? STATUS.danger : ratio >= 0.7 ? STATUS.ok : STATUS.warn;
   };
 
@@ -484,9 +685,24 @@ const HistoryTab = ({
 
   // Data hari yang dipilih
   const currentDayData = daysMap[selectedDate] || { meals: {}, water: 0 };
-  const currentDayTotals = computeDayTotals(currentDayData);
+  const currentDayTotals = useMemo(() => {
+    let totals = { ...EMPTY_NUTRITION };
+    if (!currentDayData?.meals) return totals;
+    Object.values(currentDayData.meals).forEach(entries => {
+      (entries || []).forEach(e => {
+        if (e.nutrition) {
+          totals = addNutrition(totals, e.nutrition);
+        }
+      });
+    });
+    return totals;
+  }, [currentDayData]);
   const currentDayTargets = getEffectiveDayTarget(selectedDate, currentDayData);
   const isFutureDate = selectedDate > todayStr;
+  const activeSessions = useMemo(() => {
+    return MEAL_SESSIONS.filter(s => s.id !== 'drink' && (currentDayData.meals?.[s.id] || []).length > 0);
+  }, [currentDayData]);
+  const hasMeals = activeSessions.length > 0;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col relative w-full h-[calc(100vh-64px)] overflow-hidden">
@@ -598,8 +814,11 @@ const HistoryTab = ({
                     sel.setDate(sel.getDate() - 7);
                     changeSelectedDate(getLocalYMD(sel));
                   }}
-                  renderPanel={() => {
-                    const panelCells = weekStripDates(calendarDate, 0, 1);
+                  onDownSwipe={() => setCalendarMode('monthly')}
+                  renderPanel={(pos) => {
+                    const offsetWeeks = pos === 'prev' ? -1 : pos === 'next' ? 1 : 0;
+                    const baseD = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate() + offsetWeeks * 7);
+                    const panelCells = weekStripDates(baseD, 0, 1);
                     return (
                       <div className="grid grid-cols-7 gap-0 px-1 w-full">
                         {panelCells.map((dateObj) => {
@@ -695,235 +914,191 @@ const HistoryTab = ({
               d.setDate(d.getDate() - 1);
               changeSelectedDate(getLocalYMD(d));
             }}
-            renderPanel={() => {
+            renderPanel={(pos) => {
+              const targetDate = pos === 'prev' ? shiftYmd(selectedDate, -1) : pos === 'next' ? shiftYmd(selectedDate, 1) : selectedDate;
+              const isCurrent = pos === 'curr';
+              const dayData = daysMap[targetDate] || { meals: {}, water: 0 };
+              const dayTargets = getEffectiveDayTarget(targetDate, dayData);
+              const isFuture = targetDate > todayStr;
+
+              let dayTotals = { ...EMPTY_NUTRITION };
+              if (dayData?.meals) {
+                Object.values(dayData.meals).forEach(entries => {
+                  (entries || []).forEach(e => {
+                    if (e.nutrition) {
+                      dayTotals = addNutrition(dayTotals, e.nutrition);
+                    }
+                  });
+                });
+              }
+
+              const dayActiveSessions = MEAL_SESSIONS.filter(s => s.id !== 'drink' && (dayData.meals?.[s.id] || []).length > 0);
+              const dayHasMeals = dayActiveSessions.length > 0;
+
               return (
                 <div 
-                  ref={scrollContainerRef}
-                  className="flex flex-col h-full overflow-y-auto hide-scrollbar pb-28 pt-1"
+                  ref={isCurrent ? scrollContainerRef : null}
+                  className="flex flex-col h-full overflow-y-auto hide-scrollbar pb-28 pt-1 overscroll-contain"
                 >
-                  {/* Header Detail Tanggal */}
-                  <div className="flex items-center justify-between pb-3 border-b border-black/5 dark:border-white/5 shrink-0">
-                    <div className="flex items-center gap-2">
-                      <p className={`text-base font-black ${t.textMain}`}>{formatPrettyDate(selectedDate)}</p>
-                    </div>
-
-                    {!showHealthMode && (
-                      <div className={`flex gap-1 p-1 rounded-xl ${t.bgSunken}`}>
-                        <button
-                          onClick={() => setSheetSubTab('makan')}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${sheetSubTab === 'makan' ? `${t.bgAccent} text-white` : t.textMuted}`}
-                        >
-                          Makan
-                        </button>
-                        <button
-                          onClick={() => setSheetSubTab('nutrisi')}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${sheetSubTab === 'nutrisi' ? `${t.bgAccent} text-white` : t.textMuted}`}
-                        >
-                          Nutrisi
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* KONTEN TAMPILAN: MODE MAKAN / NUTRISI */}
+                  {/* KONTEN TAMPILAN: MODE MAKAN / RIWAYAT */}
                   {!showHealthMode && (
-                    <div className="pt-3 space-y-3">
-                      {sheetSubTab === 'makan' && (
+                    <div className="pt-2 space-y-3">
+                      {!dayHasMeals ? (
+                        /* State Kosong Bersih */
+                        <div className={`p-6 rounded-2xl border ${t.border} ${t.bgCard} text-center space-y-1`}>
+                          <p className={`text-xs font-medium ${t.textMuted}`}>
+                            {isFuture ? 'Belum ada menu yang direncanakan.' : 'Belum ada riwayat makan yang dicatat.'}
+                          </p>
+                        </div>
+                      ) : (
                         <>
-                          {/* Ringkasan Singkat Total Kalori & Makro */}
-                          <div className={`p-3 rounded-2xl border ${t.border} ${t.bgCard} flex items-center justify-between`}>
-                            <div>
-                              <span className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Total Asupan</span>
-                              <p className={`text-sm font-black ${t.textMain}`}>
-                                {Math.round(currentDayTotals.kcal)} <span className="text-xs font-semibold text-neutral-400">/ {Math.round(currentDayTargets.kcal || 2000)} kkal</span>
-                              </p>
+                          {/* Ringkasan Kalori & 3 Kartu PKL (Hanya tampil jika ada menu) */}
+                          <div className={`p-3.5 rounded-2xl border ${t.border} ${t.bgCard} space-y-2.5`}>
+                            <div className="flex items-baseline gap-1.5">
+                              <span className={`text-2xl font-black ${t.textMain} tabular-nums tracking-tight`}>
+                                {Math.round(dayTotals.kcal)}
+                              </span>
+                              <span className={`text-xs font-semibold ${t.textMuted}`}>
+                                / {Math.round(dayTargets.kcal || 2000)} kkal
+                              </span>
                             </div>
-                            <div className="flex items-center gap-2.5 text-[11px] font-bold">
-                              <span className="text-rose-500">P {Math.round(currentDayTotals.protein)}g</span>
-                              <span className="text-amber-500">K {Math.round(currentDayTotals.carbs)}g</span>
-                              <span className="text-blue-500">L {Math.round(currentDayTotals.fat)}g</span>
-                            </div>
-                          </div>
 
-                          {/* Sesi Makan (Minimalis & Read-Only) */}
-                          {MEAL_SESSIONS.filter(s => s.id !== 'drink').map((s) => {
-                            const entries = currentDayData.meals?.[s.id] || [];
-                            const sessionKcal = entries.reduce((sum, e) => sum + (Number(e.nutrition?.kcal) || 0), 0);
-                            const hasPlanned = entries.some(e => e.planned || e.isMealPrep || isFutureDate);
+                            {/* 3 Kotak Mini PKL */}
+                            <div className="grid grid-cols-3 gap-2">
+                              {[
+                                { key: 'protein', label: 'PROTEIN', color: 'bg-emerald-500', val: dayTotals.protein, tgt: dayTargets.protein },
+                                { key: 'carbs', label: 'KARBO', color: 'bg-amber-400', val: dayTotals.carbs, tgt: dayTargets.carbs },
+                                { key: 'fat', label: 'LEMAK', color: 'bg-rose-500', val: dayTotals.fat, tgt: dayTargets.fat }
+                              ].map((m) => {
+                                const v = Math.round(m.val || 0);
+                                const tg = m.tgt ? Math.round(m.tgt) : null;
+                                const pct = tg ? Math.min(100, Math.round((v / tg) * 100)) : 0;
 
-                            return (
-                              <div key={s.id} className={`p-3.5 rounded-2xl border ${t.border} ${t.bgCard} space-y-2`}>
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-bold">{s.emoji} {s.label}</span>
-                                    {entries.length > 0 && (
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${hasPlanned ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400' : 'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400'}`}>
-                                        {hasPlanned ? 'Direncanakan' : 'Tercatat'}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className={`text-xs font-black ${sessionKcal > 0 ? t.textMain : t.textMuted}`}>
-                                      {Math.round(sessionKcal)} kkal
-                                    </span>
-                                    {entries.length > 0 && (
-                                      <span className={`text-[11px] ${t.textMuted}`}>
-                                        ({entries.length})
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {entries.length === 0 ? (
-                                  <p className={`text-xs ${t.textMuted} italic py-1`}>Belum ada menu dicatat.</p>
-                                ) : (
-                                  <div className="space-y-1.5 pt-0.5">
-                                    {entries.map((e, idx) => {
-                                      const rawUnit = e.unit || (s.id === 'drink' ? 'ml' : 'g');
-                                      const unit = URT_DICTIONARY[normalizeUnit(rawUnit)] ? normalizeUnit(rawUnit) : (rawUnit === 'ml' ? 'ml' : 'g');
-                                      const isGram = unit === 'g' || unit === 'ml';
-                                      const unitWeight = isGram ? 1 : (URT_DICTIONARY[unit] || 1);
-                                      const qty = Math.round(((e.grams || 0) / unitWeight) * 10) / 10;
-
-                                      return (
-                                        <div key={e.id || idx} className={`flex items-center justify-between px-3 py-2 rounded-xl ${t.bgSunken}`}>
-                                          <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
-                                            <p className={`text-xs font-semibold truncate ${t.textMain}`}>
-                                              {e.name}
-                                            </p>
-                                            {e.isMealPrep && (
-                                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 shrink-0">
-                                                Meal Prep
-                                              </span>
-                                            )}
-                                            {e.source === 'recipe' && !e.isMealPrep && <ChefHat size={12} className="text-emerald-500 shrink-0" />}
-                                            {e.source === 'domus' && <Box size={12} className="text-sky-500 shrink-0" />}
-                                          </div>
-                                          <div className="flex items-center gap-2.5 shrink-0">
-                                            <span className={`text-[11px] font-medium ${t.textMuted}`}>
-                                              {qty} {unit}
-                                            </span>
-                                            <span className={`text-xs font-bold ${t.textMain} w-14 text-right tabular-nums`}>
-                                              {Math.round(e.nutrition?.kcal || 0)} kkal
-                                            </span>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-
-                          {/* Tombol Aksi Utama: Edit / Catat di Tab Catat */}
-                          <div className="pt-2">
-                            <button
-                              onClick={() => navigate('/log', { state: { selectedDate } })}
-                              className={`w-full py-3.5 rounded-2xl ${t.bgAccent} text-white text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/15 active:scale-[0.98] transition-transform`}
-                            >
-                              <Pencil size={15} />
-                              <span>{isFutureDate ? 'Atur & Jadwalkan Menu di Tab Catat' : 'Edit Riwayat Makan di Tab Catat'}</span>
-                            </button>
-                          </div>
-
-                          {/* Rekomendasi Stok Meal Prep untuk Hari Depan */}
-                          {isFutureDate && mealPreps?.filter(b => b.remainingPortions > 0).length > 0 && (
-                            <div className={`p-4 rounded-2xl border ${t.border} ${t.bgCard} space-y-2`}>
-                              <div className="flex items-center gap-1.5">
-                                <ChefHat size={15} className="text-emerald-500" />
-                                <span className={`text-xs font-bold uppercase tracking-wider ${t.textMain}`}>
-                                  Gunakan Stok Meal Prep
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-1 gap-2 pt-1">
-                                {mealPreps.filter(b => b.remainingPortions > 0).map((batch) => (
-                                  <div key={batch.id} className={`flex items-center justify-between p-2.5 rounded-xl ${t.bgSunken}`}>
-                                    <div className="min-w-0 flex-1">
-                                      <p className={`text-xs font-bold truncate ${t.textMain}`}>{batch.recipeName}</p>
-                                      <p className={`text-[11px] ${t.textMuted}`}>
-                                        Sisa {batch.remainingPortions} porsi · {Math.round(batch.perPortion?.kcal || 0)} kkal
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                      {['breakfast', 'lunch', 'dinner'].map((sId) => (
-                                        <button
-                                          key={sId}
-                                          onClick={() => useMealPrepForSession(batch, sId)}
-                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${t.border} hover:${t.bgAccentSoft} transition-colors`}
-                                        >
-                                          {sId === 'breakfast' ? 'Sarapan' : sId === 'lunch' ? 'Siang' : 'Malam'}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )}
-
-                      {sheetSubTab === 'nutrisi' && (
-                        <div className="space-y-4">
-                          {/* Makronutrisi Cards */}
-                          <div className="grid grid-cols-3 gap-2">
-                            {[
-                              { key: 'protein', label: 'Protein', color: 'bg-rose-500', unit: 'g' },
-                              { key: 'carbs', label: 'Karbo', color: 'bg-amber-500', unit: 'g' },
-                              { key: 'fat', label: 'Lemak', color: 'bg-sky-500', unit: 'g' }
-                            ].map((m) => {
-                              const val = currentDayTotals[m.key] || 0;
-                              const tgt = currentDayTargets[m.key] || 0;
-                              const pct = tgt ? Math.min(100, Math.round((val / tgt) * 100)) : 0;
-                              return (
-                                <div key={m.key} className={`p-3 rounded-2xl border ${t.border} ${t.bgCard} flex flex-col justify-between`}>
-                                  <div>
-                                    <p className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>{m.label}</p>
-                                    <p className={`text-base font-black ${t.textMain} mt-0.5`}>
-                                      {Math.round(val)}<span className="text-[10px] font-medium text-zinc-400">/{tgt ? Math.round(tgt) : '—'}g</span>
-                                    </p>
-                                  </div>
-                                  <div className="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden mt-2">
-                                    <div className={`h-full rounded-full ${m.color}`} style={{ width: `${pct}%` }} />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {/* Mikronutrisi Detail */}
-                          <div className={`p-4 rounded-2xl border ${t.border} ${t.bgCard} space-y-3`}>
-                            <p className={`text-xs font-black uppercase tracking-wider ${t.textMuted}`}>
-                              Rincian Mikronutrisi
-                            </p>
-                            <div className="space-y-2.5">
-                              {NUTRIENTS.filter(n => !['kcal', 'protein', 'carbs', 'fat'].includes(n.key)).map((n) => {
-                                const val = currentDayTotals[n.key] || 0;
-                                const tgt = currentDayTargets[n.key] || 0;
-                                const pct = tgt ? Math.min(100, (val / tgt) * 100) : 0;
                                 return (
-                                  <div key={n.key}>
-                                    <div className="flex justify-between items-baseline text-xs">
-                                      <span className={t.textMuted}>{n.label}</span>
-                                      <span className={`font-bold ${t.textMain}`}>
-                                        {val < 10 ? Number(val.toFixed(1)) : Math.round(val)}
-                                        <span className={`text-[10px] font-normal ${t.textMuted}`}>
-                                          {tgt ? ` / ${Math.round(tgt)}` : ''} {n.unit}
-                                        </span>
-                                      </span>
+                                  <div key={m.key} className={`p-2.5 rounded-xl border ${t.border} ${t.bgSunken} flex flex-col justify-between`}>
+                                    <p className="text-[9px] font-black uppercase tracking-wider text-neutral-400">{m.label}</p>
+                                    <p className={`text-sm font-black ${t.textMain} mt-0.5 tabular-nums`}>
+                                      {v}<span className="text-[10px] font-semibold text-neutral-400">{tg ? `/${tg}g` : 'g'}</span>
+                                    </p>
+                                    <div className="w-full h-1 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden mt-1.5">
+                                      <div className={`h-full rounded-full ${m.color} transition-all duration-300`} style={{ width: `${pct}%` }} />
                                     </div>
-                                    {tgt > 0 && (
-                                      <div className="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden mt-1">
-                                        <div className={`h-full rounded-full ${t.bgAccent}`} style={{ width: `${pct}%` }} />
-                                      </div>
-                                    )}
                                   </div>
                                 );
                               })}
                             </div>
                           </div>
-                        </div>
+
+                          {/* Sesi Makan yang Aktif */}
+                          {dayActiveSessions.map((s) => {
+                            const entries = dayData.meals?.[s.id] || [];
+                            const sessionKcal = entries.reduce((sum, e) => sum + (Number(e.nutrition?.kcal) || 0), 0);
+                            const hasPlanned = entries.some(e => e.planned || e.isMealPrep || isFuture);
+
+                            return (
+                              <div key={s.id} className={`p-4 rounded-2xl border ${t.border} ${t.bgCard} space-y-1.5`}>
+                                <div className="flex items-center justify-between pb-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold">{s.emoji} {s.label}</span>
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${hasPlanned ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400' : 'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400'}`}>
+                                      {hasPlanned ? 'Direncanakan' : 'Dikonsumsi'}
+                                    </span>
+                                  </div>
+                                  <span className={`text-xs font-black ${sessionKcal > 0 ? t.textMain : t.textMuted}`}>
+                                    {Math.round(sessionKcal)} kkal
+                                  </span>
+                                </div>
+
+                                <div className="divide-y divide-black/5 dark:divide-white/5 pt-1">
+                                  {entries.map((e, idx) => {
+                                    const rawUnit = e.unit || (s.id === 'drink' ? 'ml' : 'g');
+                                    const unit = normalizeUnit(rawUnit) || (rawUnit === 'ml' ? 'ml' : 'g');
+                                    const isGram = unit === 'g' || unit === 'ml';
+                                    const unitWeight = getItemUnitWeight(e, unit);
+                                    const rawQty = (e.grams || 0) / unitWeight;
+                                    const qty = Math.round(rawQty * 100) / 100;
+                                    const isPlannedItem = isFuture || e.isMealPrep || e.planned;
+
+                                    const displayName = (() => {
+                                      if (e.name && e.name !== 'Meal Prep' && e.name !== 'Meal Prep (1 porsi)') return e.name;
+                                      if (e.batchId) {
+                                        const b = mealPreps.find(x => x.id === e.batchId);
+                                        if (b?.name) return `${b.name} (1 porsi)`;
+                                      }
+                                      if (e.recipeId) {
+                                        const r = recipes.find(x => x.id === e.recipeId);
+                                        if (r?.name) return `${r.name} (1 porsi)`;
+                                      }
+                                      return e.name || 'Makanan';
+                                    })();
+
+                                    return (
+                                      <div key={e.id || idx} className="flex items-center justify-between py-2.5 first:pt-1 last:pb-0 gap-4">
+                                        <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-4">
+                                          <p className={`text-xs font-bold ${t.textMain} line-clamp-2 break-words leading-snug`}>
+                                            {displayName}
+                                          </p>
+                                          {(e.isMealPrep || e.source === 'recipe') && (
+                                            <ChefHat size={13} className="text-emerald-500 shrink-0" />
+                                          )}
+                                          {e.source === 'domus' && <Box size={13} className="text-sky-500 shrink-0" />}
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0 text-right whitespace-nowrap">
+                                          <span className="text-xs font-medium text-neutral-400 tabular-nums">
+                                            {qty} {unit}
+                                          </span>
+                                          <span className={`text-xs font-black ${t.textMain} tabular-nums min-w-[54px] text-right`}>
+                                            {Math.round(e.nutrition?.kcal || 0)} <span className="text-[10px] font-normal text-neutral-400">kkal</span>
+                                          </span>
+                                          {isPlannedItem && (
+                                            <button
+                                              onClick={(ev) => {
+                                                ev.stopPropagation();
+                                                cancelMealEntry(targetDate, s.id, e.id);
+                                              }}
+                                              className="p-1 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-rose-500/10 active:scale-90 transition-all ml-0.5"
+                                              title="Batalkan & kembalikan stok"
+                                            >
+                                              <X size={13} />
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
+
+                      {/* Tombol Aksi Utama: Program Diet (Masa Depan) / Catat (Hari ini/Lalu) */}
+                      <div className="pt-2">
+                        <button
+                          onClick={() => {
+                            if (isFuture) {
+                              navigate('/program');
+                            } else {
+                              navigate('/log', { state: { selectedDate: targetDate } });
+                            }
+                          }}
+                          className={`w-full py-3.5 rounded-2xl ${t.bgAccent} text-white text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/15 active:scale-[0.98] transition-transform`}
+                        >
+                          {isFuture ? <Calendar size={15} /> : <Pencil size={15} />}
+                          <span>{isFuture ? 'Atur Program Diet' : 'Edit Riwayat Makan di Tab Catat'}</span>
+                        </button>
+                      </div>
+
+                      {/* Tombol Gunakan Stok Meal Prep — seperti "Tambah Sesi" di Logym */}
+                      {isFuture && mealPreps?.filter(b => b.remainingPortions > 0).length > 0 && (
+                        <button
+                          onClick={() => setShowMealPrepModalDate(targetDate)}
+                          className={`w-full py-3.5 rounded-2xl border-2 border-dashed border-emerald-500/40 text-emerald-500 font-bold text-xs flex items-center justify-center gap-2 hover:bg-emerald-500/5 active:scale-[0.98] transition-all`}
+                        >
+                          <ChefHat size={16} />
+                          <span>Gunakan Stok Meal Prep</span>
+                        </button>
                       )}
                     </div>
                   )}
@@ -947,11 +1122,11 @@ const HistoryTab = ({
                         ) : (
                           <div className="space-y-1.5">
                             {medicines.map((m) => {
-                              const isChecked = !!currentDayData.medChecks?.[m.id];
+                              const isChecked = !!dayData.medChecks?.[m.id];
                               return (
                                 <button
                                   key={m.id}
-                                  onClick={() => toggleMed(selectedDate, m.id)}
+                                  onClick={() => toggleMed(targetDate, m.id)}
                                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all ${isChecked ? `${t.bgAccentSoft} border-transparent` : `${t.bgSunken} ${t.border}`}`}
                                 >
                                   <span className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 ${isChecked ? `${t.bgAccent} text-white` : `border ${t.border}`}`}>
@@ -981,13 +1156,13 @@ const HistoryTab = ({
                           </div>
                         </div>
 
-                        {(!currentDayData.meals?.drink || currentDayData.meals.drink.length === 0) ? (
+                        {(!dayData.meals?.drink || dayData.meals.drink.length === 0) ? (
                           <p className={`text-xs ${t.textMuted} italic py-1`}>
                             Belum ada suplemen atau minuman khusus yang dicatat.
                           </p>
                         ) : (
                           <div className="space-y-1.5">
-                            {currentDayData.meals.drink.map((e) => (
+                            {dayData.meals.drink.map((e) => (
                               <div key={e.id} className={`flex items-center justify-between px-3 py-2 rounded-xl ${t.bgSunken}`}>
                                 <span className={`text-xs font-semibold ${t.textMain}`}>{e.name}</span>
                                 <span className={`text-xs font-bold ${t.textMain}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
@@ -1007,26 +1182,26 @@ const HistoryTab = ({
                             </span>
                           </div>
                           <span className={`text-xs font-bold ${t.textMain}`}>
-                            {currentDayData.water || 0} / {waterGoal} ml
+                            {dayData.water || 0} / {waterGoal} ml
                           </span>
                         </div>
 
                         <div className="w-full h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
                           <div
                             className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                            style={{ width: `${Math.min(100, Math.round(((currentDayData.water || 0) / waterGoal) * 100))}%` }}
+                            style={{ width: `${Math.min(100, Math.round(((dayData.water || 0) / waterGoal) * 100))}%` }}
                           />
                         </div>
 
                         <div className="flex items-center justify-end gap-2 pt-1">
                           <button
-                            onClick={() => adjustWater(selectedDate, -WATER_STEP_ML)}
+                            onClick={() => adjustWater(targetDate, -WATER_STEP_ML)}
                             className={`px-3 py-1.5 rounded-xl border ${t.border} text-xs font-bold ${t.textMuted} hover:${t.bgAccentSoft}`}
                           >
                             -200 ml
                           </button>
                           <button
-                            onClick={() => adjustWater(selectedDate, WATER_STEP_ML)}
+                            onClick={() => adjustWater(targetDate, WATER_STEP_ML)}
                             className={`px-3 py-1.5 rounded-xl ${t.bgAccent} text-white text-xs font-bold hover:opacity-90`}
                           >
                             +200 ml
@@ -1051,19 +1226,19 @@ const HistoryTab = ({
                         {trackCycle ? (
                           <div className="space-y-2">
                             <button
-                              onClick={() => toggleMenstruation(selectedDate)}
-                              className={`w-full flex items-center justify-center gap-2 py-3 rounded-2xl border font-bold text-xs transition-all ${currentDayData.menstruation ? 'bg-rose-500 text-white border-rose-500 shadow-sm' : `${t.bgSunken} ${t.border} ${t.textMain}`}`}
+                              onClick={() => toggleMenstruation(targetDate)}
+                              className={`w-full flex items-center justify-center gap-2 py-3 rounded-2xl border font-bold text-xs transition-all ${dayData.menstruation ? 'bg-rose-500 text-white border-rose-500 shadow-sm' : `${t.bgSunken} ${t.border} ${t.textMain}`}`}
                             >
-                              <span className={`w-2.5 h-2.5 rounded-full ${currentDayData.menstruation ? 'bg-white' : 'bg-rose-500'}`} />
-                              {currentDayData.menstruation ? 'Hari Menstruasi (Tercatat)' : 'Tandai Hari Menstruasi'}
+                              <span className={`w-2.5 h-2.5 rounded-full ${dayData.menstruation ? 'bg-white' : 'bg-rose-500'}`} />
+                              {dayData.menstruation ? 'Hari Menstruasi (Tercatat)' : 'Tandai Hari Menstruasi'}
                             </button>
                             <p className={`text-[11px] ${t.textMuted} leading-relaxed text-center`}>
-                              Penanda pribadi untuk konteks kebutuhan gizi (zat besi, hidrasi &amp; kalori).
+                              Tandai hari saat periode menstruasi berlangsung untuk estimasi siklus di kalender.
                             </p>
                           </div>
                         ) : (
-                          <p className={`text-xs ${t.textMuted} leading-relaxed`}>
-                            Aktifkan fitur ini jika Anda ingin mencatat hari menstruasi dan mendapatkan konteks nutrisi harian.
+                          <p className={`text-xs ${t.textMuted} italic py-1`}>
+                            Fitur pelacakan siklus menstruasi dinonaktifkan.
                           </p>
                         )}
                       </div>
@@ -1075,6 +1250,68 @@ const HistoryTab = ({
           />
         </div>
       </div>
+
+      {/* MODAL: Gunakan Stok Meal Prep */}
+      {showMealPrepModalDate && (() => {
+        const availableBatches = mealPreps?.filter(b => b.remainingPortions > 0) || [];
+        return (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4 bg-black/70 backdrop-blur-sm animate-in fade-in overscroll-contain touch-none" onClick={() => setShowMealPrepModalDate(null)}>
+            <div
+              className={`relative w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-in zoom-in-95 duration-200 backdrop-blur-xl ${theme === 'dark' ? 'bg-zinc-900/95 border border-emerald-500/20' : 'bg-white/95 border border-emerald-500/15'}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className={`font-black text-lg ${t.textMain} flex items-center gap-2`}>
+                  <ChefHat size={20} className="text-emerald-500" />
+                  Stok Meal Prep
+                </h3>
+                <button onClick={() => setShowMealPrepModalDate(null)} className={`p-1.5 rounded-full bg-black/10 dark:bg-white/10 hover:opacity-80 transition-all`}>
+                  <X size={18} className={t.textMain} />
+                </button>
+              </div>
+
+              <div className="space-y-4 max-h-72 overflow-y-auto overscroll-contain touch-pan-y hide-scrollbar">
+                {availableBatches.length === 0 ? (
+                  <p className={`text-xs text-center py-4 ${t.textMuted}`}>Tidak ada stok meal prep tersisa.</p>
+                ) : (
+                  availableBatches.map((batch, bIdx) => (
+                    <div key={batch.id}>
+                      {bIdx > 0 && <div className={`h-px mb-4 ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'}`} />}
+                      <div className="mb-2">
+                        <p className={`text-sm font-bold ${t.textMain} leading-snug`}>
+                          {batch.name || batch.recipeName || 'Resep'}
+                        </p>
+                        <p className={`text-[11px] ${t.textMuted} mt-0.5`}>
+                          Sisa <span className="font-bold text-emerald-500">{batch.remainingPortions} porsi</span> · {Math.round(batch.perPortion?.kcal || 0)} kkal/porsi
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { id: 'breakfast', label: 'Sarapan', icon: '🌅' },
+                          { id: 'lunch',     label: 'Siang',   icon: '☀️' },
+                          { id: 'dinner',    label: 'Malam',   icon: '🌙' },
+                        ].map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => {
+                              useMealPrepForSession(batch, s.id);
+                              setShowMealPrepModalDate(null);
+                            }}
+                            className={`py-2.5 px-2 rounded-2xl text-[11px] font-bold active:scale-95 transition-all flex items-center justify-center gap-1.5 ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-500/15'}`}
+                          >
+                            <span>{s.icon}</span>
+                            <span>{s.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -22,7 +22,7 @@ import { nutrientSources } from '../utils/nutrientSources';
 import AttachmentMenu from '../components/AttachmentMenu';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
-import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS } from '../utils/urtMapping';
+import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS, getItemUnitWeight } from '../utils/urtMapping';
 import useBackClose from '../hooks/useBackClose';
 
 // Simpan baseline (gram & gizi) tetap di tiap item hasil Lomy begitu muncul di preview —
@@ -452,93 +452,41 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   };
 
   const removeEntry = async (sessionId, entryId) => {
+    const targetEntry = (day.meals?.[sessionId] || []).find(e => e.id === entryId);
+    if (!targetEntry) return;
+
     if (!(await showConfirm('Hapus menu ini dari catatan?', { title: 'Hapus Menu', confirmText: 'Hapus', danger: true }))) return;
+
+    // Jika berasal dari Meal Prep, kembalikan 1 porsi ke wadah/stok matang di Tab Program
+    if ((targetEntry.batchId || targetEntry.isMealPrep) && saveMealPrepsFn && mealPreps) {
+      saveMealPrepsFn(mealPreps.map(b => {
+        if (b.id === targetEntry.batchId || (b.name && targetEntry.name && targetEntry.name.includes(b.name))) {
+          const maxP = b.initialPortions || b.totalPortions || 99;
+          return { ...b, remainingPortions: Math.min(maxP, (b.remainingPortions || 0) + 1) };
+        }
+        return b;
+      }));
+    }
+
     const meals = { ...(day.meals || {}) };
     meals[sessionId] = (meals[sessionId] || []).filter(e => e.id !== entryId);
     persistDay({ ...day, meals });
-    showToast('Item dihapus.', { type: 'info' });
+    showToast('Menu dihapus & stok dikembalikan ke Program.', { type: 'info' });
   };
 
   const toggleEatenStatus = (sessionId, e, checked) => {
     // 1. Update log entry
     const meals = { ...(day.meals || {}) };
-    meals[sessionId] = meals[sessionId].map(x => x.id === e.id ? { ...x, isEaten: checked } : x);
+    meals[sessionId] = meals[sessionId].map(x => x.id === e.id ? { ...x, isEaten: checked, planned: !checked } : x);
     persistDay({ ...day, meals });
-
-    // 2. Manage batch stock and Domus stock
-    if (e.batchId && mealPreps) {
-      const batch = mealPreps.find(b => b.id === e.batchId);
-      if (batch) {
-        const diff = checked ? -1 : 1;
-        const newRemaining = Math.max(0, batch.remainingPortions + diff);
-        const updatedBatch = { ...batch, remainingPortions: newRemaining };
-        const otherBatches = mealPreps.filter(b => b.id !== batch.id);
-        
-        saveMealPrepsFn([updatedBatch, ...otherBatches]);
-
-        // Sync to Domus if linked
-        if (batch.domusItemId) {
-          if (newRemaining <= 0) {
-            // Porsinya abis, entitasnya tetap — resep yang sama bakal dimasak lagi dan porsinya
-            // numpang barang ini juga (addPortionsToDomusItem), jadi id-nya harus kejaga.
-            zeroDomusItemStock(batch.domusItemId).catch(console.error);
-          } else {
-            updateDomusItemQuantity(batch.domusItemId, newRemaining, 'porsi').catch(console.error);
-          }
-        }
-
-        if (checked) {
-          // If eaten, check for deficit in future planned meals
-          let scheduledUneaten = [];
-          Object.entries(daysMap).forEach(([ymd, d]) => {
-            if (!d.meals) return;
-            Object.entries(d.meals).forEach(([sess, items]) => {
-              items.forEach(item => {
-                // Must be same batch, NOT eaten, and NOT the current item we just updated
-                if (item.batchId === batch.id && !item.isEaten && item.id !== e.id) {
-                  scheduledUneaten.push({ ymd, session: sess, entryId: item.id });
-                }
-              });
-            });
-          });
-
-          // Sort descending (furthest future first)
-          scheduledUneaten.sort((a, b) => b.ymd.localeCompare(a.ymd));
-          
-          if (scheduledUneaten.length > newRemaining) {
-            const toDelete = scheduledUneaten.length - newRemaining;
-            const itemsToDelete = scheduledUneaten.slice(0, toDelete);
-            
-            // Note: we fetch the latest state of the day from daysMap, remove the item, and saveDay
-            // To avoid race conditions if multiple items are deleted from the same day, we group them.
-            const deletesByYmd = {};
-            itemsToDelete.forEach(target => {
-              if (!deletesByYmd[target.ymd]) deletesByYmd[target.ymd] = [];
-              deletesByYmd[target.ymd].push(target);
-            });
-            
-            Object.entries(deletesByYmd).forEach(([ymd, targets]) => {
-              const targetDay = daysMap[ymd];
-              const targetMeals = { ...targetDay.meals };
-              targets.forEach(target => {
-                targetMeals[target.session] = targetMeals[target.session].filter(x => x.id !== target.entryId);
-              });
-              saveDay(ymd, { ...targetDay, meals: targetMeals });
-            });
-            
-            showAlert(`Auto-Koreksi: ${toDelete} jadwal masa depan dihapus otomatis karena stok habis.`);
-          }
-        }
-      }
+    if (showToast) {
+      showToast(checked ? 'Menu ditandai telah dikonsumsi 🍽️' : 'Menu dikembalikan ke status rencana ⏳');
     }
 
-    // 3. Deduct Domus stock
+    // 2. Deduct Domus stock
     if (e.domusItemId && domusItems) {
       const domusItem = domusItems.find(i => i.id === e.domusItemId);
-      // Only deduct if we are marking it as eaten (checked), and we haven't already deducted it 
-      // (in reality we might want a mechanism to un-eat and add back stock, but this is simple for now)
       if (domusItem && checked) {
-        // e.grams is the amount consumed in Lomeal
         const res = deductStock(domusItem, e.grams || 100);
         if (res.ok && res.depleted) {
           zeroDomusItemStock(e.domusItemId).catch(console.error);
@@ -1962,10 +1910,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                              const isMealPrep = e.isMealPrep || e.source === 'recipe';
                              const isEaten = e.isEaten !== undefined ? e.isEaten : !isMealPrep;
                              const rawUnit = e.unit || (detailSession === 'drink' ? 'ml' : 'g');
-                             const unit = URT_DICTIONARY[normalizeUnit(rawUnit)] ? normalizeUnit(rawUnit) : (rawUnit === 'ml' ? 'ml' : 'g');
+                             const unit = normalizeUnit(rawUnit) || (rawUnit === 'ml' ? 'ml' : 'g');
                              const isGram = unit === 'g' || unit === 'ml';
-                             const unitWeight = isGram ? 1 : (URT_DICTIONARY[unit] || 1);
-                             const qty = Math.round(((e.grams || 0) / unitWeight) * 10) / 10;
+                             const unitWeight = getItemUnitWeight(e, unit);
+                             const rawQty = (e.grams || 0) / unitWeight;
+                             const qty = Math.round(rawQty * 100) / 100;
 
                              const updateItemGrams = (grams, nextUnit = unit) => {
                                const meals = { ...(day.meals || {}) };
@@ -1986,72 +1935,117 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                                persistDay({ ...day, meals });
                              };
 
-                             return (
-                               <div key={e.id} className={`flex items-center justify-between p-3.5 rounded-2xl border ${t.border} ${t.bgCard} ${!isEaten ? 'opacity-50' : ''}`}>
-                                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                                   {isMealPrep && (
-                                     <input type="checkbox" checked={isEaten} onChange={(ev) => toggleEatenStatus(detailSession, e, ev.target.checked)} className="w-5 h-5 rounded accent-emerald-500 shrink-0" />
-                                   )}
-                                   <div className="truncate flex-1">
-                                     <p className={`body-md ${t.textMain} truncate`}>
-                                       {e.name}
-                                     </p>
-                                     <div className={`caption font-medium ${t.textMuted} flex flex-wrap items-center gap-2 mt-1`}>
-                                       {detailSession === 'drink' && (
-                                         <div className={`px-2 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} shrink-0`}>
-                                           <input
-                                             type="time"
-                                             value={e.time || '12:00'}
-                                             onChange={(ev) => {
-                                               const meals = { ...(day.meals || {}) };
-                                               meals[detailSession] = meals[detailSession].map(x => x.id === e.id ? { ...x, time: ev.target.value } : x);
-                                               persistDay({ ...day, meals });
-                                             }}
-                                             onClick={(ev) => { try { ev.target.showPicker?.(); } catch {} }}
-                                             className={`bg-transparent outline-none text-xs font-bold ${t.textMain} [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
-                                           />
-                                         </div>
-                                       )}
-                                       <span className="truncate flex items-center gap-1.5">
-                                          <span className={`text-xs font-bold ${t.textMain}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
-                                          <span className="text-[10px] text-green-500 font-semibold">P {Math.round(e.nutrition?.protein || 0)}g</span>
-                                          <span className="text-[10px] text-amber-500 font-semibold">K {Math.round(e.nutrition?.carbs || 0)}g</span>
-                                          <span className="text-[10px] text-red-400 font-semibold">L {Math.round(e.nutrition?.fat || 0)}g</span>
-                                          {!isGram && <span className={`text-[10px] ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
-                                        </span>
-                                       {e.source === 'recipe' && <span className="inline-flex items-center gap-1 ml-1 text-emerald-500">· <ChefHat size={14} strokeWidth={2.5} /></span>}{e.source === 'domus' && <span className="inline-flex items-center gap-1 ml-1 text-blue-500">· <Box size={14} strokeWidth={2.5} /></span>}
-                                       {e.isMealPrep && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border shrink-0 ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>Meal Prep</span>}
-                                     </div>
-                                   </div>
-                                 </div>
+                             const changeItemUnit = (newUnit) => {
+                               const meals = { ...(day.meals || {}) };
+                               meals[detailSession] = meals[detailSession].map(x => {
+                                 if (x.id !== e.id) return x;
+                                 return {
+                                   ...x,
+                                   unit: newUnit
+                                 };
+                               });
+                               persistDay({ ...day, meals });
+                             };
 
-                                 <div className="shrink-0 flex items-center gap-2">
+                             const displayName = (() => {
+                                if (e.name && e.name !== 'Meal Prep' && e.name !== 'Meal Prep (1 porsi)') return e.name;
+                                if (e.batchId) {
+                                  const b = mealPreps?.find(x => x.id === e.batchId);
+                                  if (b?.name) return `${b.name} (1 porsi)`;
+                                }
+                                if (e.recipeId) {
+                                  const r = recipes?.find(x => x.id === e.recipeId);
+                                  if (r?.name) return `${r.name} (1 porsi)`;
+                                }
+                                return e.name || 'Makanan';
+                              })();
+
+                              return (
+                                <div key={e.id} className={`flex items-center justify-between p-3.5 rounded-2xl border ${t.border} ${t.bgCard} ${!isEaten ? 'opacity-70' : ''}`}>
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
+                                    <div className="truncate flex-1">
+                                      <p className={`body-md font-bold ${t.textMain} truncate`}>
+                                        {displayName}
+                                      </p>
+                                      <div className={`caption font-medium ${t.textMuted} flex flex-wrap items-center gap-2 mt-1`}>
+                                        {detailSession === 'drink' && (
+                                          <div className={`px-2 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} shrink-0`}>
+                                            <input
+                                              type="time"
+                                              value={e.time || '12:00'}
+                                              onChange={(ev) => {
+                                                const meals = { ...(day.meals || {}) };
+                                                meals[detailSession] = meals[detailSession].map(x => x.id === e.id ? { ...x, time: ev.target.value } : x);
+                                                persistDay({ ...day, meals });
+                                              }}
+                                              onClick={(ev) => { try { ev.target.showPicker?.(); } catch {} }}
+                                              className={`bg-transparent outline-none text-xs font-bold ${t.textMain} [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
+                                            />
+                                          </div>
+                                        )}
+                                        <span className="truncate flex items-center gap-1.5">
+                                           <span className={`text-xs font-bold ${t.textMain}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
+                                           <span className="text-[10px] text-green-500 font-semibold">P {Math.round(e.nutrition?.protein || 0)}g</span>
+                                           <span className="text-[10px] text-amber-500 font-semibold">K {Math.round(e.nutrition?.carbs || 0)}g</span>
+                                           <span className="text-[10px] text-red-400 font-semibold">L {Math.round(e.nutrition?.fat || 0)}g</span>
+                                           {!isGram && <span className={`text-[10px] ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
+                                        </span>
+                                        {(e.source === 'recipe' || e.isMealPrep) && (
+                                          <span className="inline-flex items-center gap-1 ml-0.5 text-emerald-500" title="Meal Prep"><ChefHat size={14} strokeWidth={2.5} /></span>
+                                        )}
+                                        {e.source === 'domus' && (
+                                          <span className="inline-flex items-center gap-1 ml-0.5 text-blue-500" title="Domus"><Box size={14} strokeWidth={2.5} /></span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="shrink-0 flex items-center gap-2">
+                                    {isMealPrep && (
+                                      <button
+                                        onClick={() => toggleEatenStatus(detailSession, e, !isEaten)}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
+                                          isEaten
+                                            ? 'bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30'
+                                            : `${t.bgAccent} text-white shadow-md shadow-emerald-500/20 hover:opacity-95`
+                                        }`}
+                                        title={isEaten ? 'Klik untuk membatalkan (retract)' : 'Klik untuk menandai sudah dimakan'}
+                                      >
+                                        {isEaten ? <Check size={13} strokeWidth={3} /> : <Utensils size={13} />}
+                                        <span>{isEaten ? 'Dimakan' : 'Makan'}</span>
+                                      </button>
+                                    )}
                                     <div className="flex flex-col items-center gap-0.5">
                                       <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken}`}>
                                         <SwipeInput
                                           value={qty}
                                           min={0}
-                                          onChange={(newQty) => updateItemGrams(Math.round(newQty * unitWeight), unit)}
+                                          onChange={(newQty) => {
+                                            const targetUnitWeight = getItemUnitWeight(e, unit);
+                                            const newGrams = Math.round(newQty * targetUnitWeight * 10) / 10;
+                                            updateItemGrams(newGrams, unit);
+                                          }}
                                           className={`w-10 bg-transparent body-md outline-none no-spinners font-bold text-center ${t.textMain}`}
                                         />
                                       </div>
                                       <select
                                         value={unit}
-                                        onChange={(ev) => {
-                                          const newUnit = ev.target.value;
-                                          const newUnitWeight = (newUnit === 'g' || newUnit === 'ml') ? 1 : (URT_DICTIONARY[newUnit] || 1);
-                                          const newGrams = Math.round(qty * newUnitWeight);
-                                          updateItemGrams(newGrams, newUnit);
-                                        }}
+                                        onChange={(ev) => changeItemUnit(ev.target.value)}
                                         className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}
                                       >
                                         {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
                                       </select>
                                     </div>
-                                    <button onClick={() => removeEntry(detailSession, e.id)} className="p-2 rounded-xl text-red-400 shrink-0 hover:bg-red-500/10 transition-colors"><X size={15} /></button>
-                                 </div>
-                               </div>
-                             );
+                                    <button 
+                                      onClick={() => removeEntry(detailSession, e.id)} 
+                                      className="p-2 rounded-xl text-red-400 shrink-0 hover:bg-red-500/10 transition-colors"
+                                      title="Hapus dari jadwal & kembalikan stok"
+                                    >
+                                      <X size={15} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
                            })}
                          </div>
                          {slide.items.length === 0 && (

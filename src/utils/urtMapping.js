@@ -125,9 +125,33 @@ export const calculateGramsFromURT = (qty, unit) => {
   return null;
 };
 
+export const getItemUnitWeight = (item, unitName) => {
+  const norm = normalizeUnit(unitName);
+  if (norm === 'g' || norm === 'ml') return 1;
+
+  if (norm === 'porsi') {
+    if (item?.perPortionGrams && Number(item.perPortionGrams) > 0) {
+      return Number(item.perPortionGrams);
+    }
+    if (item?.servingGrams && Number(item.servingGrams) > 0) {
+      return Number(item.servingGrams);
+    }
+    if (item?.baseGrams && Number(item.baseGrams) > 0) {
+      return Number(item.baseGrams);
+    }
+  }
+
+  if (item?.servingUnit && normalizeUnit(item.servingUnit) === norm && Number(item.servingGrams) > 0) {
+    return Number(item.servingGrams);
+  }
+
+  return URT_DICTIONARY[norm] || 1;
+};
+
 export const UNIT_OPTIONS = [
   'g', 'ml', 'porsi', 'potong', 'centong', 'sdm', 'sdt', 'butir', 'buah',
   'mangkok', 'piring', 'gelas', 'cangkir', 'botol', 'kaleng', 'cup',
   'bungkus', 'iris', 'lembar', 'tusuk', 'ekor', 'biji', 'kepal', 'genggam', 'batang', 'siung'
 ];
+
 

@@ -170,12 +170,24 @@ const PanoramicSlider = forwardRef(({
         }
       }}
     >
+      {/* Track — ini yang bergerak horizontal */}
       <div
         ref={trackRef}
         className={`w-full relative flex-1 ${hClass}`}
         style={{ willChange: 'transform' }}
       >
-        {renderPanel ? renderPanel('curr') : null}
+        {/* Panel kiri (prev) */}
+        <div className={`w-full absolute top-0 -left-full flex flex-col ${fillHeight ? 'h-full' : 'min-h-full'}`}>
+          {renderPanel ? renderPanel('prev') : null}
+        </div>
+        {/* Panel tengah (curr) — ini yang terlihat */}
+        <div className={`w-full relative flex flex-col ${fillHeight ? 'h-full' : 'min-h-full'}`}>
+          {renderPanel ? renderPanel('curr') : null}
+        </div>
+        {/* Panel kanan (next) */}
+        <div className={`w-full absolute top-0 left-full flex flex-col ${fillHeight ? 'h-full' : 'min-h-full'}`}>
+          {renderPanel ? renderPanel('next') : null}
+        </div>
       </div>
     </div>
   );
