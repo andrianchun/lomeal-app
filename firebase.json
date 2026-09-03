@@ -46,6 +46,28 @@
         ]
       },
       {
+        "comment": "Header unduhan APK langsung: Cache no-store, Content-Type APK Android, Content-Disposition attachment agar browser langsung trigger download.",
+        "source": "/apk/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/vnd.android.package-archive"
+          },
+          {
+            "key": "Content-Disposition",
+            "value": "attachment; filename=\"lomeal-latest.apk\""
+          },
+          {
+            "key": "Access-Control-Allow-Origin",
+            "value": "*"
+          }
+        ]
+      },
+      {
         "comment": "Access-Control-Allow-Origin wajib di sini — WebView Capacitor native fetch() dari origin https://localhost, BUKAN https://lomeal.web.app, jadi cek OTA di APK itu cross-origin. Tanpa header ini browser/WebView nolak fetch()-nya (TypeError: Failed to fetch) SEBELUM kode sempat baca respons apa pun — APK jadi permanen mengira sudah versi terbaru padahal cek-nya gagal diam-diam. version.json/zip publik & tanpa kredensial, jadi wildcard aman.",
         "source": "/ota/**",
         "headers": [

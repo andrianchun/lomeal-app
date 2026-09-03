@@ -17,26 +17,44 @@ const readVersion = () => JSON.parse(fs.readFileSync('package.json', 'utf8')).ve
 const BUMPS = ['patch', 'minor', 'major'];
 const args = process.argv.slice(2);
 const forced = args.includes('force');
+const apk = args.includes('apk');
 const bump = args.find(a => BUMPS.includes(a)) || 'patch';
 // Sisa argumen = catatan rilis. Ditulis apa adanya ke version.json dan tampil di
 // kartu/modal update, jadi kalimat lengkap — bukan satu kata asal.
-const rest = args.filter(a => a !== 'force' && !BUMPS.includes(a));
+const rest = args.filter(a => a !== 'force' && a !== 'apk' && !BUMPS.includes(a));
 if (rest.length > 1) {
   console.error(`Catatan rilis harus satu argumen (pakai tanda kutip): ${rest.join(' | ')}`);
   process.exit(1);
 }
 const notes = rest[0];
 if (notes && !/\s/.test(notes)) {
-  console.error(`Catatan rilis "${notes}" cuma satu kata — kelihatan seperti salah ketik.\nPakai: npm run release [patch|minor|major] [force] ["kalimat catatan rilis"]`);
+  console.error(`Catatan rilis "${notes}" cuma satu kata — kelihatan seperti salah ketik.\nPakai: npm run release [patch|minor|major] [force] [apk] ["kalimat catatan rilis"]`);
+  process.exit(1);
+}
+
+// Pastikan public/apk ada dan APK rilis disalin jika tersedia
+if (!fs.existsSync('public/apk')) {
+  fs.mkdirSync('public/apk', { recursive: true });
+}
+if (fs.existsSync('android/app/build/outputs/apk/release/app-release.apk')) {
+  fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'public/apk/lomeal-latest.apk');
+} else if (fs.existsSync('android/app/build/outputs/apk/release/lomeal_installer.apk')) {
+  fs.copyFileSync('android/app/build/outputs/apk/release/lomeal_installer.apk', 'public/apk/lomeal-latest.apk');
+}
+
+if (apk && !fs.existsSync('public/apk/lomeal-latest.apk')) {
+  console.error('Jalur APK dipilih tapi public/apk/lomeal-latest.apk tidak ada.\n' +
+    'Build dulu APK-nya lalu salin:\n' +
+    '  cp android/app/build/outputs/apk/release/app-release.apk public/apk/lomeal-latest.apk');
   process.exit(1);
 }
 
 const from = readVersion();
 run(`npm version ${bump} --no-git-tag-version`);
 const version = readVersion(); // WAJIB baca ulang: nilai lama sudah basi setelah bump
-console.log(`\nRelease v${from} -> v${version}${forced ? '  [WAJIB — user diblokir sampai update]' : ''}\n`);
+console.log(`\nRelease v${from} -> v${version}${forced ? '  [WAJIB — user diblokir sampai update]' : ''}${apk ? '  [jalur APK]' : ''}\n`);
 
-run('npm run build:ota', { OTA_FORCE: forced ? '1' : '0', OTA_NOTES: notes || '' });
+run('npm run build:ota', { OTA_FORCE: forced ? '1' : '0', OTA_NOTES: notes || '', OTA_APK: apk ? '1' : '0' });
 
 // Buang cache unggah Firebase sebelum deploy. Cache ini bikin firebase-tools melewati file
 // yang dikira sudah terunggah, dan berkali-kali bikin SELURUH /ota/** raib dari hosting:

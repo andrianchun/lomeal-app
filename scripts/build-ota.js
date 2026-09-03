@@ -60,14 +60,17 @@ output.on('close', function() {
   fs.copyFileSync(outputPath, path.join(otaPath, LEGACY_BRIDGE));
 
   // version.json ditulis SETELAH zip selesai, supaya manifest tidak pernah menunjuk zip yang gagal dibuat.
-  // OTA_FORCE/OTA_NOTES di-set oleh scripts/release.js (`npm run release force "catatan"`).
-  fs.writeFileSync(path.join(otaPath, 'version.json'), JSON.stringify({
+  // OTA_FORCE/OTA_NOTES/OTA_APK di-set oleh scripts/release.js (`npm run release force apk "catatan"`).
+  const apk = process.env.OTA_APK === '1';
+  const manifest = {
     ota_version: version,
-    ota_url: `https://lomeal.web.app/ota/${zipName}`,
+    ota_url: apk ? 'https://lomeal.web.app/apk/lomeal-latest.apk' : `https://lomeal.web.app/ota/${zipName}`,
     is_forced: process.env.OTA_FORCE === '1',
     release_notes: process.env.OTA_NOTES || `Pembaruan v${version}`
-  }, null, 2));
-  console.log(`OTA siap (v${version}). Zip ter-deploy: ${kept.slice(0, KEEP).join(', ')}`);
+  };
+  if (apk) manifest.is_apk = true;
+  fs.writeFileSync(path.join(otaPath, 'version.json'), JSON.stringify(manifest, null, 2));
+  console.log(`OTA siap (v${version})${apk ? ' [Jalur APK]' : ''}. Zip ter-deploy: ${kept.slice(0, KEEP).join(', ')}`);
 });
 
 archive.on('warning', function(err) {
@@ -85,13 +88,13 @@ archive.on('error', function(err) {
 archive.pipe(output);
 
 // Append files from the dist directory, putting its contents at the root of archive.
-// - 'ota/**' wajib di-ignore supaya zip tidak me-zip dirinya sendiri.
+// - 'ota/**' dan 'apk/**' wajib di-ignore supaya zip tidak me-zip dirinya sendiri atau file APK.
 // - service worker & manifest PWA dibuang: tidak berguna di WebView native, dan kalau
 //   sampai ter-register di dalam WebView, SW itu akan menyajikan index.html lamanya
 //   sendiri dan menutupi bundle yang baru dipasang Capgo.
 archive.glob('**/*', {
   cwd: distPath,
-  ignore: ['ota/**', 'sw.js', 'workbox-*.js', 'registerSW.js', 'manifest.webmanifest']
+  ignore: ['ota/**', 'apk/**', 'sw.js', 'workbox-*.js', 'registerSW.js', 'manifest.webmanifest']
 });
 
 archive.finalize();
