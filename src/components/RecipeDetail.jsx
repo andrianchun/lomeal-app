@@ -107,14 +107,25 @@ const RecipeDetail = ({ t, theme, user, recipe, domusItems, onClose, onCook, onE
         <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-transparent" />
       </div>
 
+      {/* ---------- TOP STATUS BAR FADE OVERLAY ---------- */}
+      <div 
+        className="fixed top-0 inset-x-0 z-20 pointer-events-none transition-all duration-300"
+        style={{
+          height: 'calc(6.5rem + env(safe-area-inset-top, 24px))',
+          background: isDark
+            ? 'linear-gradient(to bottom, #070a08 0%, #070a08 30%, rgba(7,10,8,0.92) 55%, rgba(7,10,8,0.5) 80%, transparent 100%)'
+            : 'linear-gradient(to bottom, #f6f8f6 0%, #f6f8f6 30%, rgba(246,248,246,0.92) 55%, rgba(246,248,246,0.5) 80%, transparent 100%)'
+        }}
+      />
+
       {/* ---------- FLOATING TOP BUTTONS ---------- */}
-      <div className="absolute top-0 inset-x-0 p-4 pt-safe flex items-center justify-between z-20 pointer-events-none">
+      <div className="fixed top-0 inset-x-0 p-4 pt-safe flex items-center justify-between z-30 pointer-events-none">
         <div className="pointer-events-auto">
-          <button onClick={onClose} className={roundBtn}><ChevronLeft size={20} /></button>
+          <button onClick={onClose} className={roundBtn} aria-label="Kembali"><ChevronLeft size={20} /></button>
         </div>
         <div className="flex gap-2 pointer-events-auto">
-          <button onClick={onEdit} className={roundBtn}><Pencil size={16} /></button>
-          <button onClick={onShare} disabled={shareBusy} className={`${roundBtn} disabled:opacity-60`}>
+          <button onClick={onEdit} className={roundBtn} aria-label="Edit resep"><Pencil size={16} /></button>
+          <button onClick={onShare} disabled={shareBusy} className={`${roundBtn} disabled:opacity-60`} aria-label="Bagikan resep">
             {shareBusy ? <Loader2 size={16} className="animate-spin" /> : <Share2 size={16} />}
           </button>
         </div>

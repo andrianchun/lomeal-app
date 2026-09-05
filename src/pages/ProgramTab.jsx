@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ChefHat, Plus, X, Clock, CalendarPlus, Warehouse, ClipboardList, Send, Trash2, Utensils, Calculator, Coins, Loader2, Search, Box, Check } from 'lucide-react';
+import { ChefHat, Plus, X, Clock, CalendarPlus, Warehouse, ClipboardList, Send, Trash2, Utensils, Calculator, Coins, Loader2, Search, Box, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { EMPTY_NUTRITION, DIET_PROFILES, DIET_GOALS, ACTIVITY_LEVELS } from '../data/nutrition';
 import { MEAL_SESSIONS, DEFAULT_SESSION_TIMES, macroText, getLocalYMD, DAY_NAMES_ID, heroForRecipe, formatDuration } from '../data/constants';
 import { STATUS } from '../theme';
@@ -43,18 +43,18 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
   };
   const handleSubTabTouchMove = (e) => { swipeXRef.current.end = e.touches[0].clientX; };
   const handleSubTabTouchEnd = (e) => {
-    const dist = swipeXRef.current.start - swipeXRef.current.end;
-    if (Math.abs(dist) < 50) return;
-    if (dist > 0 && activeTab === 'resep') { setActiveTab('meal_prep'); e.stopPropagation(); }
-    else if (dist < 0 && activeTab === 'meal_prep') { setActiveTab('resep'); e.stopPropagation(); }
+    const diff = swipeXRef.current.end - swipeXRef.current.start;
+    if (diff > 50 && activeTab === 'meal_prep') setActiveTab('resep');
+    if (diff < -50 && activeTab === 'resep') setActiveTab('meal_prep');
   };
-  const [editing, setEditing] = useState(null);  // draft resep di builder
-  const [viewingId, setViewingId] = useState(null); // resep yang lagi dibuka detailnya
-  const [assigning, setAssigning] = useState(null); // resep yang sedang dijadwalkan
+  const [editing, setEditing] = useState(null); // recipe to edit/create
+  const [viewingId, setViewingId] = useState(null); // recipe to view details
+  const [assigning, setAssigning] = useState(null); // recipe to plan to calendar
   const [cooking, setCooking] = useState(null); // { recipe, servings } — sesi masak yang lagi jalan
   const [shareBusy, setShareBusy] = useState(null);
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
   const [showQuickAiModal, setShowQuickAiModal] = useState(false);
+  const [showTargetDetails, setShowTargetDetails] = useState(false);
   const [quickPrompt, setQuickPrompt] = useState('');
   const [selectedIngredients, setSelectedIngredients] = useState([]);
   const [ingredientSearch, setIngredientSearch] = useState('');
@@ -93,6 +93,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
       const init = (profile?.kulkas || []).map((k) => (typeof k === 'string' ? k : k?.name)).filter(Boolean);
       setSelectedIngredients(init);
       setIngredientSearch('');
+      setShowTargetDetails(false);
     }
   }, [showQuickAiModal, profile?.kulkas]);
 
@@ -128,6 +129,14 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
 
     return { domusList: dList, dbList: generalNames };
   }, [domusItems, customFoods, ingredientSearch]);
+
+  const unselectedDomus = useMemo(() => {
+    return domusList.filter(d => !selectedIngredients.some(s => s.toLowerCase() === d.name.toLowerCase()));
+  }, [domusList, selectedIngredients]);
+
+  const unselectedDb = useMemo(() => {
+    return dbList.filter(d => !selectedIngredients.some(s => s.toLowerCase() === d.name.toLowerCase()));
+  }, [dbList, selectedIngredients]);
 
   const handleAddIngredient = (name) => {
     const trimmed = (name || '').trim();
@@ -669,98 +678,112 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm no-swipe" onClick={() => !isQuickGenerating && setShowQuickAiModal(false)}>
           <div
             onClick={(e) => e.stopPropagation()}
-            className={`relative w-full sm:max-w-md max-h-[90vh] overflow-y-auto hide-scrollbar rounded-[2rem] border ${theme === 'dark' ? 'border-white/10 bg-[#0a1510]' : 'border-black/10 bg-white'} backdrop-blur-2xl p-6 flex flex-col shadow-2xl anim-rise`}
+            className={`relative w-full sm:max-w-md max-h-[90vh] overflow-y-auto hide-scrollbar rounded-[2rem] border ${theme === 'dark' ? 'border-white/10 bg-[#0a1510]' : 'border-black/10 bg-white'} backdrop-blur-2xl p-5 sm:p-6 flex flex-col shadow-2xl anim-rise`}
           >
+            {/* MODAL HEADER */}
             <div className="flex items-center justify-between pb-3 border-b border-black/5 dark:border-white/10 shrink-0">
-              <h3 className={`h2 ${t.textMain}`}>Buat Resep</h3>
-              <button onClick={() => !isQuickGenerating && setShowQuickAiModal(false)} className={`p-1.5 rounded-full ${t.btnBg} ${t.textMuted}`}>
+              <div className="flex items-center gap-2">
+                <ChefHat size={20} className="text-emerald-400" />
+                <h3 className={`h2 ${t.textMain}`}>Buat Resep</h3>
+              </div>
+              <button onClick={() => !isQuickGenerating && setShowQuickAiModal(false)} className={`p-1.5 rounded-full ${t.btnBg} ${t.textMuted} hover:${t.textMain} transition-colors`} aria-label="Tutup">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="py-4 space-y-4">
-              {/* Profil Target Nutrisi (Single surface, NO nested boxes) */}
-              <div className={`p-4 rounded-2xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-black/5 bg-black/5'} space-y-2.5`}>
-                <div className="flex items-center justify-between border-b border-black/5 dark:border-white/10 pb-2">
-                  <span className={`h3 ${t.textMuted}`}>Target Nutrisi</span>
-                  <span className={`body-md font-bold ${t.textAccent}`}>{Math.round(profile?.targets?.kcal || 2000).toLocaleString('id-ID')} kkal / hari</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                  <div>
-                    <span className={`caption ${t.textMuted} block`}>Fisik (BB / TB)</span>
-                    <span className={`body-md ${t.textMain}`}>
-                      {profile?.physical?.weight || profile?.weight || '—'} kg · {profile?.physical?.height || profile?.height || '—'} cm
+            <div className="py-3.5 space-y-4">
+              {/* TARGET NUTRISI - SLEEK COMPACT STRIP (NO HEAVY NESTED BOXES) */}
+              <div className={`rounded-2xl ${theme === 'dark' ? 'bg-white/[0.04] border border-white/5' : 'bg-black/[0.03] border border-black/5'} transition-all overflow-hidden`}>
+                <div 
+                  onClick={() => setShowTargetDetails(!showTargetDetails)}
+                  className="p-3 flex items-center justify-between cursor-pointer active:opacity-80 select-none"
+                >
+                  <div className="flex items-center gap-2 min-w-0 pr-2">
+                    <span className="caption font-black uppercase tracking-wider text-emerald-400 shrink-0">Target</span>
+                    <span className={`caption ${t.textMuted}`}>•</span>
+                    <span className={`caption font-bold ${t.textMain} truncate`}>
+                      {Math.round(profile?.targets?.kcal || 2000).toLocaleString('id-ID')} kkal · P {Math.round(profile?.targets?.protein || 0)}g K {Math.round(profile?.targets?.carbs || 0)}g L {Math.round(profile?.targets?.fat || 0)}g
                     </span>
                   </div>
-
-                  <div>
-                    <span className={`caption ${t.textMuted} block`}>Diet & Fase</span>
-                    <span className={`body-md ${t.textMain} truncate block`}>
-                      {dietLabel} {goalLabel ? `(${goalLabel})` : ''}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className={`caption ${t.textMuted} block`}>Target Makro</span>
-                    <span className={`body-md ${t.textMain}`}>
-                      P {Math.round(profile?.targets?.protein || 0)}g · K {Math.round(profile?.targets?.carbs || 0)}g · L {Math.round(profile?.targets?.fat || 0)}g
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className={`caption ${t.textMuted} block`}>Aktivitas</span>
-                    <span className={`body-md ${t.textMain} truncate block`}>
-                      {activityLabel}
-                    </span>
+                  <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-400 shrink-0">
+                    <span>{showTargetDetails ? 'Ringkas' : 'Detail'}</span>
+                    {showTargetDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                   </div>
                 </div>
 
-                {(profile?.allergies?.trim() || (profile?.medicalHistory || []).length > 0) && (
-                  <div className="pt-2 border-t border-black/5 dark:border-white/10 flex items-baseline gap-1.5 flex-wrap">
-                    <span className={`caption ${t.textMuted}`}>Pantangan / Alergi:</span>
-                    <span className="caption text-rose-400 font-bold">
-                      {[profile?.allergies?.trim(), ...(profile?.medicalHistory || [])].filter(Boolean).join(', ')}
-                    </span>
+                {showTargetDetails && (
+                  <div className="px-3 pb-3 pt-1 border-t border-black/5 dark:border-white/5 space-y-2">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                      <div>
+                        <span className={`text-[10px] ${t.textMuted} block`}>Fisik (BB / TB)</span>
+                        <span className={`font-semibold ${t.textMain}`}>
+                          {profile?.physical?.weight || profile?.weight || '—'} kg · {profile?.physical?.height || profile?.height || '—'} cm
+                        </span>
+                      </div>
+                      <div>
+                        <span className={`text-[10px] ${t.textMuted} block`}>Diet & Fase</span>
+                        <span className={`font-semibold ${t.textMain} truncate block`}>
+                          {dietLabel} {goalLabel ? `(${goalLabel})` : ''}
+                        </span>
+                      </div>
+                      <div>
+                        <span className={`text-[10px] ${t.textMuted} block`}>Aktivitas</span>
+                        <span className={`font-semibold ${t.textMain} truncate block`}>
+                          {activityLabel}
+                        </span>
+                      </div>
+                    </div>
+
+                    {(profile?.allergies?.trim() || (profile?.medicalHistory || []).length > 0) && (
+                      <div className="pt-1.5 border-t border-black/5 dark:border-white/5 flex items-baseline gap-1.5 flex-wrap text-xs">
+                        <span className={`text-[10px] ${t.textMuted}`}>Pantangan / Alergi:</span>
+                        <span className="text-xs text-rose-400 font-bold">
+                          {[profile?.allergies?.trim(), ...(profile?.medicalHistory || [])].filter(Boolean).join(', ')}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Multi-Select Bahan Makanan yang Tersedia */}
+              {/* BAHAN YANG TERSEDIA */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className={`caption ${t.textMain}`}>Bahan yang Tersedia</label>
-                  <span className={`caption ${t.textMuted}`}>{selectedIngredients.length} bahan</span>
+                  <label className={`caption font-bold ${t.textMain}`}>Bahan yang Dipilih</label>
+                  <span className={`caption font-semibold ${t.textMuted}`}>{selectedIngredients.length} bahan</span>
                 </div>
 
-                {/* Selected chips */}
-                {selectedIngredients.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto hide-scrollbar">
+                {/* Selected Ingredients (Green Chips) */}
+                {selectedIngredients.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto hide-scrollbar py-0.5">
                     {selectedIngredients.map((name, i) => (
                       <span
                         key={`${name}-${i}`}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl caption font-bold ${t.bgAccent} text-white shadow-sm`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold bg-emerald-500 text-white shadow-sm transition-all"
                       >
                         {name}
                         <button
                           type="button"
                           onClick={() => setSelectedIngredients(prev => prev.filter((_, idx) => idx !== i))}
                           className="hover:opacity-80 p-0.5"
+                          aria-label={`Hapus ${name}`}
                         >
-                          <X size={14} />
+                          <X size={13} />
                         </button>
                       </span>
                     ))}
                   </div>
+                ) : (
+                  <p className={`text-xs italic ${t.textMuted} py-1`}>Pilih bahan dari stok Domus atau cari di bawah ini.</p>
                 )}
 
                 {/* Search & Add Input */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pt-1">
                   <div className={`flex items-center gap-2 flex-1 px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} transition-all focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/30`}>
                     <Search size={15} className={`shrink-0 ${t.textMuted}`} />
                     <input
                       type="text"
-                      placeholder="Cari / tambah bahan..."
+                      placeholder="Cari / ketik bahan..."
                       value={ingredientSearch}
                       onChange={(e) => setIngredientSearch(e.target.value)}
                       onKeyDown={(e) => {
@@ -769,7 +792,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                           handleAddIngredient(ingredientSearch);
                         }
                       }}
-                      className={`w-full bg-transparent ${t.textMain} body-md outline-none placeholder:opacity-40 placeholder:${t.textMuted}`}
+                      className={`w-full bg-transparent ${t.textMain} text-sm outline-none placeholder:opacity-40 placeholder:${t.textMuted}`}
                     />
                     {ingredientSearch && (
                       <button
@@ -785,101 +808,90 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                     <button
                       type="button"
                       onClick={() => handleAddIngredient(ingredientSearch)}
-                      className={`px-3.5 py-2.5 rounded-xl ${t.bgAccent} text-white caption font-bold shrink-0 active:scale-95 transition-transform shadow-sm`}
+                      className={`px-3 py-2.5 rounded-xl ${t.bgAccent} text-white text-xs font-bold shrink-0 active:scale-95 transition-transform shadow-sm`}
                     >
                       + Tambah
                     </button>
                   )}
                 </div>
 
-                {/* Grouped Dropdown List (Domus di atas sendiri, lalu Database/Populer) */}
-                <div className={`max-h-48 overflow-y-auto hide-scrollbar rounded-2xl border ${t.border} ${theme === 'dark' ? 'bg-black/30' : 'bg-black/5'} p-2 space-y-2.5`}>
-                  {/* Tambah bahan custom jika belum ada di database */}
-                  {ingredientSearch.trim() && !domusList.some(d => d.name.toLowerCase() === ingredientSearch.trim().toLowerCase()) && !dbList.some(d => d.name.toLowerCase() === ingredientSearch.trim().toLowerCase()) && (
-                    <div
-                      onClick={() => handleAddIngredient(ingredientSearch)}
-                      className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold ${t.bgAccent} text-white cursor-pointer active:scale-[0.98] transition-all`}
-                    >
-                      <span>+ Tambah &ldquo;{ingredientSearch.trim()}&rdquo;</span>
-                      <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-medium">Bahan Baru</span>
-                    </div>
-                  )}
+                {/* Quick Add Custom Query if not already in suggestions */}
+                {ingredientSearch.trim() && !domusList.some(d => d.name.toLowerCase() === ingredientSearch.trim().toLowerCase()) && !dbList.some(d => d.name.toLowerCase() === ingredientSearch.trim().toLowerCase()) && (
+                  <button
+                    type="button"
+                    onClick={() => handleAddIngredient(ingredientSearch)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 active:scale-95 transition-all"
+                  >
+                    <Plus size={13} />
+                    <span>Tambah &ldquo;{ingredientSearch.trim()}&rdquo;</span>
+                  </button>
+                )}
 
-                  {/* Group 1: Stok Dapur Domus (di atas sendiri) */}
-                  {domusList.length > 0 && (
+                {/* AVAILABLE INGREDIENTS AS CLEAN CHIPS (NO NESTED BOXES!) */}
+                <div className="space-y-3 pt-1">
+                  {/* Stok Dapur Domus Chips */}
+                  {unselectedDomus.length > 0 && (
                     <div>
-                      <div className="flex items-center gap-1.5 px-2 py-1 mb-1">
-                        <Box size={12} className="text-sky-400 shrink-0" />
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <Box size={13} className="text-sky-400 shrink-0" />
                         <span className="text-[10px] font-black uppercase tracking-wider text-sky-400">
-                          Stok Dapur Domus ({domusList.length})
+                          Stok Dapur Domus ({unselectedDomus.length})
                         </span>
                       </div>
-                      <div className="space-y-1">
-                        {domusList.map((item) => {
-                          const isSelected = selectedIngredients.includes(item.name);
-                          return (
-                            <div
-                              key={`domus-${item.name}`}
-                              onClick={() => handleToggleIngredient(item.name)}
-                              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all ${
-                                isSelected
-                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                                  : theme === 'dark' ? 'bg-white/5 hover:bg-white/10 text-neutral-200' : 'bg-white hover:bg-black/5 text-neutral-800 shadow-sm'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2 truncate pr-2">
-                                <span className="truncate">{item.name}</span>
-                                {item.stock && (
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${theme === 'dark' ? 'bg-sky-500/20 text-sky-300' : 'bg-sky-50 text-sky-700'}`}>
-                                    {item.stock}
-                                  </span>
-                                )}
-                              </div>
-                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${isSelected ? 'bg-emerald-500 text-white' : theme === 'dark' ? 'bg-white/10 text-neutral-400' : 'bg-black/5 text-neutral-600'}`}>
-                                {isSelected ? <Check size={12} /> : <Plus size={12} />}
-                              </span>
-                            </div>
-                          );
-                        })}
+                      <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto hide-scrollbar">
+                        {unselectedDomus.map((item) => (
+                          <button
+                            key={`domus-${item.name}`}
+                            type="button"
+                            onClick={() => handleAddIngredient(item.name)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95 ${
+                              theme === 'dark'
+                                ? 'bg-sky-950/40 border border-sky-800/40 text-sky-300 hover:bg-sky-900/50'
+                                : 'bg-sky-50 border border-sky-200 text-sky-800 hover:bg-sky-100'
+                            }`}
+                          >
+                            <Plus size={12} className="text-sky-400 shrink-0" />
+                            <span>{item.name}</span>
+                            {item.stock && (
+                              <span className="text-[10px] opacity-70 font-normal ml-0.5">({item.stock})</span>
+                            )}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}
 
-                  {/* Group 2: Database Bahan & Populer */}
-                  {dbList.length > 0 && (
+                  {/* Bahan Populer Chips */}
+                  {unselectedDb.length > 0 && (
                     <div>
-                      <div className="flex items-center gap-1.5 px-2 py-1 mb-1">
-                        <Utensils size={12} className="text-emerald-400 shrink-0" />
-                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
-                          Database & Populer
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <Utensils size={13} className="text-neutral-400 shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-neutral-400">
+                          {ingredientSearch.trim() ? 'Hasil Lainnya' : 'Bahan Populer'}
                         </span>
                       </div>
-                      <div className="space-y-1">
-                        {dbList.map((item) => {
-                          const isSelected = selectedIngredients.includes(item.name);
-                          return (
-                            <div
-                              key={`db-${item.name}`}
-                              onClick={() => handleToggleIngredient(item.name)}
-                              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all ${
-                                isSelected
-                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                                  : theme === 'dark' ? 'bg-white/5 hover:bg-white/10 text-neutral-200' : 'bg-white hover:bg-black/5 text-neutral-800 shadow-sm'
-                              }`}
-                            >
-                              <span className="truncate pr-2">{item.name}</span>
-                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${isSelected ? 'bg-emerald-500 text-white' : theme === 'dark' ? 'bg-white/10 text-neutral-400' : 'bg-black/5 text-neutral-600'}`}>
-                                {isSelected ? <Check size={12} /> : <Plus size={12} />}
-                              </span>
-                            </div>
-                          );
-                        })}
+                      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto hide-scrollbar">
+                        {unselectedDb.map((item) => (
+                          <button
+                            key={`db-${item.name}`}
+                            type="button"
+                            onClick={() => handleAddIngredient(item.name)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all active:scale-95 ${
+                              theme === 'dark'
+                                ? 'bg-white/5 border border-white/5 text-neutral-300 hover:bg-white/10'
+                                : 'bg-black/5 border border-black/5 text-neutral-700 hover:bg-black/10'
+                            }`}
+                          >
+                            <Plus size={12} className="opacity-50 shrink-0" />
+                            <span>{item.name}</span>
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}
 
-                  {domusList.length === 0 && dbList.length === 0 && !ingredientSearch.trim() && (
-                    <p className={`text-xs ${t.textMuted} text-center py-3 italic`}>Belum ada bahan dalam daftar.</p>
+                  {unselectedDomus.length === 0 && unselectedDb.length === 0 && !ingredientSearch.trim() && (
+                    <p className={`text-xs ${t.textMuted} text-center py-2 italic`}>Semua bahan yang tersedia sudah dipilih.</p>
                   )}
                 </div>
               </div>
@@ -887,7 +899,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
               {/* Konsep Masakan */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className={`caption ${t.textMain}`}>Konsep Masakan (Opsional)</label>
+                  <label className={`caption font-bold ${t.textMain}`}>Konsep Masakan (Opsional)</label>
                   <span className={`caption ${quickPrompt.length >= 150 ? 'text-amber-500' : t.textMuted}`}>
                     {quickPrompt.length}/150
                   </span>
@@ -898,7 +910,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                   placeholder="Misal: aglio e olio, ala Korea, tomyam segar, pasta rendah kalori..."
                   value={quickPrompt}
                   onChange={(e) => setQuickPrompt(e.target.value.slice(0, 150))}
-                  className={`w-full px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none resize-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 placeholder:opacity-35 placeholder:${t.textMuted}`}
+                  className={`w-full px-3.5 py-2.5 rounded-xl border ${t.border} ${t.inputBg} ${t.textMain} text-sm outline-none resize-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 placeholder:opacity-35 placeholder:${t.textMuted}`}
                 />
               </div>
             </div>
@@ -907,7 +919,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
               <button
                 disabled={isQuickGenerating}
                 onClick={handleQuickGenerate}
-                className={`w-full py-3.5 rounded-2xl body-md ${t.bgAccent} flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${isQuickGenerating ? 'opacity-80 cursor-not-allowed' : ''}`}
+                className={`w-full py-3.5 rounded-2xl body-md ${t.bgAccent} font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${isQuickGenerating ? 'opacity-80 cursor-not-allowed' : ''}`}
               >
                 {isQuickGenerating ? (
                   <>

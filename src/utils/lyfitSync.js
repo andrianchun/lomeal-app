@@ -111,36 +111,50 @@ export const extractLyfitDay = (yearDays, ymd) => {
 
   workouts.forEach((w) => {
     if (!w || typeof w !== 'object') return;
+    // Abaikan sesi yang masih terjadwal / belum dikerjakan
+    if (w.status === 'planned' || w.isProjected) return;
+
     const logObj = w.log || w.exerciseLogs || w.workoutLog || w.logs || w.records;
     const hasLogs = logObj && typeof logObj === 'object' && Object.keys(logObj).length > 0;
-    const isCompleted = w.status === 'completed' || w.completed === true || w.programId === 'adhoc' || hasLogs;
+    const isCompleted = w.status === 'completed' || w.completed === true || (w.programId === 'adhoc' && hasLogs);
     if (isCompleted || w.isWorkout) completedSessions += 1;
 
     if (hasLogs) {
-      totalExercises += Object.keys(logObj).length;
-    } else if (Array.isArray(w.exercises) && w.exercises.length > 0) {
-      totalExercises += w.exercises.length;
-    } else if (typeof w.exercises === 'object' && w.exercises !== null && Object.keys(w.exercises).length > 0) {
-      totalExercises += Object.keys(w.exercises).length;
-    } else if (Array.isArray(w.overriddenExercises) && w.overriddenExercises.length > 0) {
-      totalExercises += w.overriddenExercises.length;
-    } else if (Array.isArray(w.completedExercises) && w.completedExercises.length > 0) {
-      totalExercises += w.completedExercises.length;
-    } else if (Array.isArray(w.exerciseList) && w.exerciseList.length > 0) {
-      totalExercises += w.exerciseList.length;
-    } else if (Array.isArray(w.items) && w.items.length > 0) {
-      totalExercises += w.items.length;
-    } else if (w.exerciseCount && Number(w.exerciseCount) > 0) {
-      totalExercises += Number(w.exerciseCount);
-    } else if (w.workoutCount && Number(w.workoutCount) > 0) {
-      totalExercises += Number(w.workoutCount);
-    } else if (isCompleted || w.duration || w.activeMinutes || w.caloriesBurned || w.burnedKcal) {
-      totalExercises += 1;
+      let count = 0;
+      Object.values(logObj).forEach((sets) => {
+        if (Array.isArray(sets)) {
+          if (sets.some((s) => s?.done && !s?.skipped)) count += 1;
+        } else if (sets && typeof sets === 'object') {
+          if (Object.values(sets).some((s) => s?.done && !s?.skipped)) count += 1;
+        }
+      });
+      // Fallback jika format log adhoc/cardio tanpa centang done: gunakan jumlah item latihan
+      totalExercises += count > 0 ? count : Object.keys(logObj).length;
+    } else if (isCompleted) {
+      if (Array.isArray(w.exercises) && w.exercises.length > 0) {
+        totalExercises += w.exercises.length;
+      } else if (typeof w.exercises === 'object' && w.exercises !== null && Object.keys(w.exercises).length > 0) {
+        totalExercises += Object.keys(w.exercises).length;
+      } else if (Array.isArray(w.overriddenExercises) && w.overriddenExercises.length > 0) {
+        totalExercises += w.overriddenExercises.length;
+      } else if (Array.isArray(w.completedExercises) && w.completedExercises.length > 0) {
+        totalExercises += w.completedExercises.length;
+      } else if (Array.isArray(w.exerciseList) && w.exerciseList.length > 0) {
+        totalExercises += w.exerciseList.length;
+      } else if (Array.isArray(w.items) && w.items.length > 0) {
+        totalExercises += w.items.length;
+      } else if (w.exerciseCount && Number(w.exerciseCount) > 0) {
+        totalExercises += Number(w.exerciseCount);
+      } else if (w.workoutCount && Number(w.workoutCount) > 0) {
+        totalExercises += Number(w.workoutCount);
+      } else if (w.duration || w.activeMinutes || w.caloriesBurned || w.burnedKcal) {
+        totalExercises += 1;
+      }
     }
   });
 
   // Fallback: Jika tidak ditemukan di per-sesi, periksa langsung di tingkat root hari (day)
-  if (totalExercises === 0) {
+  if (totalExercises === 0 && day.status !== 'planned') {
     const rootLogs = day.exerciseLogs || day.log || day.workoutLog || day.logs || day.records;
     if (rootLogs && typeof rootLogs === 'object' && Object.keys(rootLogs).length > 0) {
       totalExercises += Object.keys(rootLogs).length;

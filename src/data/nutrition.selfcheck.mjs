@@ -63,11 +63,13 @@ assert.equal(
 assert.equal(computeDayTotals({ meals: { pagi: [entry(100, { isEaten: false })] } }).kcal, 0);
 assert.equal(computeDayTotals({ meals: { pagi: [entry(100, { isEaten: true })] } }).kcal, 100);
 
-// Meal prep default BELUM dimakan walaupun defaultEaten true.
+// Meal prep & planned default BELUM dimakan walaupun defaultEaten true.
 assert.equal(computeDayTotals({ meals: { pagi: [entry(100, { isMealPrep: true })] } }).kcal, 0);
 assert.equal(computeDayTotals({ meals: { pagi: [entry(100, { source: 'recipe' })] } }).kcal, 0);
+assert.equal(computeDayTotals({ meals: { pagi: [entry(100, { planned: true })] } }).kcal, 0);
 // ...tapi kalau user centang sudah dimakan, tetap dihitung.
 assert.equal(computeDayTotals({ meals: { pagi: [entry(100, { isMealPrep: true, isEaten: true })] } }).kcal, 100);
+assert.equal(computeDayTotals({ meals: { pagi: [entry(100, { planned: true, isEaten: true })] } }).kcal, 100);
 
 // defaultEaten=false dipakai buat tanggal masa depan (rencana, bukan riwayat).
 assert.equal(computeDayTotals({ meals: { pagi: [entry(100)] } }, false).kcal, 0);

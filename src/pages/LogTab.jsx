@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
-import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator } from 'lucide-react';
+import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator, Trash2 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import RingChart from '../components/RingChart';
 import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity } from '../utils/domusSync';
@@ -81,6 +81,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const [pickerOpen, setPickerOpen] = useState(false); // FoodPicker terbuka? (nambah ke batch aiResult yang sama)
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
   const [detailSlide, setDetailSlide] = useState(0);
+  const [sessionTitleInput, setSessionTitleInput] = useState('');
+  const sessionTitleRef = useRef('');
+  sessionTitleRef.current = sessionTitleInput;
+  const chatInputRef = useRef(null);
+  const [isInputFocused, setIsInputFocused] = useState(false);
 
   // Datang dari tombol "Makan" di stok Meal Prep / Calendar: langsung buka tanggal & sheet sesi tujuannya.
   useEffect(() => {
@@ -90,6 +95,10 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   useEffect(() => {
     setDetailSlide(0);
+    if (detailSession) {
+      const current = day?.sessionLabels?.[detailSession] || profile?.settings?.sessionLabels?.[detailSession] || MEAL_SESSIONS.find(s => s.id === detailSession)?.label || (detailSession.startsWith('snack') ? `Camilan ${detailSession.replace('snack', '')}` : 'Sesi Baru');
+      setSessionTitleInput(current);
+    }
   }, [detailSession]);
 
   const [copySourceSession, setCopySourceSession] = useState(null);
@@ -122,27 +131,51 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // (dan copySourceSession/pickerOpen menggantikannya) — urutan push otomatis LIFO yang
   // bener karena yang belakangan dibuka memang belakangan di-push.
   useBackClose(!!aiResult, () => setAiResult(null));
-  useBackClose(!!detailSession, () => setDetailSession(null));
+  useBackClose(!!detailSession, () => closeDetailSession());
   useBackClose(!!copySourceSession, () => { setCopySourceSession(null); setCopyTargetSessions([]); });
   useBackClose(showDayStatsModal, () => setShowDayStatsModal(false));
   useBackClose(showAddSessionModal, () => setShowAddSessionModal(false));
   // pickerOpen (FoodPickerModal) sudah dihandle di dalam komponennya sendiri lewat prop `open`.
   
-  // Safe dismiss for smart-input-bar (menyembunyikan bar ketika tap di luarnya, menghindari glitch onBlur)
+  // Safe dismiss for smart-input-bar & sync keyboard state via Visual Viewport
   useEffect(() => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    const checkKeyboard = () => {
+      if (!vv) return;
+      const isKeyboardVisible = (window.innerHeight - vv.height) > 120;
+      if (isKeyboardVisible) {
+        document.body.classList.add('keyboard-open');
+      } else if (document.activeElement !== chatInputRef.current) {
+        document.body.classList.remove('keyboard-open');
+        setIsInputFocused(false);
+      }
+    };
+
+    if (vv) {
+      vv.addEventListener('resize', checkKeyboard);
+      vv.addEventListener('scroll', checkKeyboard);
+    }
+
     const handlePointerDown = (e) => {
-      if (document.body.classList.contains('keyboard-open')) {
-        const bar = document.getElementById('smart-input-bar');
-        const sheet = document.getElementById('ai-result-sheet');
-        // If clicking outside both the input bar AND the Lomy result sheet (if open)
-        if (bar && !bar.contains(e.target) && (!sheet || !sheet.contains(e.target))) {
-          document.body.classList.remove('keyboard-open');
-          if (document.activeElement) document.activeElement.blur();
+      const bar = document.getElementById('smart-input-bar');
+      const sheet = document.getElementById('ai-result-sheet');
+      // If clicking outside both the input bar AND the Lomy result sheet (if open)
+      if (bar && !bar.contains(e.target) && (!sheet || !sheet.contains(e.target))) {
+        if (chatInputRef.current && document.activeElement === chatInputRef.current) {
+          chatInputRef.current.blur();
         }
       }
     };
     document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', checkKeyboard);
+        vv.removeEventListener('scroll', checkKeyboard);
+      }
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.body.classList.remove('keyboard-open');
+    };
   }, []);
 
   const cameraRef = useRef(null);
@@ -437,6 +470,36 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   }, [selectedYmd]);
 
   const persistDay = (newDay) => saveDay(selectedYmd, newDay);
+
+  const handleRenameSession = (newVal) => {
+    if (!detailSession) return;
+    const trimmed = (newVal !== undefined ? newVal : sessionTitleRef.current).trim();
+    if (!trimmed) return;
+    const currentLabel = day?.sessionLabels?.[detailSession] || profile?.settings?.sessionLabels?.[detailSession] || MEAL_SESSIONS.find(s => s.id === detailSession)?.label || '';
+    if (trimmed !== currentLabel) {
+      persistDay({
+        ...day,
+        sessionLabels: { ...(day.sessionLabels || {}), [detailSession]: trimmed },
+      });
+      if (saveProfilePatch) {
+        saveProfilePatch({
+          settings: {
+            ...(profile?.settings || {}),
+            sessionLabels: {
+              ...(profile?.settings?.sessionLabels || {}),
+              [detailSession]: trimmed,
+            },
+          },
+        });
+      }
+      showToast(`Nama sesi diubah menjadi "${trimmed}"`, { type: 'success' });
+    }
+  };
+
+  const closeDetailSession = () => {
+    handleRenameSession();
+    setDetailSession(null);
+  };
 
   const handleRemoveSession = async (sessionId) => {
     const sessionLabel = activeSessions.find(s => s.id === sessionId)?.label || '';
@@ -913,7 +976,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     showToast(`${foods.length} catatan makanan berhasil disimpan!`);
   };
 
-  const chatInputRef = useRef(null);
   const baseVoiceTextRef = useRef('');
   const voiceTimerRef = useRef(null);
   const voiceListenersRef = useRef([]);
@@ -1079,10 +1141,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     userDefaults.forEach(id => { if (!hidden.includes(id)) activeIds.add(id); });
     Object.keys(day.meals || {}).forEach(id => { if (!hidden.includes(id)) activeIds.add(id); });
     Object.keys(day.sessionLabels || {}).forEach(id => { if (!hidden.includes(id)) activeIds.add(id); });
+    Object.keys(profile?.settings?.sessionLabels || {}).forEach(id => { if (!hidden.includes(id)) activeIds.add(id); });
     
     let allSessions = Array.from(activeIds).map(id => {
       const base = MEAL_SESSIONS.find(s => s.id === id);
-      const customLabel = day.sessionLabels?.[id] || base?.label || `Camilan ${id.replace('snack', '')}`;
+      const customLabel = day.sessionLabels?.[id] || profile?.settings?.sessionLabels?.[id] || base?.label || `Camilan ${id.replace('snack', '')}`;
       return base ? { ...base, label: customLabel } : { id, label: customLabel, emoji: '🍽️' };
     });
     
@@ -1273,7 +1336,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       )}
 
       {/* ===== WATER TRACKER (Mengambang di atas input bar) ===== */}
-      <div className="fixed left-0 right-0 z-30 pointer-events-none px-3" style={{ bottom: 'calc(180px + env(safe-area-inset-bottom, 20px))' }}>
+      <div id="floating-rack" className="fixed left-0 right-0 z-30 pointer-events-none px-3 transition-opacity duration-200" style={{ bottom: 'calc(180px + env(safe-area-inset-bottom, 20px))' }}>
          <div className="max-w-2xl mx-auto flex justify-end pointer-events-none">
              <div
                  // p-2 & border SELALU ada (cuma warnanya yang transisi transparent↔terlihat) —
@@ -1382,9 +1445,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
       {/* ===== SMART INPUT BAR (menempel di atas BottomNav, besar ala Logym) ===== */}
       <div id="smart-input-bar" className="fixed left-0 right-0 z-30 px-3 pb-2 pointer-events-none transition-all duration-300 ease-out" style={{ bottom: 'calc(82px + env(safe-area-inset-bottom, 20px))' }}>
-        <div className={`no-swipe pointer-events-auto relative max-w-2xl mx-auto flex items-center gap-1.5 px-3 py-2.5 rounded-[32px] border ${t.border} ${t.navBg} shadow-2xl transition-all duration-300 ease-out`}>
+        <div className={`no-swipe pointer-events-auto relative max-w-2xl mx-auto flex items-end gap-1.5 px-2.5 py-2 rounded-[28px] border ${t.border} ${t.navBg} shadow-2xl transition-all duration-300 ease-out`}>
           {aiBusy ? (
-            <div className="absolute inset-0 rounded-[32px] overflow-hidden pointer-events-none">
+            <div className="absolute inset-0 rounded-[28px] overflow-hidden pointer-events-none">
               <div className="absolute inset-0 bg-green-500/20 dark:bg-green-400/20 w-full origin-left" style={{ animation: 'progressFill 10s cubic-bezier(0.1, 0.8, 0.2, 1) forwards' }} />
             </div>
           ) : null}
@@ -1410,7 +1473,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             }} />
           
           {aiBusy ? (
-            <div className="relative z-10 flex-1 px-2 body-lg font-bold text-green-600 dark:text-green-400 animate-pulse flex items-center gap-2 min-w-0">
+            <div className="relative z-10 flex-1 px-2 body-lg font-bold text-green-600 dark:text-green-400 animate-pulse flex items-center gap-2 min-w-0 h-[46px]">
               <Loader2 size={18} className="animate-spin shrink-0" /> <span className="truncate">Memproses...</span>
             </div>
           ) : (
@@ -1421,27 +1484,63 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                 setChatText(e.target.value);
                 if (chatInputRef.current) {
                   chatInputRef.current.style.height = 'auto';
-                  chatInputRef.current.style.height = Math.min(chatInputRef.current.scrollHeight, 120) + 'px';
+                  const baseH = (isInputFocused || e.target.value) ? 46 : 38;
+                  chatInputRef.current.style.height = Math.max(baseH, Math.min(chatInputRef.current.scrollHeight, 120)) + 'px';
                 }
               }}
-              onFocus={() => document.body.classList.add('keyboard-open')}
+              onFocus={() => {
+                setIsInputFocused(true);
+                document.body.classList.add('keyboard-open');
+                if (chatInputRef.current) {
+                  chatInputRef.current.style.height = 'auto';
+                  chatInputRef.current.style.height = Math.max(46, Math.min(chatInputRef.current.scrollHeight, 120)) + 'px';
+                }
+              }}
+              onBlur={() => {
+                setIsInputFocused(false);
+                setTimeout(() => {
+                  if (window.visualViewport) {
+                    const isKeyboardUp = (window.innerHeight - window.visualViewport.height) > 120;
+                    if (!isKeyboardUp && document.activeElement !== chatInputRef.current) {
+                      document.body.classList.remove('keyboard-open');
+                    }
+                  } else if (document.activeElement !== chatInputRef.current) {
+                    document.body.classList.remove('keyboard-open');
+                  }
+                  if (chatInputRef.current && !chatText) {
+                    chatInputRef.current.style.height = '38px';
+                  }
+                }, 150);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (chatText.trim() && !aiBusy) {
+                    runMagicPrompt();
+                  }
+                }
+              }}
               placeholder="Ketik makananmu..."
-              className={`relative z-10 flex-1 min-w-0 bg-transparent outline-none body-lg px-2 py-3.5 font-medium ${t.textMain} placeholder:${t.textMuted} placeholder:opacity-50 hide-scrollbar resize-none overflow-y-auto`}
-              rows={1}
-              style={{ height: 'auto' }} />
+              className={`relative z-10 flex-1 min-w-0 bg-transparent outline-none text-sm md:text-base px-2 py-1.5 font-medium leading-snug ${t.textMain} placeholder:${t.textMuted} placeholder:opacity-50 hide-scrollbar resize-none overflow-y-auto`}
+              rows={isInputFocused || chatText ? 2 : 1}
+              style={{
+                height: (isInputFocused || chatText) ? '46px' : '38px',
+                minHeight: (isInputFocused || chatText) ? '46px' : '38px',
+                maxHeight: '120px'
+              }} />
           )}
           
           {aiBusy ? (
-            <button onClick={cancelAiRequest} className={`relative z-10 shrink-0 p-3.5 rounded-full bg-red-500 text-white shadow-lg transition-transform active:scale-95`} aria-label="Batal">
-              <X size={22} />
+            <button onClick={cancelAiRequest} className={`relative z-10 shrink-0 w-[46px] h-[46px] flex items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition-transform active:scale-95`} aria-label="Batal">
+              <X size={20} />
             </button>
           ) : chatText.trim() ? (
-            <button onClick={() => runMagicPrompt()} className={`relative z-10 shrink-0 p-3.5 rounded-full bg-green-500 text-white shadow-lg transition-transform active:scale-95`} aria-label="Kirim">
-              <Send size={22} />
+            <button onClick={() => runMagicPrompt()} className={`relative z-10 shrink-0 w-[46px] h-[46px] flex items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-transform active:scale-95`} aria-label="Kirim">
+              <Send size={20} />
             </button>
           ) : (
-            <button onClick={() => { if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId()); setPickerOpen(true); }} className={`relative z-10 shrink-0 p-3.5 rounded-full ${t.bgAccent} shadow-lg transition-transform active:scale-95`} aria-label="Input manual presisi">
-              <Plus size={22} />
+            <button onClick={() => { if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId()); setPickerOpen(true); }} className={`relative z-10 shrink-0 w-[46px] h-[46px] flex items-center justify-center rounded-full ${t.bgAccent} shadow-lg transition-transform active:scale-95`} aria-label="Input manual presisi">
+              <Plus size={20} />
             </button>
           )}
         </div>
@@ -1656,7 +1755,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
             <p className={`caption font-medium mb-2 ${t.textMuted}`}>Masukkan ke sesi:</p>
             <div ref={sessionStripRef} className="flex gap-2 overflow-x-auto hide-scrollbar mb-4 -mx-1 px-1">
-              {MEAL_SESSIONS.map(s => (
+              {activeSessions.map(s => (
                 <button key={s.id} data-session={s.id} onClick={() => setAiTargetSession(s.id)}
                   className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-2xl body-md font-bold transition-all active:scale-95 ${aiTargetSession === s.id ? `${t.bgAccent} text-white shadow-glow` : `${t.bgCardSoft} ${t.textMuted}`}`}>
                   <span className="text-base">{s.emoji}</span> {s.label}
@@ -1748,24 +1847,31 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         };
 
         return (
-          <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe ${pickerOpen || copySourceSession || editingPhotoObj || !!aiResult || aiBusy ? 'hidden' : ''}`} onClick={() => setDetailSession(null)}>
+          <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe ${pickerOpen || copySourceSession || editingPhotoObj || !!aiResult || aiBusy ? 'hidden' : ''}`} onClick={closeDetailSession}>
             <div onClick={(e) => e.stopPropagation()}
               className={`w-full max-w-sm max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl anim-rise`}>
               
               {/* FIXED HEADER */}
-              <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5`}>
-                <div className="flex flex-col flex-1 mr-4">
-                  <input key={detailSession} type="text" className={`bg-transparent outline-none h2 ${t.textMain} w-full`} 
-                    placeholder="Sesi Baru"
-                    defaultValue={activeSessions.find(s => s.id === detailSession)?.label || ''}
-                    onBlur={(e) => {
-                      const newVal = e.target.value.trim();
-                      if (newVal && newVal !== activeSessions.find(s => s.id === detailSession)?.label) {
-                        persistDay({ ...day, sessionLabels: { ...(day.sessionLabels || {}), [detailSession]: newVal } });
+              <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5 gap-2`}>
+                <div className="flex items-center flex-1 min-w-0 mr-1 relative group">
+                  <input
+                    type="text"
+                    value={sessionTitleInput}
+                    onChange={(e) => setSessionTitleInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleRenameSession(e.currentTarget.value);
+                        e.currentTarget.blur();
                       }
-                    }} />
+                    }}
+                    onBlur={(e) => handleRenameSession(e.target.value)}
+                    placeholder="Nama Sesi..."
+                    className={`bg-transparent outline-none h2 ${t.textMain} w-full pr-6 rounded-lg transition-colors border-b border-transparent focus:border-emerald-500`}
+                  />
+                  <Pencil size={13} className={`absolute right-1 ${t.textMuted} opacity-40 group-hover:opacity-80 pointer-events-none transition-opacity`} />
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 shrink-0">
                   {detailSession !== 'drink' && (
                     <input type="time" 
                       value={activeSlideTime}
@@ -1773,7 +1879,22 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                       onClick={(e) => { try { e.target.showPicker?.(); } catch {} }}
                       className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none cursor-pointer`} />
                   )}
-                  <button onClick={() => handleRemoveSession(detailSession)} className={`p-2 rounded-xl bg-red-400/10 text-red-400`}><X size={15} /></button>
+                  <button
+                    onClick={() => handleRemoveSession(detailSession)}
+                    className="p-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 active:scale-95 transition-all"
+                    title="Hapus sesi hari ini"
+                    aria-label="Hapus sesi hari ini"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                  <button
+                    onClick={closeDetailSession}
+                    className={`p-2 rounded-xl ${t.btnBg} ${t.textMuted} hover:${t.textMain} active:scale-95 transition-all`}
+                    title="Tutup"
+                    aria-label="Tutup"
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
               </div>
 
@@ -1961,90 +2082,97 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                               })();
 
                               return (
-                                <div key={e.id} className={`flex items-center justify-between p-3.5 rounded-2xl border ${t.border} ${t.bgCard} ${!isEaten ? 'opacity-70' : ''}`}>
-                                  <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
-                                    <div className="truncate flex-1">
-                                      <p className={`body-md font-bold ${t.textMain} truncate`}>
-                                        {displayName}
-                                      </p>
-                                      <div className={`caption font-medium ${t.textMuted} flex flex-wrap items-center gap-2 mt-1`}>
-                                        {detailSession === 'drink' && (
-                                          <div className={`px-2 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} shrink-0`}>
-                                            <input
-                                              type="time"
-                                              value={e.time || '12:00'}
-                                              onChange={(ev) => {
-                                                const meals = { ...(day.meals || {}) };
-                                                meals[detailSession] = meals[detailSession].map(x => x.id === e.id ? { ...x, time: ev.target.value } : x);
-                                                persistDay({ ...day, meals });
-                                              }}
-                                              onClick={(ev) => { try { ev.target.showPicker?.(); } catch {} }}
-                                              className={`bg-transparent outline-none text-xs font-bold ${t.textMain} [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
-                                            />
-                                          </div>
-                                        )}
-                                        <span className="truncate flex items-center gap-1.5">
-                                           <span className={`text-xs font-bold ${t.textMain}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
-                                           <span className="text-[10px] text-green-500 font-semibold">P {Math.round(e.nutrition?.protein || 0)}g</span>
-                                           <span className="text-[10px] text-amber-500 font-semibold">K {Math.round(e.nutrition?.carbs || 0)}g</span>
-                                           <span className="text-[10px] text-red-400 font-semibold">L {Math.round(e.nutrition?.fat || 0)}g</span>
-                                           {!isGram && <span className={`text-[10px] ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
-                                        </span>
-                                        {(e.source === 'recipe' || e.isMealPrep) && (
-                                          <span className="inline-flex items-center gap-1 ml-0.5 text-emerald-500" title="Meal Prep"><ChefHat size={14} strokeWidth={2.5} /></span>
-                                        )}
-                                        {e.source === 'domus' && (
-                                          <span className="inline-flex items-center gap-1 ml-0.5 text-blue-500" title="Domus"><Box size={14} strokeWidth={2.5} /></span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
+                                 <div key={e.id} className={`p-3.5 rounded-2xl border ${t.border} ${t.bgCard} ${!isEaten ? 'opacity-80' : ''} transition-all`}>
+                                   {/* Top Row: Full Title on left, Qty + Delete on right */}
+                                   <div className="flex items-start justify-between gap-3">
+                                     <div className="min-w-0 flex-1">
+                                       <p className={`body-md font-bold ${t.textMain} leading-snug break-words line-clamp-2`} title={displayName}>
+                                         {displayName}
+                                       </p>
+                                     </div>
 
-                                  <div className="shrink-0 flex items-center gap-2">
-                                    {isMealPrep && (
-                                      <button
-                                        onClick={() => toggleEatenStatus(detailSession, e, !isEaten)}
-                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
-                                          isEaten
-                                            ? 'bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30'
-                                            : `${t.bgAccent} text-white shadow-md shadow-emerald-500/20 hover:opacity-95`
-                                        }`}
-                                        title={isEaten ? 'Klik untuk membatalkan (retract)' : 'Klik untuk menandai sudah dimakan'}
-                                      >
-                                        {isEaten ? <Check size={13} strokeWidth={3} /> : <Utensils size={13} />}
-                                        <span>{isEaten ? 'Dimakan' : 'Makan'}</span>
-                                      </button>
-                                    )}
-                                    <div className="flex flex-col items-center gap-0.5">
-                                      <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken}`}>
-                                        <SwipeInput
-                                          value={qty}
-                                          min={0}
-                                          onChange={(newQty) => {
-                                            const targetUnitWeight = getItemUnitWeight(e, unit);
-                                            const newGrams = Math.round(newQty * targetUnitWeight * 10) / 10;
-                                            updateItemGrams(newGrams, unit);
-                                          }}
-                                          className={`w-10 bg-transparent body-md outline-none no-spinners font-bold text-center ${t.textMain}`}
-                                        />
-                                      </div>
-                                      <select
-                                        value={unit}
-                                        onChange={(ev) => changeItemUnit(ev.target.value)}
-                                        className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}
-                                      >
-                                        {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
-                                      </select>
-                                    </div>
-                                    <button 
-                                      onClick={() => removeEntry(detailSession, e.id)} 
-                                      className="p-2 rounded-xl text-red-400 shrink-0 hover:bg-red-500/10 transition-colors"
-                                      title="Hapus dari jadwal & kembalikan stok"
-                                    >
-                                      <X size={15} />
-                                    </button>
-                                  </div>
-                                </div>
+                                     <div className="shrink-0 flex items-center gap-2">
+                                       <div className="flex flex-col items-center gap-0.5">
+                                         <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken}`}>
+                                           <SwipeInput
+                                             value={qty}
+                                             min={0}
+                                             onChange={(newQty) => {
+                                               const targetUnitWeight = getItemUnitWeight(e, unit);
+                                               const newGrams = Math.round(newQty * targetUnitWeight * 10) / 10;
+                                               updateItemGrams(newGrams, unit);
+                                             }}
+                                             className={`w-10 bg-transparent body-md outline-none no-spinners font-bold text-center ${t.textMain}`}
+                                           />
+                                         </div>
+                                         <select
+                                           value={unit}
+                                           onChange={(ev) => changeItemUnit(ev.target.value)}
+                                           className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}
+                                         >
+                                           {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
+                                         </select>
+                                       </div>
+                                       <button 
+                                         onClick={() => removeEntry(detailSession, e.id)} 
+                                         className="p-1.5 rounded-xl text-red-400 shrink-0 hover:bg-red-500/10 transition-colors"
+                                         title="Hapus dari jadwal & kembalikan stok"
+                                         aria-label="Hapus menu"
+                                       >
+                                         <X size={16} />
+                                       </button>
+                                     </div>
+                                   </div>
+
+                                   {/* Bottom Row: Tombol Makan (di bawah judul) + Nutrisi & Detail */}
+                                   <div className="flex flex-wrap items-center gap-2.5 mt-2 pt-2 border-t border-black/5 dark:border-white/5">
+                                     {isMealPrep && (
+                                       <button
+                                         onClick={() => toggleEatenStatus(detailSession, e, !isEaten)}
+                                         className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 shrink-0 ${
+                                           isEaten
+                                             ? 'bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30'
+                                             : `${t.bgAccent} text-white shadow-sm hover:opacity-95`
+                                         }`}
+                                         title={isEaten ? 'Klik untuk membatalkan (retract)' : 'Klik untuk menandai sudah dimakan'}
+                                       >
+                                         {isEaten ? <Check size={13} strokeWidth={3} /> : <Utensils size={13} />}
+                                         <span>{isEaten ? 'Dimakan' : 'Makan'}</span>
+                                       </button>
+                                     )}
+
+                                     <div className={`caption font-medium ${t.textMuted} flex flex-wrap items-center gap-2 min-w-0`}>
+                                       {detailSession === 'drink' && (
+                                         <div className={`px-2 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} shrink-0`}>
+                                           <input
+                                             type="time"
+                                             value={e.time || '12:00'}
+                                             onChange={(ev) => {
+                                               const meals = { ...(day.meals || {}) };
+                                               meals[detailSession] = meals[detailSession].map(x => x.id === e.id ? { ...x, time: ev.target.value } : x);
+                                               persistDay({ ...day, meals });
+                                             }}
+                                             onClick={(ev) => { try { ev.target.showPicker?.(); } catch {} }}
+                                             className={`bg-transparent outline-none text-xs font-bold ${t.textMain} [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
+                                           />
+                                         </div>
+                                       )}
+                                       <span className="flex items-center gap-1.5 flex-wrap">
+                                         <span className={`text-xs font-bold ${t.textMain}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
+                                         <span className="text-[10px] text-green-500 font-semibold">P {Math.round(e.nutrition?.protein || 0)}g</span>
+                                         <span className="text-[10px] text-amber-500 font-semibold">K {Math.round(e.nutrition?.carbs || 0)}g</span>
+                                         <span className="text-[10px] text-red-400 font-semibold">L {Math.round(e.nutrition?.fat || 0)}g</span>
+                                         {!isGram && <span className={`text-[10px] ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
+                                       </span>
+                                       {(e.source === 'recipe' || e.isMealPrep) && (
+                                         <span className="inline-flex items-center gap-1 ml-0.5 text-emerald-500" title="Meal Prep"><ChefHat size={14} strokeWidth={2.5} /></span>
+                                       )}
+                                       {e.source === 'domus' && (
+                                         <span className="inline-flex items-center gap-1 ml-0.5 text-blue-500" title="Domus"><Box size={14} strokeWidth={2.5} /></span>
+                                       )}
+                                     </div>
+                                   </div>
+                                 </div>
                               );
                            })}
                          </div>
@@ -2256,7 +2384,19 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               <button onClick={() => {
                 const n = activeSessions.filter(s => s.id.startsWith('snack')).length + 1;
                 const newId = `snack${n}`;
-                persistDay({ ...day, sessionLabels: { ...(day.sessionLabels || {}), [newId]: `Camilan ${n}` } });
+                const newLabel = `Camilan ${n}`;
+                persistDay({ ...day, sessionLabels: { ...(day.sessionLabels || {}), [newId]: newLabel } });
+                if (saveProfilePatch) {
+                  saveProfilePatch({
+                    settings: {
+                      ...(profile?.settings || {}),
+                      sessionLabels: {
+                        ...(profile?.settings?.sessionLabels || {}),
+                        [newId]: newLabel,
+                      },
+                    },
+                  });
+                }
                 setShowAddSessionModal(false);
                 setDetailSession(newId);
               }} className={`w-full flex items-center justify-center gap-2 p-3 rounded-xl border-2 border-dashed ${t.borderDashed} ${t.textMuted} font-medium`}>

@@ -97,21 +97,21 @@ const AttachmentMenu = ({ onSelectCamera, onSelectGallery, onSelectMic, mainColo
   };
 
   return (
-    <div className="relative flex items-center justify-center w-[50px] h-[50px]" ref={containerRef}>
+    <div className="relative flex items-center justify-center w-[46px] h-[46px]" ref={containerRef}>
       <button
         type="button"
         disabled={disabled}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        className={`relative z-20 flex items-center justify-center transition-transform active:scale-95 disabled:opacity-50 w-[50px] h-[50px] rounded-full ${isListening ? 'bg-red-500 text-white' : mainColorClass} shadow-lg`}
+        className={`relative z-20 flex items-center justify-center transition-transform active:scale-95 disabled:opacity-50 w-[46px] h-[46px] rounded-full ${isListening ? 'bg-red-500 text-white' : mainColorClass} shadow-lg`}
         aria-label="Lampiran"
         style={{ touchAction: 'none' }}
       >
         {isListening ? (
-          <Mic size={22} className="transition-transform" />
+          <Mic size={20} className="transition-transform" />
         ) : (
-          <Paperclip size={22} className={isOpen ? 'rotate-90 transition-transform' : 'transition-transform'} />
+          <Paperclip size={20} className={isOpen ? 'rotate-90 transition-transform' : 'transition-transform'} />
         )}
       </button>
 

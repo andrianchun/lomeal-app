@@ -568,7 +568,7 @@ const HistoryTab = ({
     const kcalDiff = (baseTargets?.kcal || 0) - baseTdee;
 
     const lyfitDay = extractLyfitDay(lyfitYearData, ymd) || (isToday ? lyfitToday : null);
-    const totals = computeDayTotals(dayData || {});
+    const totals = computeDayTotals(dayData || {}, !isFuture);
     const bmrBase = lyfitDay?.bmr || baseTargets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
     const tefDay = calcTEF({
       protein: totals.protein,
@@ -593,20 +593,17 @@ const HistoryTab = ({
   const getDayDot = (ymd) => {
     const dayData = daysMap[ymd];
     if (!dayData) return null;
-    let totalKcal = 0;
-    let hasPlanned = ymd > todayStr;
-    Object.values(dayData.meals || {}).forEach(arr => {
-      (arr || []).forEach(e => {
-        totalKcal += (Number(e.nutrition?.kcal) || 0);
-        if (e.planned || e.isMealPrep) hasPlanned = true;
-      });
-    });
-    if (!totalKcal) return null;
-    if (hasPlanned) {
-      return { bg: 'bg-amber-500', hex: '#f59e0b' };
-    }
+    const isFuture = ymd > todayStr;
+    const eatenTotals = computeDayTotals(dayData, !isFuture);
     const dayTargets = getEffectiveDayTarget(ymd, dayData);
-    const ratio = totalKcal / (dayTargets.kcal || 2000);
+
+    if (isFuture) {
+      const hasPlanned = Object.values(dayData.meals || {}).some(arr => (arr || []).length > 0);
+      return hasPlanned ? { bg: 'bg-amber-500', hex: '#f59e0b' } : null;
+    }
+
+    if (!eatenTotals.kcal) return null;
+    const ratio = eatenTotals.kcal / (dayTargets.kcal || 2000);
     return ratio > 1.05 ? STATUS.danger : ratio >= 0.7 ? STATUS.ok : STATUS.warn;
   };
 
@@ -686,21 +683,12 @@ const HistoryTab = ({
   // Data hari yang dipilih
   const currentDayData = daysMap[selectedDate] || { meals: {}, water: 0 };
   const currentDayTotals = useMemo(() => {
-    let totals = { ...EMPTY_NUTRITION };
-    if (!currentDayData?.meals) return totals;
-    Object.values(currentDayData.meals).forEach(entries => {
-      (entries || []).forEach(e => {
-        if (e.nutrition) {
-          totals = addNutrition(totals, e.nutrition);
-        }
-      });
-    });
-    return totals;
-  }, [currentDayData]);
+    return computeDayTotals(currentDayData, selectedDate <= todayStr);
+  }, [currentDayData, selectedDate, todayStr]);
   const currentDayTargets = getEffectiveDayTarget(selectedDate, currentDayData);
   const isFutureDate = selectedDate > todayStr;
   const activeSessions = useMemo(() => {
-    return MEAL_SESSIONS.filter(s => s.id !== 'drink' && (currentDayData.meals?.[s.id] || []).length > 0);
+    return Object.keys(currentDayData.meals || {}).filter(s => s !== 'drink' && (currentDayData.meals?.[s] || []).length > 0);
   }, [currentDayData]);
   const hasMeals = activeSessions.length > 0;
 
@@ -921,18 +909,49 @@ const HistoryTab = ({
               const dayTargets = getEffectiveDayTarget(targetDate, dayData);
               const isFuture = targetDate > todayStr;
 
-              let dayTotals = { ...EMPTY_NUTRITION };
-              if (dayData?.meals) {
-                Object.values(dayData.meals).forEach(entries => {
+              // Hitung total kalori & makro harian yang SUDAH DIMAKAN (kecuali tanggal masa depan: tampilkan rencana)
+              let dayTotals = computeDayTotals(dayData, !isFuture);
+              let dayPlannedKcal = 0;
+
+              if (isFuture) {
+                // Di masa depan, belum ada yang dimakan: tampilkan akumulasi menu yang direncanakan
+                let plannedTotals = { ...EMPTY_NUTRITION };
+                Object.values(dayData.meals || {}).forEach(entries => {
                   (entries || []).forEach(e => {
                     if (e.nutrition) {
-                      dayTotals = addNutrition(dayTotals, e.nutrition);
+                      plannedTotals = addNutrition(plannedTotals, e.nutrition);
+                    }
+                  });
+                });
+                dayTotals = plannedTotals;
+              } else {
+                // Untuk hari ini / masa lalu: hitung kalori rencana yang belum dimakan untuk info tambahan
+                Object.values(dayData.meals || {}).forEach(entries => {
+                  (entries || []).forEach(e => {
+                    const isMealPrep = e.isMealPrep || e.source === 'recipe' || e.planned;
+                    const eaten = e.isEaten !== undefined ? Boolean(e.isEaten) : !isMealPrep;
+                    if (!eaten && e.nutrition?.kcal) {
+                      dayPlannedKcal += Number(e.nutrition.kcal);
                     }
                   });
                 });
               }
 
-              const dayActiveSessions = MEAL_SESSIONS.filter(s => s.id !== 'drink' && (dayData.meals?.[s.id] || []).length > 0);
+              const sessionOrder = ['breakfast', 'snack', 'lunch', 'snack2', 'dinner', 'snack3'];
+              const dayMealKeys = Object.keys(dayData.meals || {}).filter(s => s !== 'drink' && (dayData.meals?.[s] || []).length > 0);
+              dayMealKeys.sort((a, b) => {
+                const idxA = sessionOrder.indexOf(a);
+                const idxB = sessionOrder.indexOf(b);
+                if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                if (idxA !== -1) return -1;
+                if (idxB !== -1) return 1;
+                return a.localeCompare(b);
+              });
+              const dayActiveSessions = dayMealKeys.map(id => {
+                const base = MEAL_SESSIONS.find(s => s.id === id);
+                const label = dayData.sessionLabels?.[id] || profile?.settings?.sessionLabels?.[id] || base?.label || `Camilan ${id.replace('snack', '')}`;
+                return base ? { ...base, label } : { id, label, emoji: '🍽️' };
+              });
               const dayHasMeals = dayActiveSessions.length > 0;
 
               return (
@@ -954,13 +973,20 @@ const HistoryTab = ({
                         <>
                           {/* Ringkasan Kalori & 3 Kartu PKL (Hanya tampil jika ada menu) */}
                           <div className={`p-3.5 rounded-2xl border ${t.border} ${t.bgCard} space-y-2.5`}>
-                            <div className="flex items-baseline gap-1.5">
-                              <span className={`text-2xl font-black ${t.textMain} tabular-nums tracking-tight`}>
-                                {Math.round(dayTotals.kcal)}
-                              </span>
-                              <span className={`text-xs font-semibold ${t.textMuted}`}>
-                                / {Math.round(dayTargets.kcal || 2000)} kkal
-                              </span>
+                            <div className="flex items-baseline justify-between">
+                              <div className="flex items-baseline gap-1.5">
+                                <span className={`text-2xl font-black ${t.textMain} tabular-nums tracking-tight`}>
+                                  {Math.round(dayTotals.kcal)}
+                                </span>
+                                <span className={`text-xs font-semibold ${t.textMuted}`}>
+                                  / {Math.round(dayTargets.kcal || 2000)} kkal
+                                </span>
+                              </div>
+                              {dayPlannedKcal > 0 && !isFuture && (
+                                <span className="text-[11px] font-bold text-amber-500 bg-amber-500/10 px-2.5 py-0.5 rounded-full">
+                                  +{Math.round(dayPlannedKcal)} kkal rencana
+                                </span>
+                              )}
                             </div>
 
                             {/* 3 Kotak Mini PKL */}
@@ -992,21 +1018,50 @@ const HistoryTab = ({
                           {/* Sesi Makan yang Aktif */}
                           {dayActiveSessions.map((s) => {
                             const entries = dayData.meals?.[s.id] || [];
-                            const sessionKcal = entries.reduce((sum, e) => sum + (Number(e.nutrition?.kcal) || 0), 0);
-                            const hasPlanned = entries.some(e => e.planned || e.isMealPrep || isFuture);
+
+                            const isEntryEaten = (e) => {
+                              if (isFuture) return false;
+                              if (e.isEaten !== undefined) return Boolean(e.isEaten);
+                              const isMealPrep = e.isMealPrep || e.source === 'recipe' || e.planned;
+                              return !isMealPrep;
+                            };
+
+                            const eatenEntries = entries.filter(e => isEntryEaten(e));
+                            const plannedEntries = entries.filter(e => !isEntryEaten(e));
+                            const eatenKcal = eatenEntries.reduce((sum, e) => sum + (Number(e.nutrition?.kcal) || 0), 0);
+                            const plannedKcal = plannedEntries.reduce((sum, e) => sum + (Number(e.nutrition?.kcal) || 0), 0);
+
+                            const displaySessionKcal = isFuture 
+                              ? plannedKcal 
+                              : (eatenEntries.length > 0 ? eatenKcal : plannedKcal);
+
+                            const sessionStatus = isFuture
+                              ? { label: 'Direncanakan', color: 'bg-amber-500/15 text-amber-500 dark:text-amber-400' }
+                              : (eatenEntries.length === entries.length
+                                ? { label: 'Dikonsumsi', color: 'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400' }
+                                : eatenEntries.length > 0
+                                  ? { label: 'Sebagian Dimakan', color: 'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400' }
+                                  : { label: 'Direncanakan', color: 'bg-amber-500/15 text-amber-500 dark:text-amber-400' });
 
                             return (
                               <div key={s.id} className={`p-4 rounded-2xl border ${t.border} ${t.bgCard} space-y-1.5`}>
                                 <div className="flex items-center justify-between pb-1">
                                   <div className="flex items-center gap-2">
                                     <span className="text-sm font-bold">{s.emoji} {s.label}</span>
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${hasPlanned ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400' : 'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400'}`}>
-                                      {hasPlanned ? 'Direncanakan' : 'Dikonsumsi'}
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sessionStatus.color}`}>
+                                      {sessionStatus.label}
                                     </span>
                                   </div>
-                                  <span className={`text-xs font-black ${sessionKcal > 0 ? t.textMain : t.textMuted}`}>
-                                    {Math.round(sessionKcal)} kkal
-                                  </span>
+                                  <div className="text-right">
+                                    <span className={`text-xs font-black ${displaySessionKcal > 0 ? t.textMain : t.textMuted}`}>
+                                      {Math.round(displaySessionKcal)} kkal
+                                    </span>
+                                    {!isFuture && eatenEntries.length > 0 && plannedEntries.length > 0 && (
+                                      <span className="text-[10px] text-amber-500 font-medium ml-1.5">
+                                        (+{Math.round(plannedKcal)} renc)
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
 
                                 <div className="divide-y divide-black/5 dark:divide-white/5 pt-1">
@@ -1017,7 +1072,7 @@ const HistoryTab = ({
                                     const unitWeight = getItemUnitWeight(e, unit);
                                     const rawQty = (e.grams || 0) / unitWeight;
                                     const qty = Math.round(rawQty * 100) / 100;
-                                    const isPlannedItem = isFuture || e.isMealPrep || e.planned;
+                                    const isPlannedItem = !isEntryEaten(e);
 
                                     const displayName = (() => {
                                       if (e.name && e.name !== 'Meal Prep' && e.name !== 'Meal Prep (1 porsi)') return e.name;
@@ -1033,7 +1088,7 @@ const HistoryTab = ({
                                     })();
 
                                     return (
-                                      <div key={e.id || idx} className="flex items-center justify-between py-2.5 first:pt-1 last:pb-0 gap-4">
+                                      <div key={e.id || idx} className={`flex items-center justify-between py-2.5 first:pt-1 last:pb-0 gap-4 ${isPlannedItem && !isFuture ? 'opacity-75' : ''}`}>
                                         <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-4">
                                           <p className={`text-xs font-bold ${t.textMain} line-clamp-2 break-words leading-snug`}>
                                             {displayName}
@@ -1042,12 +1097,17 @@ const HistoryTab = ({
                                             <ChefHat size={13} className="text-emerald-500 shrink-0" />
                                           )}
                                           {e.source === 'domus' && <Box size={13} className="text-sky-500 shrink-0" />}
+                                          {isPlannedItem && !isFuture && (
+                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 shrink-0">
+                                              Rencana
+                                            </span>
+                                          )}
                                         </div>
                                         <div className="flex items-center gap-2 shrink-0 text-right whitespace-nowrap">
                                           <span className="text-xs font-medium text-neutral-400 tabular-nums">
                                             {qty} {unit}
                                           </span>
-                                          <span className={`text-xs font-black ${t.textMain} tabular-nums min-w-[54px] text-right`}>
+                                          <span className={`text-xs font-black ${isPlannedItem && !isFuture ? 'text-amber-500/90' : t.textMain} tabular-nums min-w-[54px] text-right`}>
                                             {Math.round(e.nutrition?.kcal || 0)} <span className="text-[10px] font-normal text-neutral-400">kkal</span>
                                           </span>
                                           {isPlannedItem && (

@@ -392,8 +392,8 @@ export const computeDayTotals = (day, defaultEaten = true) => {
   Object.entries(day.meals).forEach(([sessionId, entries]) => {
     if (hidden.includes(sessionId) && !(entries || []).length) return;
     (entries || []).forEach((e) => {
-      const isMealPrep = e.isMealPrep || e.source === 'recipe';
-      const eaten = e.isEaten !== undefined ? e.isEaten : (isMealPrep ? false : defaultEaten);
+      const isPlanned = e.isMealPrep || e.source === 'recipe' || e.planned;
+      const eaten = e.isEaten !== undefined ? Boolean(e.isEaten) : (isPlanned ? false : defaultEaten);
       if (eaten) {
         totals = addNutrition(totals, e.nutrition); 
       }

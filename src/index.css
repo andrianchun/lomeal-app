@@ -176,16 +176,19 @@ input[type=number] {
 
 
 /* Hide bottom nav and drop smart input bar when keyboard opens */
-body.keyboard-open #bottom-nav {
+body.keyboard-open #bottom-nav,
+body.keyboard-open #floating-rack {
   display: none !important;
 }
 body.keyboard-open #smart-input-bar {
   bottom: 0 !important;
-  padding-bottom: 0 !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+  padding-bottom: max(6px, env(safe-area-inset-bottom, 6px)) !important;
 }
 body.keyboard-open #smart-input-bar > div {
-  align-items: flex-start !important;
-  padding-bottom: calc(100px + env(safe-area-inset-bottom, 20px)) !important;
-  border-radius: 28px 28px 0 0 !important;
-  border-bottom: none !important;
+  max-width: 100% !important;
+  align-items: flex-end !important;
+  padding: 6px 8px !important;
+  border-radius: 24px !important;
 }
