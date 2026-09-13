@@ -559,35 +559,18 @@ const HistoryTab = ({
     if (showToast) showToast('Rencana makan dibatalkan & stok dikembalikan.');
   };
 
-  // Single Source of Truth untuk kalkulasi Target Harian (Dinamis dengan Logym jika terhubung)
+  // Single Source of Truth untuk kalkulasi Target Harian (Target Gizi Terencana yang Stabil)
   const getEffectiveDayTarget = useCallback((ymd, dayData) => {
     const isToday = ymd === todayStr;
     const isFuture = ymd > todayStr;
     const baseTargets = (isToday || isFuture ? profile?.targets : (dayData?.targetSnapshot || profile?.targets)) || {};
-    const baseTdee = baseTargets?.tdee || baseTargets?.kcal || 0;
-    const kcalDiff = (baseTargets?.kcal || 0) - baseTdee;
-
-    const lyfitDay = extractLyfitDay(lyfitYearData, ymd) || (isToday ? lyfitToday : null);
-    const totals = computeDayTotals(dayData || {}, !isFuture);
-    const bmrBase = lyfitDay?.bmr || baseTargets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
-    const tefDay = calcTEF({
-      protein: totals.protein,
-      carbs: totals.carbs,
-      fat: totals.fat,
-      kcal: totals.kcal,
-      bmr: bmrBase
-    }).total;
-
-    const burnedTotal = logymUser ? (lyfitDay?.burnedKcal || (bmrBase + tefDay)) : (baseTdee || 0);
-    const allowanceKcal = (logymUser && burnedTotal > 0)
-      ? Math.max(0, burnedTotal + kcalDiff)
-      : (baseTargets.kcal || 2000);
+    const targetKcal = baseTargets?.kcal || 2000;
 
     return {
       ...baseTargets,
-      kcal: allowanceKcal,
+      kcal: targetKcal,
     };
-  }, [todayStr, profile?.targets, profile?.physical, lyfitYearData, lyfitToday, logymUser]);
+  }, [todayStr, profile?.targets]);
 
   // Helper Dots Status Kepatuhan Kalori (Tercatat vs Direncanakan)
   const getDayDot = (ymd) => {

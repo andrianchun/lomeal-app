@@ -61,9 +61,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
           const tdeeEffective = lyfitDay?.burnedKcal ? burnedActual : (baseTdee || burnedActual);
           
           const targetDeltaVal = (dayTargets?.kcal || baseTdee) - baseTdee; // 0=maint, neg=cut, pos=bulk
-          const allowanceDay = lyfitDay?.burnedKcal 
-            ? Math.max(0, lyfitDay.burnedKcal + targetDeltaVal) 
-            : (dayTargets?.kcal || baseTdee);
+          const targetKcalDay = dayTargets?.kcal || baseTdee;
 
           let delta = null;
           if (eaten > 0 && tdeeEffective > 0) {
@@ -80,7 +78,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
               protein: totals.protein > 0 ? totals.protein : null,
               fat: totals.fat > 0 ? totals.fat : null,
               carbs: totals.carbs > 0 ? totals.carbs : null,
-              targetCalories: allowanceDay || null,
+              targetCalories: targetKcalDay || null,
               targetProtein: dayTargets?.protein || null,
               targetFat: dayTargets?.fat || null,
               targetCarbs: dayTargets?.carbs || null,

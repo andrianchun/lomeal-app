@@ -128,22 +128,14 @@ const DashboardTab = ({
   // Kalori Dimakan selalu ditarik dari "Tab Catat" (totals.kcal dari rekam makanan lokal Lomeal).
   const displayKcal = totals.kcal;
 
-  // FIX: Logym activityCalories = BMR + langkah + workout = total bakar NYATA hari ini.
-  // Formula lama salah: allowance = targets.kcal + burnedBonus (double-counting!).
-  // Formula baru: allowance = burn_aktual + program_delta
-  //   Maintenance: allowance = burnedBonus + 0          → sisa = burnedBonus - dimakan
-  //   Cutting:     allowance = burnedBonus - defisit    → sisa lebih kecil
-  //   Bulking:     allowance = burnedBonus + surplus     → sisa lebih besar
-  // Kalau tidak ada data Logym, fallback ke targets.kcal (behavior lama).
+  // Target kalori makan harian yang terencana (stabil, tidak membengkak mengikuti pembakaran total).
+  // targets.kcal adalah target gizi terencana (BMR * actFactor + surplus/defisit, misal 2.000-an kkal).
   const baseTdee = targets.tdee || targets.kcal || 0;
   const programDelta = (targets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
-  const actualTdee = logymUser ? burnedTotal : Math.max(baseTdee, burnedTotal);
-  const allowance = actualTdee > 0
-    ? Math.max(0, actualTdee + programDelta)
-    : (targets.kcal || 0);
+  const targetKcal = targets.kcal || 2000;
 
-  const remaining = Math.round(allowance - displayKcal);
-  const ringProgress = allowance > 0 ? Math.min(1, displayKcal / allowance) : 0;
+  const remaining = Math.round(targetKcal - displayKcal);
+  const ringProgress = targetKcal > 0 ? Math.min(1, displayKcal / targetKcal) : 0;
   const burnedBonus = Math.max(0, burnedTotal - baseTdee);
   const balance = getEnergyBalance(displayKcal, baseTdee, burnedBonus);
   const isBulking = programDelta > 0;
@@ -280,7 +272,7 @@ const DashboardTab = ({
                   <p className={`h3 ${t.textMuted}`}>Kalori Dimakan</p>
                   <p className={`text-xl font-black tabular-nums ${t.textAccent} mt-0.5`}>
                     {Math.round(displayKcal).toLocaleString('id-ID')}
-                    <span className={`caption ${t.textMuted} ml-1`}>/ {Math.round(allowance || targets.kcal || 0).toLocaleString('id-ID')} kkal</span>
+                    <span className={`caption ${t.textMuted} ml-1`}>/ {Math.round(targetKcal).toLocaleString('id-ID')} kkal</span>
                   </p>
                   <div className={`caption ${t.textMuted} mt-0.5 flex items-center gap-1.5`}>
                     <span className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-500 text-[8px] uppercase font-bold tracking-wider">LOMEAL</span>

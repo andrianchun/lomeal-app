@@ -59,6 +59,9 @@ export const pushTargetsToLogym = async (logymUid, targets) => {
       lomealSync: {
         targets: {
           kcal: Math.round(targets.kcal || 0),
+          tdee: Math.round(targets.tdee || 0),
+          bmr: Math.round(targets.bmr || 0),
+          dietGoal: targets.dietGoal || 'maintenance',
           protein: Math.round(targets.protein || 0),
           carbs: Math.round(targets.carbs || 0),
           fat: Math.round(targets.fat || 0),

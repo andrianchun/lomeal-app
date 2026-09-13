@@ -408,22 +408,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const targets = (isToday || isFuture ? profile?.targets : (day.targetSnapshot || profile?.targets)) || {};
   const dietGoal = targets.dietGoal || profile?.dietGoal || 'maintenance';
   const baseTdee = targets.tdee || targets.kcal || 0;
-  const kcalDiff = (targets.kcal || 0) - baseTdee;
-
-  // Hitung allowance kalori dinamis (sinkron dengan DashboardTab)
-  const selectedLyfitDay = extractLyfitDay(lyfitYearData, selectedYmd) || (isToday ? lyfitToday : null);
-  const bmrBase = selectedLyfitDay?.bmr || targets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
-  const tefDay = calcTEF({
-    protein: totals.protein,
-    carbs: totals.carbs,
-    fat: totals.fat,
-    kcal: totals.kcal,
-    bmr: bmrBase
-  }).total;
-  const burnedTotal = logymUser ? (selectedLyfitDay?.burnedKcal || (bmrBase + tefDay)) : (baseTdee || 0);
-  const allowanceKcal = (logymUser && burnedTotal > 0)
-    ? Math.max(0, burnedTotal + kcalDiff)
-    : (targets.kcal || 0);
+  const targetKcal = targets.kcal || 2000;
 
   // ---------- Date Strip horizontal (±30 hari) ----------
   const dates = useMemo(() => {
@@ -1174,7 +1159,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   };
 
   const MacroBar = ({ mkey, showSources = false }) => {
-    const target = mkey === 'kcal' ? (allowanceKcal || targets.kcal || 1) : (targets[mkey] || 1);
+    const target = mkey === 'kcal' ? (targetKcal || targets.kcal || 1) : (targets[mkey] || 1);
     const value = totals[mkey] || 0;
     const actualPct = (value / target) * 100;
     const barWidth = Math.min(100, Math.max(0, actualPct));
