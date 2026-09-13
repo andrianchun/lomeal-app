@@ -279,19 +279,9 @@ const DashboardTab = ({
                     {Math.round(displayKcal).toLocaleString('id-ID')}
                     <span className={`caption ${t.textMuted} ml-1`}>/ {Math.round(targetKcal).toLocaleString('id-ID')} kkal</span>
                   </p>
-                  <div className={`caption ${t.textMuted} mt-0.5 flex items-center gap-1.5`}>
-                    <span className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-500 text-[8px] uppercase font-bold tracking-wider">LOMEAL</span>
-                    {logymUser && (
-                      <span className={`px-1 py-0.5 rounded text-[8px] uppercase font-bold tracking-wider ${
-                        burnedTotal > baseTdee
-                          ? 'bg-amber-500/20 text-amber-500'
-                          : 'bg-blue-500/20 text-blue-500'
-                      }`}>
-                        {burnedTotal > baseTdee ? 'Target Latihan' : 'Target Rest'}
-                      </span>
-                    )}
+                  <p className={`caption ${t.textMuted} mt-0.5`}>
                     {today?.meals ? Object.values(today.meals).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0) : 0} konsumsi
-                  </div>
+                  </p>
                 </div>
 
                 {/* Garis Pemisah Tengah */}
