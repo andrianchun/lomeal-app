@@ -408,6 +408,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const targets = (isToday || isFuture ? profile?.targets : (day.targetSnapshot || profile?.targets)) || {};
   const dietGoal = targets.dietGoal || profile?.dietGoal || 'maintenance';
   const baseTdee = targets.tdee || targets.kcal || 0;
+  const kcalDiff = (targets.kcal || 0) - baseTdee;
   
   // Hitung target kalori dinamis (Calorie Cycling sinkron dengan DashboardTab)
   const selectedLyfitDay = extractLyfitDay(lyfitYearData, selectedYmd) || (isToday ? lyfitToday : null);
@@ -1181,6 +1182,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     const sources = showSources && expandedNutrient === mkey ? nutrientSources(day, mkey) : null;
     const isCut = dietGoal === 'cutting' || dietGoal === 'cut';
     const isBulk = dietGoal === 'bulk' || dietGoal === 'bulking';
+    const kcalDiff = (targets.kcal || 0) - baseTdee;
 
     return (
         <div>
