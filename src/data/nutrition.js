@@ -215,12 +215,33 @@ export const calcTEF = ({ protein = 0, carbs = 0, fat = 0, kcal = 0, bmr = 0 } =
 // individual, ini bukan pengganti itu).
 export const MIN_SAFE_KCAL = { female: 1200, male: 1500 };
 
+export const calcDynamicTarget = (baseTargets, burnedTotal, gender = 'male') => {
+  if (!baseTargets) return 2000;
+  const baseTdee = baseTargets.tdee || baseTargets.kcal || 2000;
+  const programDelta = (baseTargets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
+  const baseKcal = baseTargets.kcal || 2000;
+
+  const burn = Number(burnedTotal) || 0;
+  if (burn > baseTdee) {
+    const rawTarget = Math.round(burn + programDelta);
+    const safeMin = MIN_SAFE_KCAL[gender === 'female' ? 'female' : 'male'] || 1500;
+    return Math.max(rawTarget, safeMin);
+  }
+
+  return baseKcal;
+};
+
 export const calcTargets = (profile) => {
   const { weight = 70, dietGoal = 'maintenance', dietProfile = 'weight_loss', pace = 'normal', activityLevel = 'light', customDeltaKcal = null, customProteinPerKg = null } = profile || {};
   const bmr = calcBMR(profile) || 1600;
   
+  // Jika tersambung dengan Logym (kalori olahraga dihitung dinamis dari Logym/Health Connect),
+  // aktivitas dasar untuk baseline rest day memakai sedentary (1.2) agar kalori olahraga tidak terhitung dobel di baseline.
+  const isLogymLinked = !!(profile?.fromLogym || profile?.logymUser || profile?.isSynced);
+  const effectiveActLevel = isLogymLinked ? 'sedentary' : activityLevel;
+
   // Ambil faktor aktivitas dari profil (fallback ke 'light' jika tidak valid)
-  const actFactor = (ACTIVITY_LEVELS.find(a => a.id === activityLevel) || ACTIVITY_LEVELS[1]).factor;
+  const actFactor = (ACTIVITY_LEVELS.find(a => a.id === effectiveActLevel) || ACTIVITY_LEVELS[1]).factor;
   const tdee = Math.round(bmr * actFactor);
   
   const paceFactor = (PACES.find(p => p.id === pace) || PACES[1]).factor;

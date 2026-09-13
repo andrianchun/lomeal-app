@@ -2,7 +2,7 @@ import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import { getLocalYMD } from '../data/constants';
 import { formatNumber } from '../utils/numberFormat';
-import { computeDayTotals, calcTEF } from '../data/nutrition';
+import { computeDayTotals, calcTEF, calcDynamicTarget } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 
 const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
@@ -62,6 +62,9 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
           
           const targetDeltaVal = (dayTargets?.kcal || baseTdee) - baseTdee; // 0=maint, neg=cut, pos=bulk
           const targetKcalDay = dayTargets?.kcal || baseTdee;
+          const dynamicTargetDay = lyfitDay?.burnedKcal
+            ? calcDynamicTarget(dayTargets, burnedActual)
+            : targetKcalDay;
 
           let delta = null;
           if (eaten > 0 && tdeeEffective > 0) {
@@ -78,7 +81,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
               protein: totals.protein > 0 ? totals.protein : null,
               fat: totals.fat > 0 ? totals.fat : null,
               carbs: totals.carbs > 0 ? totals.carbs : null,
-              targetCalories: targetKcalDay || null,
+              targetCalories: dynamicTargetDay || null,
               targetProtein: dayTargets?.protein || null,
               targetFat: dayTargets?.fat || null,
               targetCarbs: dayTargets?.carbs || null,

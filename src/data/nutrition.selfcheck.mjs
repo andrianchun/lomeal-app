@@ -135,4 +135,19 @@ assert.equal(tgCustomDelta.kcal, tgCustomDelta.tdee - 500);
 const tgCustomProtein = calcTargets({ ...maleBio, customProteinPerKg: 2.2 });
 assert.equal(tgCustomProtein.protein, Math.round(75 * 2.2));
 
+// Logym-linked baseline: uses sedentary (1.2) so rest day target is not double-counted
+const tgLogym = calcTargets({ ...maleBio, activityLevel: 'moderate', dietGoal: 'bulk', fromLogym: true, customDeltaKcal: 240 });
+assert.equal(tgLogym.tdee, Math.round(1724 * 1.2)); // 2069 kcal
+assert.equal(tgLogym.kcal, 2069 + 240); // 2309 kcal (rest day)
+
+// Dynamic Target (Calorie Cycling)
+import { calcDynamicTarget } from './nutrition.js';
+// On rest day (burn <= baseTdee or burn = 0) -> target is base target
+assert.equal(calcDynamicTarget(tgLogym, 0), tgLogym.kcal);
+assert.equal(calcDynamicTarget(tgLogym, 2000), tgLogym.kcal);
+
+// On workout day (burn 2666 > baseTdee 2069) -> target expands dynamically!
+assert.equal(calcDynamicTarget(tgLogym, 2666), 2666 + 240); // 2906 kcal!
+
 console.log('nutrition OK (all tests passed)');
+

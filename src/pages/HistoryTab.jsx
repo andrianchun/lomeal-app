@@ -13,7 +13,7 @@ import {
   MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, 
   getMonthKey, DEFAULT_SESSION_TIMES, weekStripDates, WATER_STEP_ML 
 } from '../data/constants';
-import { computeDayTotals, NUTRIENTS, EMPTY_NUTRITION, addNutrition, calcTEF, calcBMR } from '../data/nutrition';
+import { computeDayTotals, NUTRIENTS, EMPTY_NUTRITION, addNutrition, calcTEF, calcBMR, calcDynamicTarget } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 import { STATUS } from '../theme';
 import { URT_DICTIONARY, normalizeUnit, UNIT_OPTIONS, getItemUnitWeight } from '../utils/urtMapping';
@@ -559,18 +559,36 @@ const HistoryTab = ({
     if (showToast) showToast('Rencana makan dibatalkan & stok dikembalikan.');
   };
 
-  // Single Source of Truth untuk kalkulasi Target Harian (Target Gizi Terencana yang Stabil)
+  // Single Source of Truth untuk kalkulasi Target Harian (Calorie Cycling dengan Logym jika terhubung)
   const getEffectiveDayTarget = useCallback((ymd, dayData) => {
     const isToday = ymd === todayStr;
     const isFuture = ymd > todayStr;
     const baseTargets = (isToday || isFuture ? profile?.targets : (dayData?.targetSnapshot || profile?.targets)) || {};
-    const targetKcal = baseTargets?.kcal || 2000;
+    const baseKcal = baseTargets?.kcal || 2000;
+
+    if (!logymUser) {
+      return { ...baseTargets, kcal: baseKcal };
+    }
+
+    const lyfitDay = extractLyfitDay(lyfitYearData, ymd) || (isToday ? lyfitToday : null);
+    const totals = computeDayTotals(dayData || {}, !isFuture);
+    const bmrBase = lyfitDay?.bmr || baseTargets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
+    const tefDay = calcTEF({
+      protein: totals.protein,
+      carbs: totals.carbs,
+      fat: totals.fat,
+      kcal: totals.kcal,
+      bmr: bmrBase
+    }).total;
+
+    const burnedTotal = lyfitDay?.burnedKcal || (bmrBase + tefDay);
+    const dynamicKcal = calcDynamicTarget(baseTargets, burnedTotal, profile?.physical?.gender);
 
     return {
       ...baseTargets,
-      kcal: targetKcal,
+      kcal: dynamicKcal,
     };
-  }, [todayStr, profile?.targets]);
+  }, [todayStr, profile?.targets, profile?.physical, lyfitYearData, lyfitToday, logymUser]);
 
   // Helper Dots Status Kepatuhan Kalori (Tercatat vs Direncanakan)
   const getDayDot = (ymd) => {

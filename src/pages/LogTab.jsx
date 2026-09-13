@@ -7,7 +7,7 @@ import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS, MONTH_NAMES_ID, getMonthKey } from '../data/constants';
-import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR } from '../data/nutrition';
+import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR, calcDynamicTarget } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
@@ -408,7 +408,21 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const targets = (isToday || isFuture ? profile?.targets : (day.targetSnapshot || profile?.targets)) || {};
   const dietGoal = targets.dietGoal || profile?.dietGoal || 'maintenance';
   const baseTdee = targets.tdee || targets.kcal || 0;
-  const targetKcal = targets.kcal || 2000;
+  
+  // Hitung target kalori dinamis (Calorie Cycling sinkron dengan DashboardTab)
+  const selectedLyfitDay = extractLyfitDay(lyfitYearData, selectedYmd) || (isToday ? lyfitToday : null);
+  const bmrBase = selectedLyfitDay?.bmr || targets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
+  const tefDay = calcTEF({
+    protein: totals.protein,
+    carbs: totals.carbs,
+    fat: totals.fat,
+    kcal: totals.kcal,
+    bmr: bmrBase
+  }).total;
+  const burnedTotal = logymUser ? (selectedLyfitDay?.burnedKcal || (bmrBase + tefDay)) : (baseTdee || 0);
+  const targetKcal = logymUser
+    ? calcDynamicTarget(targets, burnedTotal, profile?.physical?.gender)
+    : (targets.kcal || 2000);
 
   // ---------- Date Strip horizontal (±30 hari) ----------
   const dates = useMemo(() => {

@@ -7,7 +7,7 @@ import TargetSettingsModal from '../components/TargetSettingsModal';
 import BiometricSettingsModal from '../components/BiometricSettingsModal';
 import LabResultsCard from '../components/LabResultsCard';
 import { nutrientSources } from '../utils/nutrientSources';
-import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS, calcTEF } from '../data/nutrition';
+import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS, calcTEF, calcDynamicTarget } from '../data/nutrition';
 import { STATUS, statusFor, MACRO_COLORS } from '../theme';
 import { MEAL_SESSIONS, getLocalYMD, getMonthKey } from '../data/constants';
 import { pushActivityOverrideToLogym } from '../utils/biometricSync';
@@ -128,11 +128,16 @@ const DashboardTab = ({
   // Kalori Dimakan selalu ditarik dari "Tab Catat" (totals.kcal dari rekam makanan lokal Lomeal).
   const displayKcal = totals.kcal;
 
-  // Target kalori makan harian yang terencana (stabil, tidak membengkak mengikuti pembakaran total).
-  // targets.kcal adalah target gizi terencana (BMR * actFactor + surplus/defisit, misal 2.000-an kkal).
+  // Target kalori makan harian fleksibel (Calorie Cycling):
+  // Baseline hari istirahat stabil di targets.kcal (~2000-2300 kkal).
+  // Pada hari latihan / aktivitas tinggi (burnedTotal > baseTdee), target naik proporsional
+  // untuk mengisi glikogen dan mendukung sintesis otot.
   const baseTdee = targets.tdee || targets.kcal || 0;
   const programDelta = (targets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
-  const targetKcal = targets.kcal || 2000;
+  const dynamicTarget = logymUser
+    ? calcDynamicTarget(targets, burnedTotal, profile?.physical?.gender)
+    : (targets.kcal || 2000);
+  const targetKcal = dynamicTarget;
 
   const remaining = Math.round(targetKcal - displayKcal);
   const ringProgress = targetKcal > 0 ? Math.min(1, displayKcal / targetKcal) : 0;
@@ -276,6 +281,15 @@ const DashboardTab = ({
                   </p>
                   <div className={`caption ${t.textMuted} mt-0.5 flex items-center gap-1.5`}>
                     <span className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-500 text-[8px] uppercase font-bold tracking-wider">LOMEAL</span>
+                    {logymUser && (
+                      <span className={`px-1 py-0.5 rounded text-[8px] uppercase font-bold tracking-wider ${
+                        burnedTotal > baseTdee
+                          ? 'bg-amber-500/20 text-amber-500'
+                          : 'bg-blue-500/20 text-blue-500'
+                      }`}>
+                        {burnedTotal > baseTdee ? 'Target Latihan' : 'Target Rest'}
+                      </span>
+                    )}
                     {today?.meals ? Object.values(today.meals).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0) : 0} konsumsi
                   </div>
                 </div>
