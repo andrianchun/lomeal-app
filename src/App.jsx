@@ -413,12 +413,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       return;
     }
     if (settings.healthConnectEnabled) {
-      const totals = Object.values(dayData?.meals || {}).flat().reduce((acc, e) => {
-        Object.keys(acc).forEach((k) => { acc[k] += Number(e.nutrition?.[k]) || 0; });
-        return acc;
-      }, { kcal: 0, protein: 0, carbs: 0, fat: 0, sodium: 0, sugar: 0 });
-      hcWriteNutrition(ymd, totals).catch(() => {});
-      if (dayData?.water) hcWriteHydration(ymd, dayData.water).catch(() => {});
+      hcWriteNutrition(ymd, dayData?.meals || {}).catch(() => {});
+      if (dayData?.water !== undefined) hcWriteHydration(ymd, dayData.water).catch(() => {});
     }
     // Kalori-dimakan dikirim ke Logym untuk SEMUA hari yang berubah — bukan cuma hari ini.
     // pushDailyTotalsToLogym → lomealSync.today (dashboard Lomeal ringkas di Logym)
@@ -770,7 +766,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       const dayData = daysMap[ymd];
       if (!dayData) continue;
       const totals = computeDayTotals(dayData, true);
-      if (totals.kcal > 0 && (await hcWriteNutrition(ymd, totals))) pushed++;
+      if ((dayData.meals || totals.kcal > 0) && (await hcWriteNutrition(ymd, dayData.meals || totals))) pushed++;
       if (dayData.water) await hcWriteHydration(ymd, dayData.water);
     }
 

@@ -10,13 +10,15 @@
 // di sini nembak persis tipe-tipe itu. Jadi fitur tulis-ke-Health-Connect selama ini SELALU
 // gagal, bukan cuma soal bug izin di bawah.
 // ============================================================
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 // Import STATIS, jangan diganti dynamic import lewat fungsi async — plugin Capacitor itu
 // Proxy yang menganggap SEMUA akses property sebagai method native, termasuk `.then` yang
 // diakses otomatis saat promise me-resolve nilai balikan fungsi async. Hasilnya panggilan
 // native "Health.then()" yang gak ada → promise gak pernah selesai → semua pemanggil
 // nge-hang diam-diam selamanya. (Bug nyata: tombol "Hubungkan" macet di "Menghubungkan...".)
 import { Health } from '@capgo/capacitor-health';
+
+const LomealHealth = registerPlugin('LomealHealth');
 
 const isNative = () => Capacitor.isNativePlatform();
 
@@ -117,47 +119,223 @@ export const hcReadBurnedCalories = async (ymd) => {
   return byDay[ymd] ?? null;
 };
 
-// Health Connect MENJUMLAHKAN semua record di satu hari, dan plugin ini cuma punya
-// saveSample — gak ada delete/update. Jadi menulis "total hari ini" tiap kali user nambah
-// makanan bikin record numpuk (200 + 450 + 700 = 1350 kcal padahal aslinya 700).
-// Solusinya: catat berapa yang SUDAH pernah ditulis per hari, lalu tulis SELISIHNYA saja.
-// ponytail: kalau user MENGHAPUS makanan, selisihnya negatif dan sengaja di-skip (Health
-// Connect gak bisa dikurangi) — jadi angkanya bisa kelebihan sampai user nambah lagi.
-// Naikkan ke pencatatan per-item + delete kalau plugin-nya nanti dukung hapus record.
-const writtenKey = (kind, ymd) => `hc_written_${kind}_${ymd}`;
+// ---------- SINKRONISASI NUTRISI KE HEALTH CONNECT (STANDAR ENTERPRISE) ----------
+// Menggunakan custom plugin native LomealHealth jika tersedia di APK (mendukung NutritionRecord
+// lengkap: mealType, nama makanan, protein, karbohidrat, lemak, serat, natrium, dan jam aktual).
+// Fallback ke @capgo/capacitor-health jika masih berjalan di APK versi lama sebelum update native.
 
-const writeDelta = async (kind, dataType, ymd, value, toUnit = (v) => v) => {
+let lomealHealthAvailable = null;
+export const isLomealHealthAvailable = async () => {
   if (!isNative()) return false;
-  const key = writtenKey(kind, ymd);
-  const already = Number(localStorage.getItem(key)) || 0;
-  const delta = value - already;
-  if (delta <= 0) return false;
-  // endDate WAJIB lebih besar dari startDate — Health Connect nolak record berdurasi nol
-  // dengan "startTime must be before endTime."
-  const start = new Date(`${ymd}T12:00:00`);
+  if (lomealHealthAvailable !== null) return lomealHealthAvailable;
   try {
-    await Health.saveSample({
-      dataType,
-      value: toUnit(delta),
-      startDate: start.toISOString(),
-      endDate: new Date(start.getTime() + 60000).toISOString(),
-    });
-    localStorage.setItem(key, String(value));
-    return true;
-  } catch (e) {
-    console.warn(`hcWrite ${kind} gagal:`, e);
+    const res = await LomealHealth.isAvailable();
+    lomealHealthAvailable = !!res?.available;
+    return lomealHealthAvailable;
+  } catch {
+    lomealHealthAvailable = false;
     return false;
   }
 };
 
-// Tulis kalori yang dimakan (ringkasan, bukan per-item — plugin ini gak dukung Nutrition
-// record lengkap dengan makro) ke Health Connect.
-export const hcWriteNutrition = (ymd, totals) =>
-  writeDelta('kcal', 'dietaryEnergyConsumed', ymd, Math.round(totals.kcal || 0));
+const MEAL_TYPE_MAP = {
+  breakfast: 1, // MEAL_TYPE_BREAKFAST
+  lunch: 2,     // MEAL_TYPE_LUNCH
+  dinner: 3,    // MEAL_TYPE_DINNER
+  snack: 4,     // MEAL_TYPE_SNACK
+  snack2: 4,
+  snack3: 4,
+  drink: 4,
+};
 
-// Lomeal nyimpen mL, plugin minta liter.
-export const hcWriteHydration = (ymd, ml) =>
-  writeDelta('water', 'dietaryWater', ymd, Number(ml) || 0, (v) => v / 1000);
+const DEFAULT_SESSION_TIMES = {
+  breakfast: '07:00',
+  snack: '10:00',
+  lunch: '12:00',
+  snack2: '15:00',
+  dinner: '19:00',
+  snack3: '21:00',
+  drink: '23:59',
+};
+
+const SESSION_LABELS = {
+  breakfast: 'Sarapan',
+  lunch: 'Makan Siang',
+  dinner: 'Makan Malam',
+  snack: 'Camilan',
+  snack2: 'Camilan Siang',
+  snack3: 'Camilan Malam',
+  drink: 'Minuman',
+};
+
+const toIsoTimestamp = (ymd, timeStr) => {
+  const t = (timeStr && timeStr.length >= 4) ? timeStr.slice(0, 5) : '12:00';
+  const localDate = new Date(`${ymd}T${t.length === 5 ? t + ':00' : t}`);
+  return isNaN(localDate.getTime()) ? new Date(`${ymd}T12:00:00`).toISOString() : localDate.toISOString();
+};
+
+/**
+ * Sinkronkan seluruh sesi makan satu hari ke Health Connect.
+ * @param {string} ymd - Format 'YYYY-MM-DD'
+ * @param {object} mealsData - Map sesi makan: { breakfast: [entries], lunch: [entries], ... } atau objek totals
+ */
+export const hcSyncDayMeals = async (ymd, mealsData) => {
+  if (!isNative() || !mealsData) return false;
+
+  const nativeAvailable = await isLomealHealthAvailable();
+  const sessionsPayload = [];
+
+  if (typeof mealsData === 'object' && !('kcal' in mealsData)) {
+    // Format standar: { breakfast: [entries], lunch: [entries], ... }
+    for (const [sessionId, entries] of Object.entries(mealsData)) {
+      if (!Array.isArray(entries) || entries.length === 0) continue;
+
+      const kcal = Math.round(entries.reduce((sum, e) => sum + (Number(e.nutrition?.kcal) || 0), 0));
+      const protein = Math.round((entries.reduce((sum, e) => sum + (Number(e.nutrition?.protein) || 0), 0)) * 10) / 10;
+      const carbs = Math.round((entries.reduce((sum, e) => sum + (Number(e.nutrition?.carbs) || 0), 0)) * 10) / 10;
+      const fat = Math.round((entries.reduce((sum, e) => sum + (Number(e.nutrition?.fat) || 0), 0)) * 10) / 10;
+      const fiber = Math.round((entries.reduce((sum, e) => sum + (Number(e.nutrition?.fiber) || 0), 0)) * 10) / 10;
+      const sugar = Math.round((entries.reduce((sum, e) => sum + (Number(e.nutrition?.sugar) || 0), 0)) * 10) / 10;
+      const sodium = Math.round(entries.reduce((sum, e) => sum + (Number(e.nutrition?.sodium) || 0), 0)); // mg
+
+      if (kcal <= 0 && protein <= 0 && carbs <= 0 && fat <= 0) continue;
+
+      const names = entries.map((e) => e.name?.trim()).filter(Boolean);
+      const label = SESSION_LABELS[sessionId] || sessionId;
+      const name = names.length > 0 ? `${label}: ${names.join(', ')}` : label;
+
+      // Jam sesi aktual: ambil jam entry pertama yang punya field waktu, atau default waktu sesi
+      const entryWithTime = entries.find((e) => e.time && typeof e.time === 'string');
+      const timeStr = entryWithTime ? entryWithTime.time : (DEFAULT_SESSION_TIMES[sessionId] || '12:00');
+      const startTime = toIsoTimestamp(ymd, timeStr);
+      const endTime = new Date(new Date(startTime).getTime() + 15 * 60 * 1000).toISOString();
+
+      const mealType = MEAL_TYPE_MAP[sessionId] || (sessionId.startsWith('snack') ? 4 : 0);
+
+      sessionsPayload.push({
+        sessionId,
+        mealType,
+        name,
+        startTime,
+        endTime,
+        kcal,
+        protein,
+        carbs,
+        fat,
+        fiber,
+        sugar,
+        sodium,
+      });
+    }
+  } else if (typeof mealsData === 'object' && ('kcal' in mealsData)) {
+    // Format ringkasan / totals legacy
+    const kcal = Math.round(Number(mealsData.kcal) || 0);
+    if (kcal > 0) {
+      const startTime = toIsoTimestamp(ymd, new Date().toTimeString().slice(0, 5));
+      const endTime = new Date(new Date(startTime).getTime() + 15 * 60 * 1000).toISOString();
+      sessionsPayload.push({
+        sessionId: 'daily_total',
+        mealType: 0,
+        name: 'Total Harian',
+        startTime,
+        endTime,
+        kcal,
+        protein: Math.round(Number(mealsData.protein) || 0),
+        carbs: Math.round(Number(mealsData.carbs) || 0),
+        fat: Math.round(Number(mealsData.fat) || 0),
+        fiber: Math.round(Number(mealsData.fiber) || 0),
+        sugar: Math.round(Number(mealsData.sugar) || 0),
+        sodium: Math.round(Number(mealsData.sodium) || 0),
+      });
+    }
+  }
+
+  // JALUR 1: Jika custom native plugin LomealHealth aktif (di APK yang sudah terpasang build baru)
+  if (nativeAvailable) {
+    try {
+      await LomealHealth.syncDayNutrition({
+        ymd,
+        meals: sessionsPayload,
+      });
+      return true;
+    } catch (e) {
+      console.warn('LomealHealth.syncDayNutrition gagal, fallback ke generic:', e);
+    }
+  }
+
+  // JALUR 2: Fallback plugin generic @capgo/capacitor-health (untuk APK lama sebelum rebuild)
+  // Perbaikan penting: jangan hardcode 12:00:00! Tulis per sesi dengan waktu aktual sesi masing-masing.
+  let pushedAny = false;
+  for (const session of sessionsPayload) {
+    const key = `hc_written_session_${session.sessionId}_${ymd}`;
+    const already = Number(localStorage.getItem(key)) || 0;
+    const delta = session.kcal - already;
+    if (delta <= 0) continue;
+
+    try {
+      await Health.saveSample({
+        dataType: 'dietaryEnergyConsumed',
+        value: delta,
+        startDate: session.startTime,
+        endDate: session.endTime,
+      });
+      localStorage.setItem(key, String(session.kcal));
+      pushedAny = true;
+    } catch (e) {
+      console.warn(`Fallback hcWrite ${session.sessionId} gagal:`, e);
+    }
+  }
+  return pushedAny;
+};
+
+/**
+ * Sinkronkan hidrasi harian ke Health Connect.
+ */
+export const hcSyncDayHydration = async (ymd, ml) => {
+  if (!isNative()) return false;
+  const val = Number(ml) || 0;
+
+  const nativeAvailable = await isLomealHealthAvailable();
+  if (nativeAvailable) {
+    try {
+      await LomealHealth.syncDayHydration({
+        ymd,
+        waterMl: val,
+      });
+      return true;
+    } catch (e) {
+      console.warn('LomealHealth.syncDayHydration gagal, fallback:', e);
+    }
+  }
+
+  // Fallback: gunakan jam sekarang (bukan 12:00:00)
+  const key = `hc_written_water_${ymd}`;
+  const already = Number(localStorage.getItem(key)) || 0;
+  const delta = val - already;
+  if (delta <= 0) return false;
+
+  const nowTime = new Date().toTimeString().slice(0, 5);
+  const startTime = toIsoTimestamp(ymd, nowTime);
+  const endTime = new Date(new Date(startTime).getTime() + 60 * 1000).toISOString();
+
+  try {
+    await Health.saveSample({
+      dataType: 'dietaryWater',
+      value: delta / 1000,
+      startDate: startTime,
+      endDate: endTime,
+    });
+    localStorage.setItem(key, String(val));
+    return true;
+  } catch (e) {
+    console.warn('Fallback hcWrite water gagal:', e);
+    return false;
+  }
+};
+
+// Aliases agar semua pemanggil lama tetap kompatibel tanpa breaking changes
+export const hcWriteNutrition = (ymd, data) => hcSyncDayMeals(ymd, data);
+export const hcWriteHydration = (ymd, ml) => hcSyncDayHydration(ymd, ml);
 
 // Backfill: tarik kalori-terbakar N hari ke belakang sekaligus (satu query teragregasi,
 // bukan loop per-hari) — dipanggil sekali abis konek pertama kali, atau lewat tombol
