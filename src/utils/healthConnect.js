@@ -202,7 +202,15 @@ export const hcSyncDayMeals = async (ymd, mealsData) => {
 
       const names = entries.map((e) => e.name?.trim()).filter(Boolean);
       const label = SESSION_LABELS[sessionId] || sessionId;
-      const name = names.length > 0 ? `${label}: ${names.join(', ')}` : label;
+      const foodsText = names.length > 0 ? names.join(', ') : '';
+      const macroParts = [];
+      if (protein > 0) macroParts.push(`P: ${protein}g`);
+      if (carbs > 0) macroParts.push(`K: ${carbs}g`);
+      if (fat > 0) macroParts.push(`L: ${fat}g`);
+      const macroStr = macroParts.length > 0 ? `(${macroParts.join(' • ')})` : '';
+
+      let name = foodsText ? `${label}: ${foodsText}` : label;
+      if (macroStr) name = `${name} ${macroStr}`;
 
       // Jam sesi aktual: ambil jam entry pertama yang punya field waktu, atau default waktu sesi
       const entryWithTime = entries.find((e) => e.time && typeof e.time === 'string');
