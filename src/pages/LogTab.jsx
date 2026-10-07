@@ -1640,29 +1640,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               className={`absolute bottom-full mb-2 left-0 right-0 z-40 max-h-64 flex flex-col rounded-2xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-2xl shadow-2xl overflow-hidden anim-rise`}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              <div className="px-3.5 py-2 border-b border-black/5 dark:border-white/5 flex items-center justify-between bg-black/5 dark:bg-white/5 shrink-0">
-                <div className="flex items-center gap-1.5">
-                  <Database size={13} className="text-emerald-500" />
-                  <span className={`caption font-bold ${t.textMuted}`}>
-                    Database ({foodSuggestions.length})
-                  </span>
-                  {quickSearchParsed.qty > 1 && (
-                    <span className="caption font-semibold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                      {quickSearchParsed.qty} {quickSearchParsed.unit || 'porsi'}
-                    </span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDismissSuggestions(true)}
-                  className="p-1 rounded-lg text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white active:scale-95 transition-all"
-                  title="Tutup saran"
-                  aria-label="Tutup saran"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-
               <div className="overflow-y-auto divide-y divide-black/5 dark:divide-white/5 hide-scrollbar">
                 {foodSuggestions.map((food) => (
                   <div
@@ -1670,7 +1647,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                     onClick={() => handleSelectFoodSuggestion(food)}
                     className="flex items-center justify-between px-3.5 py-2.5 hover:bg-emerald-500/10 active:bg-emerald-500/20 transition-colors cursor-pointer group"
                   >
-                    <div className="min-w-0 flex-1 pr-2">
+                    <div className="min-w-0 flex-1">
                       <p className={`body-md font-bold text-sm ${t.textMain} truncate group-hover:text-emerald-500 transition-colors`}>
                         {food.name}
                       </p>
@@ -1686,25 +1663,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                             Custom
                           </span>
                         )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setChatText(food.name + ' ');
-                          chatInputRef.current?.focus();
-                        }}
-                        title="Isi ke kolom input"
-                        aria-label="Isi ke kolom input"
-                        className={`p-1.5 rounded-lg opacity-60 hover:opacity-100 ${t.bgSunken} ${t.textMuted} active:scale-95 transition-all`}
-                      >
-                        <CornerUpLeft size={13} />
-                      </button>
-                      <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-500 group-hover:bg-emerald-500 group-hover:text-white transition-all">
-                        <Plus size={14} />
                       </div>
                     </div>
                   </div>
