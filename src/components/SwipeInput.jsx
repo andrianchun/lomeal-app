@@ -15,7 +15,7 @@ const SwipeInput = ({ value, onChange, step = 1, min = 0, max, className, placeh
   }, [value]);
 
   const clamp = (v) => {
-    let n = v;
+    let n = Math.round(Number(v) * 100) / 100;
     if (min !== undefined) n = Math.max(min, n);
     if (max !== undefined) n = Math.min(max, n);
     return n;
@@ -59,12 +59,13 @@ const SwipeInput = ({ value, onChange, step = 1, min = 0, max, className, placeh
   return (
     <input
       ref={inputRef}
-      type="number" inputMode="numeric"
+      type="number" inputMode="decimal"
       style={{ touchAction: 'none' }}
       {...props}
       value={localValue ?? ''}
       onChange={(e) => setLocalValue(e.target.value)}
       onBlur={() => { const n = clamp(Number(localValue) || 0); setLocalValue(n); onChange(n); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
       onFocus={(e) => e.target.select()}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}

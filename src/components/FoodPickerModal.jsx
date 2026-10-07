@@ -43,6 +43,7 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
     const grams = food.portion?.grams || 100;
     onAdd(makeEntry({
       name: food.name, foodId: food.id, grams, unit: food.unit,
+      portion: food.portion,
       nutrition: nutritionForAmount(food, grams), source: 'db',
       baseNutrition: food.nutrition,
       baseGrams: 100,
@@ -55,7 +56,7 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
     onAdd(makeEntry({
       name: `${recipe.name} (${portions} porsi)`,
       grams: Math.round((recipe.totalGrams || 0) / (recipe.portions || 1) * portions),
-      unit: 'g',
+      unit: 'porsi',
       nutrition: scaleNutrition(recipe.perPortion, portions),
       recipeId: recipe.id, source: 'recipe',
       baseNutrition: recipe.perPortion,

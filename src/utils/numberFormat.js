@@ -18,3 +18,24 @@ export const formatNumber = (value, language = 'ID', maximumFractionDigits = 2) 
         maximumFractionDigits,
     }).format(num);
 };
+
+/**
+ * Formats a 24-hour time string ("HH:mm") according to time format preference ('24h' or '12h').
+ * @param {string} timeStr - Time string in "HH:mm"
+ * @param {string} format - '24h' or '12h' (default: '24h')
+ * @returns {string} Formatted time string
+ */
+export const formatTimeDisplay = (timeStr, format = '24h') => {
+    if (!timeStr || typeof timeStr !== 'string') return '--:--';
+    const parts = timeStr.split(':');
+    const h = parseInt(parts[0], 10);
+    const m = (parts[1] || '00').slice(0, 2).padStart(2, '0');
+    if (isNaN(h)) return timeStr;
+
+    if (format === '12h') {
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 || 12;
+        return `${String(h12).padStart(2, '0')}:${m} ${ampm}`;
+    }
+    return `${String(h).padStart(2, '0')}:${m}`;
+};

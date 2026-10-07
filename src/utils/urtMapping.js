@@ -127,22 +127,42 @@ export const calculateGramsFromURT = (qty, unit) => {
 
 export const getItemUnitWeight = (item, unitName) => {
   const norm = normalizeUnit(unitName);
-  if (norm === 'g' || norm === 'ml') return 1;
+  if (!norm || norm === 'g' || norm === 'ml') return 1;
+
+  const isRecipeOrPrep = !!(item?.recipeId || item?.batchId || item?.isMealPrep || item?.source === 'recipe');
 
   if (norm === 'porsi') {
     if (item?.perPortionGrams && Number(item.perPortionGrams) > 0) {
       return Number(item.perPortionGrams);
     }
-    if (item?.servingGrams && Number(item.servingGrams) > 0) {
+    if (isRecipeOrPrep) {
+      if (item?.servingGrams && Number(item.servingGrams) > 0) {
+        return Number(item.servingGrams);
+      }
+      if (item?.baseGrams && Number(item.baseGrams) > 0) {
+        return Number(item.baseGrams);
+      }
+    }
+    if (item?.servingUnit && normalizeUnit(item.servingUnit) === 'porsi' && Number(item.servingGrams) > 0) {
       return Number(item.servingGrams);
     }
-    if (item?.baseGrams && Number(item.baseGrams) > 0) {
-      return Number(item.baseGrams);
+    if (item?.portion?.label && Number(item?.portion?.grams) > 0) {
+      if (normalizeUnit(item.portion.label).includes('porsi')) {
+        return Number(item.portion.grams);
+      }
     }
+    return URT_DICTIONARY.porsi || 200;
   }
 
   if (item?.servingUnit && normalizeUnit(item.servingUnit) === norm && Number(item.servingGrams) > 0) {
     return Number(item.servingGrams);
+  }
+
+  if (item?.portion?.label && Number(item?.portion?.grams) > 0) {
+    const match = item.portion.label.toLowerCase().match(/1\s+([a-z]+)/);
+    if (match && normalizeUnit(match[1]) === norm) {
+      return Number(item.portion.grams);
+    }
   }
 
   return URT_DICTIONARY[norm] || 1;
@@ -153,5 +173,84 @@ export const UNIT_OPTIONS = [
   'mangkok', 'piring', 'gelas', 'cangkir', 'botol', 'kaleng', 'cup',
   'bungkus', 'iris', 'lembar', 'tusuk', 'ekor', 'biji', 'kepal', 'genggam', 'batang', 'siung'
 ];
+
+const SE_UNITS = {
+  sebuah: { qty: 1, unit: 'buah' },
+  sebutir: { qty: 1, unit: 'butir' },
+  sepotong: { qty: 1, unit: 'potong' },
+  sepiring: { qty: 1, unit: 'piring' },
+  segelas: { qty: 1, unit: 'gelas' },
+  secangkir: { qty: 1, unit: 'cangkir' },
+  semangkok: { qty: 1, unit: 'mangkok' },
+  semangkuk: { qty: 1, unit: 'mangkok' },
+  selembar: { qty: 1, unit: 'lembar' },
+  sebungkus: { qty: 1, unit: 'bungkus' },
+  sebatang: { qty: 1, unit: 'batang' },
+  seekor: { qty: 1, unit: 'ekor' },
+  sesendok: { qty: 1, unit: 'sdm' },
+  secentong: { qty: 1, unit: 'centong' },
+  setongkol: { qty: 1, unit: 'tongkol' },
+  sebotol: { qty: 1, unit: 'botol' },
+  sekaleng: { qty: 1, unit: 'kaleng' },
+  sekeping: { qty: 1, unit: 'keping' },
+  seporsi: { qty: 1, unit: 'porsi' },
+};
+
+/**
+ * Ekstrak kata kunci pencarian makanan dan kuantitas dari input bebas
+ * Mendukung variasi seperti: "pisang", "2 pisang", "2 buah pisang", "pisang 2", "150g pisang", "sebuah pisang"
+ */
+export const parseQuickInput = (input) => {
+  if (!input) return { term: '', qty: 1, unit: null, explicitGrams: null };
+  const chunks = input.split(/[,;\n]+|\bdan\b|\bsama\b|\btambah\b/i);
+  const text = chunks[chunks.length - 1].trim();
+  if (!text) return { term: '', qty: 1, unit: null, explicitGrams: null };
+
+  // 1. Grams / ml explicit: 'pisang 150g' atau '150 gram pisang'
+  const mGramPrefix = text.match(/^(\d+(?:[\.,]\d+)?)\s*(?:gram|g|ml)\s+([\D]+)$/i);
+  if (mGramPrefix) {
+    const grams = parseFloat(mGramPrefix[1].replace(',', '.'));
+    const term = mGramPrefix[2].trim();
+    return { term, qty: 1, unit: 'g', explicitGrams: grams };
+  }
+  const mGramSuffix = text.match(/^([\D]+?)\s+(\d+(?:[\.,]\d+)?)\s*(?:gram|g|ml)$/i);
+  if (mGramSuffix) {
+    const grams = parseFloat(mGramSuffix[2].replace(',', '.'));
+    const term = mGramSuffix[1].trim();
+    return { term, qty: 1, unit: 'g', explicitGrams: grams };
+  }
+
+  // 2. Prefix se- : 'sebuah pisang'
+  const mSe = text.match(/^(se[a-z]+)\s+([\D]+)$/i);
+  if (mSe && SE_UNITS[mSe[1].toLowerCase()]) {
+    const u = SE_UNITS[mSe[1].toLowerCase()];
+    return { term: mSe[2].trim(), qty: u.qty, unit: u.unit, explicitGrams: null };
+  }
+
+  // 3. Pattern '[Qty] [Unit] [Name]' -> '2 buah pisang' atau '2 porsi nasi'
+  const mPrefix = text.match(/^(\d+(?:[\.,]\d+)?|\d+\/\d+|setengah|seperempat)\s*([a-zA-Z]+)?\s+([\D]+)$/i);
+  if (mPrefix) {
+    let q = parseFloat(mPrefix[1].replace(',', '.'));
+    if (mPrefix[1].toLowerCase() === 'setengah') q = 0.5;
+    if (mPrefix[1].toLowerCase() === 'seperempat') q = 0.25;
+    const u = mPrefix[2] ? normalizeUnit(mPrefix[2]) : null;
+    const term = mPrefix[3].trim();
+    return { term, qty: q || 1, unit: u, explicitGrams: null };
+  }
+
+  // 4. Pattern '[Name] [Qty] [Unit]' -> 'pisang 2 buah' atau 'pisang 2'
+  const mSuffix = text.match(/^([\D]+?)\s+(\d+(?:[\.,]\d+)?|\d+\/\d+|setengah|seperempat)\s*([a-zA-Z]+)?$/i);
+  if (mSuffix) {
+    let q = parseFloat(mSuffix[2].replace(',', '.'));
+    if (mSuffix[2].toLowerCase() === 'setengah') q = 0.5;
+    if (mSuffix[2].toLowerCase() === 'seperempat') q = 0.25;
+    const u = mSuffix[3] ? normalizeUnit(mSuffix[3]) : null;
+    const term = mSuffix[1].trim();
+    return { term, qty: q || 1, unit: u, explicitGrams: null };
+  }
+
+  return { term: text, qty: 1, unit: null, explicitGrams: null };
+};
+
 
 

@@ -188,6 +188,11 @@ const SettingsPage = ({
                 <Toggle2 t={t} leftLabel="ID" rightLabel="EN" leftActive={language === 'ID'}
                   onLeft={() => updateSetting('language', 'ID')} onRight={() => updateSetting('language', 'EN')} />
               </Row>
+              <Row icon={Clock} label={lang.timeFormat} t={t}>
+                <Toggle2 t={t} leftLabel="24 Jam" rightLabel="12 Jam" leftActive={(settings.timeFormat || localStorage.getItem('lomeal_time_format') || '24h') !== '12h'}
+                  onLeft={() => { updateSetting('timeFormat', '24h'); localStorage.setItem('lomeal_time_format', '24h'); }}
+                  onRight={() => { updateSetting('timeFormat', '12h'); localStorage.setItem('lomeal_time_format', '12h'); }} />
+              </Row>
               <Row icon={settings.soundEnabled ? Volume2 : VolumeX} label={lang.sound} t={t}>
                 <Toggle2 t={t} leftIcon={Volume2} rightIcon={VolumeX} leftActive={!!settings.soundEnabled}
                   onLeft={() => updateSetting('soundEnabled', true)} onRight={() => updateSetting('soundEnabled', false)} />

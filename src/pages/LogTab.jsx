@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
-import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator, Trash2, ArrowRightLeft } from 'lucide-react';
+import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator, Trash2, ArrowRightLeft, Database, CornerUpLeft } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import RingChart from '../components/RingChart';
 import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity } from '../utils/domusSync';
@@ -22,7 +22,8 @@ import { nutrientSources } from '../utils/nutrientSources';
 import AttachmentMenu from '../components/AttachmentMenu';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
-import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS, getItemUnitWeight } from '../utils/urtMapping';
+import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS, getItemUnitWeight, parseQuickInput, calculateGramsFromURT } from '../utils/urtMapping';
+import { formatTimeDisplay } from '../utils/numberFormat';
 import useBackClose from '../hooks/useBackClose';
 
 // Simpan baseline (gram & gizi) tetap di tiap item hasil Lomy begitu muncul di preview —
@@ -70,6 +71,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const todayYmd = getLocalYMD();
   const routeState = useLocation().state;
   const [selectedYmd, setSelectedYmd] = useState(() => routeState?.selectedDate || routeState?.targetDate || todayYmd);
+  const timeFormat = profile?.settings?.timeFormat || localStorage.getItem('lomeal_time_format') || '24h';
 
   // === Pastikan bulan dari tanggal yang dipilih dimuat ===
   useEffect(() => {
@@ -81,11 +83,97 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const [pickerOpen, setPickerOpen] = useState(false); // FoodPicker terbuka? (nambah ke batch aiResult yang sama)
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
   const [detailSlide, setDetailSlide] = useState(0);
+  const carouselRef = useRef(null);
   const [sessionTitleInput, setSessionTitleInput] = useState('');
   const sessionTitleRef = useRef('');
   sessionTitleRef.current = sessionTitleInput;
   const chatInputRef = useRef(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
+  const [dismissSuggestions, setDismissSuggestions] = useState(false);
+  const [debouncedChatText, setDebouncedChatText] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedChatText(chatText);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [chatText]);
+
+  const quickSearchParsed = useMemo(() => {
+    return parseQuickInput(debouncedChatText);
+  }, [debouncedChatText]);
+
+  const foodSuggestions = useMemo(() => {
+    if (dismissSuggestions || !quickSearchParsed.term || quickSearchParsed.term.length < 2) {
+      return [];
+    }
+    const list = searchFoods(quickSearchParsed.term, customFoods);
+    const favSet = new Set(profile?.favoriteFoods || []);
+    if (favSet.size > 0) {
+      list.sort((a, b) => (favSet.has(b.id) ? 1 : 0) - (favSet.has(a.id) ? 1 : 0));
+    }
+    return list.slice(0, 15);
+  }, [quickSearchParsed.term, dismissSuggestions, customFoods, profile?.favoriteFoods]);
+
+  const handleSelectFoodSuggestion = (food) => {
+    const parsed = parseQuickInput(chatText);
+    let grams = food.portion?.grams || 100;
+    let unit = food.unit || (detailSession === 'drink' ? 'ml' : 'g');
+
+    if (parsed.explicitGrams) {
+      grams = parsed.explicitGrams;
+      unit = parsed.unit || 'g';
+    } else if (parsed.qty && parsed.qty > 0) {
+      if (parsed.unit) {
+        unit = parsed.unit;
+        const uGrams = calculateGramsFromURT(parsed.qty, parsed.unit);
+        if (uGrams && uGrams > 0) {
+          grams = uGrams;
+        } else {
+          grams = (food.portion?.grams || 100) * parsed.qty;
+        }
+      } else {
+        grams = (food.portion?.grams || 100) * parsed.qty;
+      }
+    }
+
+    const entry = makeEntry({
+      name: food.name,
+      foodId: food.id,
+      grams: Math.round(grams * 10) / 10,
+      unit,
+      portion: food.portion,
+      nutrition: nutritionForAmount(food, grams),
+      source: 'db',
+      baseNutrition: food.nutrition,
+      baseGrams: 100,
+    });
+
+    if (!aiResult) {
+      setAiTargetSession(detailSession || getNearestSessionId());
+    }
+
+    if (detailSession) {
+      const currentDay = daysMap[selectedYmd] || day || {};
+      const meals = { ...(currentDay.meals || {}) };
+      const sessionMeals = [...(meals[detailSession] || [])];
+      meals[detailSession] = [...sessionMeals, entry];
+      persistDay({ ...currentDay, meals });
+      if (isEditingItems && draftMeals !== null) {
+        setDraftMeals([...draftMeals, entry]);
+      }
+      showToast(`${entry.name} ditambahkan ke ${activeSessions.find(s => s.id === detailSession)?.label || 'sesi'}.`);
+    } else {
+      appendAiResult([entry], { source: 'quick_db' });
+      showToast(`${entry.name} ditambahkan!`);
+    }
+
+    setChatText('');
+    setDismissSuggestions(true);
+    if (chatInputRef.current) {
+      chatInputRef.current.style.height = '38px';
+    }
+  };
 
   // Datang dari tombol "Makan" di stok Meal Prep / Calendar: langsung buka tanggal & sheet sesi tujuannya.
   useEffect(() => {
@@ -95,6 +183,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   useEffect(() => {
     setDetailSlide(0);
+    carouselRef.current?.scrollTo?.({ left: 0 });
     setIsEditingItems(false);
     if (detailSession) {
       const current = day?.sessionLabels?.[detailSession] || profile?.settings?.sessionLabels?.[detailSession] || MEAL_SESSIONS.find(s => s.id === detailSession)?.label || (detailSession.startsWith('snack') ? `Camilan ${detailSession.replace('snack', '')}` : 'Sesi Baru');
@@ -105,6 +194,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const [copySourceSession, setCopySourceSession] = useState(null);
   const [copyActionType, setCopyActionType] = useState('both'); // 'move' | 'copy' | 'both'
   const [isEditingItems, setIsEditingItems] = useState(false);
+  const [draftMeals, setDraftMeals] = useState(null);
+  const [draftSlideTimes, setDraftSlideTimes] = useState({});
+  const [draftTitle, setDraftTitle] = useState('');
   const [copyTargetSessions, setCopyTargetSessions] = useState([]);
   const [copyTargetDate, setCopyTargetDate] = useState(todayYmd);
   const [copySelectedItems, setCopySelectedItems] = useState([]);
@@ -138,6 +230,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   useBackClose(!!copySourceSession, () => { setCopySourceSession(null); setCopyTargetSessions([]); });
   useBackClose(showDayStatsModal, () => setShowDayStatsModal(false));
   useBackClose(showAddSessionModal, () => setShowAddSessionModal(false));
+  useBackClose(!!fullscreenPhotos, () => setFullscreenPhotos(null));
   // pickerOpen (FoodPickerModal) sudah dihandle di dalam komponennya sendiri lewat prop `open`.
   
   // Safe dismiss for smart-input-bar & sync keyboard state via Visual Viewport
@@ -167,6 +260,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         if (chatInputRef.current && document.activeElement === chatInputRef.current) {
           chatInputRef.current.blur();
         }
+        setDismissSuggestions(true);
       }
     };
     document.addEventListener('pointerdown', handlePointerDown);
@@ -474,33 +568,95 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   const persistDay = (newDay) => saveDay(selectedYmd, newDay);
 
-  const handleRenameSession = (newVal) => {
-    if (!detailSession) return;
-    const trimmed = (newVal !== undefined ? newVal : sessionTitleRef.current).trim();
-    if (!trimmed) return;
-    const currentLabel = day?.sessionLabels?.[detailSession] || profile?.settings?.sessionLabels?.[detailSession] || MEAL_SESSIONS.find(s => s.id === detailSession)?.label || '';
-    if (trimmed !== currentLabel) {
-      persistDay({
-        ...day,
-        sessionLabels: { ...(day.sessionLabels || {}), [detailSession]: trimmed },
-      });
+  const startEditing = () => {
+    const currentDay = daysMap[selectedYmd] || day || {};
+    const currentMeals = currentDay.meals?.[detailSession] || [];
+    setDraftMeals(JSON.parse(JSON.stringify(currentMeals)));
+    setDraftSlideTimes({});
+    setDraftTitle(sessionTitleInput);
+    setIsEditingItems(true);
+  };
+
+  const handleCancelEdit = () => {
+    setDraftMeals(null);
+    setDraftSlideTimes({});
+    const currentDay = daysMap[selectedYmd] || day || {};
+    const orig = currentDay?.sessionLabels?.[detailSession] || profile?.settings?.sessionLabels?.[detailSession] || MEAL_SESSIONS.find(s => s.id === detailSession)?.label || (detailSession?.startsWith('snack') ? `Camilan ${detailSession.replace('snack', '')}` : 'Sesi Baru');
+    setSessionTitleInput(orig);
+    setIsEditingItems(false);
+  };
+
+  const handleSaveEdit = (slides = []) => {
+    const currentDay = daysMap[selectedYmd] || day || {};
+    const meals = { ...(currentDay.meals || {}) };
+    if (draftMeals !== null) {
+      if (saveMealPrepsFn && mealPreps) {
+        const originalItems = currentDay.meals?.[detailSession] || [];
+        const draftIds = new Set(draftMeals.map(x => x.id));
+        const deletedMealPrepItems = originalItems.filter(x => !draftIds.has(x.id) && (x.batchId || x.isMealPrep));
+        if (deletedMealPrepItems.length > 0) {
+          saveMealPrepsFn(mealPreps.map(b => {
+            const returnedCount = deletedMealPrepItems.filter(item => item.batchId === b.id || (b.name && item.name && item.name.includes(b.name))).length;
+            if (returnedCount > 0) {
+              const maxP = b.initialPortions || b.totalPortions || 99;
+              return { ...b, remainingPortions: Math.min(maxP, (b.remainingPortions || 0) + returnedCount) };
+            }
+            return b;
+          }));
+        }
+      }
+      meals[detailSession] = draftMeals;
+    }
+
+    const newDay = { ...currentDay, meals };
+
+    const trimmedTitle = sessionTitleInput.trim();
+    const currentLabel = currentDay?.sessionLabels?.[detailSession] || profile?.settings?.sessionLabels?.[detailSession] || MEAL_SESSIONS.find(s => s.id === detailSession)?.label || '';
+    if (trimmedTitle && trimmedTitle !== currentLabel) {
+      newDay.sessionLabels = { ...(currentDay.sessionLabels || {}), [detailSession]: trimmedTitle };
       if (saveProfilePatch) {
         saveProfilePatch({
           settings: {
             ...(profile?.settings || {}),
             sessionLabels: {
               ...(profile?.settings?.sessionLabels || {}),
-              [detailSession]: trimmed,
+              [detailSession]: trimmedTitle,
             },
           },
         });
       }
-      showToast(`Nama sesi diubah menjadi "${trimmed}"`, { type: 'success' });
     }
+
+    if (Object.keys(draftSlideTimes).length > 0) {
+      const sessionTimes = { ...(currentDay.sessionTimes || {}) };
+      Object.entries(draftSlideTimes).forEach(([idxStr, newTime]) => {
+        const idx = parseInt(idxStr, 10);
+        if (idx === 0 || !sessionTimes[detailSession]) {
+          sessionTimes[detailSession] = newTime;
+        }
+        const sessionPhotos = photosOf(detailSession);
+        const targetPhoto = sessionPhotos[idx];
+        if (targetPhoto) {
+          const updatedPhotos = storedPhotos(detailSession).map(p => p.id === targetPhoto.id ? { ...p, time: newTime } : p);
+          writePhotos(detailSession, updatedPhotos);
+        }
+      });
+      newDay.sessionTimes = sessionTimes;
+    }
+
+    persistDay(newDay);
+    setDraftMeals(null);
+    setDraftSlideTimes({});
+    setIsEditingItems(false);
+    showToast('Perubahan berhasil disimpan');
   };
 
   const closeDetailSession = () => {
-    handleRenameSession();
+    setDraftMeals(null);
+    setDraftSlideTimes({});
+    const currentDay = daysMap[selectedYmd] || day || {};
+    const orig = currentDay?.sessionLabels?.[detailSession] || profile?.settings?.sessionLabels?.[detailSession] || MEAL_SESSIONS.find(s => s.id === detailSession)?.label || '';
+    setSessionTitleInput(orig);
     setIsEditingItems(false);
     setDetailSession(null);
   };
@@ -509,17 +665,30 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     const sessionLabel = activeSessions.find(s => s.id === sessionId)?.label || '';
     if (!(await showConfirm(`Yakin ingin menghapus sesi ${sessionLabel} beserta isinya dari hari ini?`, { title: 'Hapus Sesi?', confirmText: 'Hapus', danger: true }))) return;
     
-    const meals = { ...(day.meals || {}) };
+    const currentDay = daysMap[selectedYmd] || day || {};
+    const meals = { ...(currentDay.meals || {}) };
     delete meals[sessionId];
-    const hidden = [...(day.hiddenSessions || []), sessionId];
+    const hidden = [...(currentDay.hiddenSessions || []), sessionId];
     storedPhotos(sessionId).forEach((p) => dropFiles(p.url, p.originalUrl, p.thumbUrl, p.originalThumbUrl));
     writePhotos(sessionId, []);
-    persistDay({ ...day, meals, hiddenSessions: hidden });
+    persistDay({ ...currentDay, meals, hiddenSessions: hidden });
+    setDraftMeals(null);
+    setDraftSlideTimes({});
+    setIsEditingItems(false);
     setDetailSession(null);
   };
 
   const removeEntry = async (sessionId, entryId) => {
-    const targetEntry = (day.meals?.[sessionId] || []).find(e => e.id === entryId);
+    if (isEditingItems && draftMeals !== null) {
+      const targetEntry = draftMeals.find(e => e.id === entryId);
+      if (!targetEntry) return;
+      if (!(await showConfirm('Hapus menu ini dari catatan?', { title: 'Hapus Menu', confirmText: 'Hapus', danger: true }))) return;
+      setDraftMeals(draftMeals.filter(e => e.id !== entryId));
+      return;
+    }
+
+    const currentDay = daysMap[selectedYmd] || day || {};
+    const targetEntry = (currentDay.meals?.[sessionId] || []).find(e => e.id === entryId);
     if (!targetEntry) return;
 
     if (!(await showConfirm('Hapus menu ini dari catatan?', { title: 'Hapus Menu', confirmText: 'Hapus', danger: true }))) return;
@@ -535,9 +704,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       }));
     }
 
-    const meals = { ...(day.meals || {}) };
+    const meals = { ...(currentDay.meals || {}) };
     meals[sessionId] = (meals[sessionId] || []).filter(e => e.id !== entryId);
-    persistDay({ ...day, meals });
+    persistDay({ ...currentDay, meals });
     showToast('Menu dihapus & stok dikembalikan ke Program.', { type: 'info' });
   };
 
@@ -636,6 +805,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       await saveDayPhotos(user.uid, copyTargetDate, targetDayPhotos);
     }
     
+    if (isMove && draftMeals !== null && copySourceSession === detailSession) {
+      setDraftMeals(prev => (prev || []).filter(e => !copySelectedItems.includes(e.id)));
+    }
     setCopySourceSession(null);
     setCopyTargetSessions([]);
     setCopySelectedItems([]);
@@ -792,6 +964,17 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   const handleReanalyzeSessionPhoto = async (sessionId, photo) => {
     if (!photo || !photo.url) return;
+
+    const ok = await showConfirm(
+      'Foto akan dianalisis ulang memakai kuota AI. Lanjutkan?',
+      {
+        title: 'Hitung Ulang?',
+        confirmText: 'Hitung Ulang',
+        cancelText: 'Batal',
+      }
+    );
+    if (!ok) return;
+
     if (!(await guardAi())) return;
 
     const controller = new AbortController();
@@ -920,7 +1103,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     });
 
     const photoId = (photoFile || photoDataUrl) ? `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` : null;
-    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: entryUnit(f.unit, f.isDrink), nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: f.source || aiResult.source || 'ai', time: aiResult.time || new Date().toTimeString().slice(0, 5), photoId }));
+    const newEntries = foods.map(f => makeEntry({ name: f.name, grams: f.grams, unit: f.unit || (f.isDrink ? 'ml' : 'g'), nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: f.source || aiResult.source || 'ai', time: aiResult.time || new Date().toTimeString().slice(0, 5), photoId }));
     
     meals[aiTargetSession] = [
       ...(meals[aiTargetSession] || []),
@@ -1276,7 +1459,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           {session.id === 'drink' ? (
             <>{displayWaterMl} mL {sTotals.kcal > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : ''}</>
           ) : (
-            <>{session.time} {eatenEntries.length > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : (allPlanned ? '· Direncanakan' : '')}</>
+            <>{formatTimeDisplay(session.time, timeFormat)} {eatenEntries.length > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : (allPlanned ? '· Direncanakan' : '')}</>
           )}
         </p>
       </button>
@@ -1451,6 +1634,84 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       {/* ===== SMART INPUT BAR (menempel di atas BottomNav, besar ala Logym) ===== */}
       <div id="smart-input-bar" className="fixed left-0 right-0 z-30 px-3 pb-2 pointer-events-none transition-all duration-300 ease-out" style={{ bottom: 'calc(82px + env(safe-area-inset-bottom, 20px))' }}>
         <div className={`no-swipe pointer-events-auto relative max-w-2xl mx-auto flex items-end gap-1.5 px-2.5 py-2 rounded-[28px] border ${t.border} ${t.navBg} shadow-2xl transition-all duration-300 ease-out`}>
+          {/* DATABASE AUTOCOMPLETE POPUP (Cepat & Offline) */}
+          {foodSuggestions.length > 0 && (
+            <div
+              className={`absolute bottom-full mb-2 left-0 right-0 z-40 max-h-64 flex flex-col rounded-2xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-2xl shadow-2xl overflow-hidden anim-rise`}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="px-3.5 py-2 border-b border-black/5 dark:border-white/5 flex items-center justify-between bg-black/5 dark:bg-white/5 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <Database size={13} className="text-emerald-500" />
+                  <span className={`caption font-bold ${t.textMuted}`}>
+                    Database ({foodSuggestions.length})
+                  </span>
+                  {quickSearchParsed.qty > 1 && (
+                    <span className="caption font-semibold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                      {quickSearchParsed.qty} {quickSearchParsed.unit || 'porsi'}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDismissSuggestions(true)}
+                  className="p-1 rounded-lg text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white active:scale-95 transition-all"
+                  title="Tutup saran"
+                  aria-label="Tutup saran"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto divide-y divide-black/5 dark:divide-white/5 hide-scrollbar">
+                {foodSuggestions.map((food) => (
+                  <div
+                    key={food.id}
+                    onClick={() => handleSelectFoodSuggestion(food)}
+                    className="flex items-center justify-between px-3.5 py-2.5 hover:bg-emerald-500/10 active:bg-emerald-500/20 transition-colors cursor-pointer group"
+                  >
+                    <div className="min-w-0 flex-1 pr-2">
+                      <p className={`body-md font-bold text-sm ${t.textMain} truncate group-hover:text-emerald-500 transition-colors`}>
+                        {food.name}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5 caption">
+                        <span className="font-bold text-emerald-500">
+                          {Math.round(food.nutrition?.kcal || 0)} kkal
+                        </span>
+                        <span className={t.textMuted}>
+                          {food.portion?.label ? food.portion.label : `per 100 ${food.unit || 'g'}`}
+                        </span>
+                        {food.isCustom && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-bold">
+                            Custom
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setChatText(food.name + ' ');
+                          chatInputRef.current?.focus();
+                        }}
+                        title="Isi ke kolom input"
+                        aria-label="Isi ke kolom input"
+                        className={`p-1.5 rounded-lg opacity-60 hover:opacity-100 ${t.bgSunken} ${t.textMuted} active:scale-95 transition-all`}
+                      >
+                        <CornerUpLeft size={13} />
+                      </button>
+                      <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-500 group-hover:bg-emerald-500 group-hover:text-white transition-all">
+                        <Plus size={14} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {aiBusy ? (
             <div className="absolute inset-0 rounded-[28px] overflow-hidden pointer-events-none">
               <div className="absolute inset-0 bg-green-500/20 dark:bg-green-400/20 w-full origin-left" style={{ animation: 'progressFill 10s cubic-bezier(0.1, 0.8, 0.2, 1) forwards' }} />
@@ -1487,6 +1748,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               value={chatText} 
               onChange={(e) => {
                 setChatText(e.target.value);
+                setDismissSuggestions(false);
                 if (chatInputRef.current) {
                   chatInputRef.current.style.height = 'auto';
                   const baseH = (isInputFocused || e.target.value) ? 46 : 38;
@@ -1518,9 +1780,14 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                 }, 150);
               }}
               onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setDismissSuggestions(true);
+                  return;
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   if (chatText.trim() && !aiBusy) {
+                    setDismissSuggestions(true);
                     runMagicPrompt();
                   }
                 }
@@ -1570,7 +1837,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                   onClick={(e) => { try { e.target.showPicker?.(); } catch {} }}
                   className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1 [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
                 />
-                <button onClick={() => setAiResult(null)} className={`p-2 rounded-xl ${t.btnBg}`}><X size={15} className={t.textMuted} /></button>
               </div>
             </div>
 
@@ -1605,13 +1871,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                     </div>
                     <div className="flex items-center gap-3 text-xs font-bold tabular-nums">
                       <span className="flex items-center gap-1 text-green-500">
-                        <span className="text-[10px] uppercase font-semibold text-green-500/70">P</span> {aiP}g
+                        <span className="caption uppercase font-semibold text-green-500/70">P</span> {aiP}g
                       </span>
                       <span className="flex items-center gap-1 text-amber-500">
-                        <span className="text-[10px] uppercase font-semibold text-amber-500/70">K</span> {aiC}g
+                        <span className="caption uppercase font-semibold text-amber-500/70">K</span> {aiC}g
                       </span>
                       <span className="flex items-center gap-1 text-red-400">
-                        <span className="text-[10px] uppercase font-semibold text-red-400/70">L</span> {aiF}g
+                        <span className="caption uppercase font-semibold text-red-400/70">L</span> {aiF}g
                       </span>
                     </div>
                   </div>
@@ -1644,7 +1910,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             <div className="space-y-1.5 mb-3">
               {aiResult.foods.map((f, i) => {
                 const rawUnit = f.unit || 'g';
-                const unit = URT_DICTIONARY[normalizeUnit(rawUnit)] ? normalizeUnit(rawUnit) : (rawUnit === 'ml' ? 'ml' : 'g');
+                const unit = normalizeUnit(rawUnit) || (rawUnit === 'ml' ? 'ml' : 'g');
                 const isGram = unit === 'g' || unit === 'ml';
                 return (
                 <div key={i} className={`flex items-start gap-2 p-3 rounded-2xl border ${t.border} ${t.bgCard}`}>
@@ -1708,12 +1974,12 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                        })()}
                     </div>
                   ) : (() => {
-                    const unitWeight = isGram ? 1 : (URT_DICTIONARY[unit] || 1);
+                    const unitWeight = getItemUnitWeight(f, unit);
                     const qty = Math.round(((f.grams || 0) / unitWeight) * 10) / 10;
                     const applyGrams = (grams, nextUnit = unit) => {
                       const baseGrams = f.baseGrams || f.grams || 1;
                       const baseNutrition = f.baseNutrition || f.nutrition || EMPTY_NUTRITION;
-                      const factor = baseGrams > 0 ? grams / baseGrams : 1;
+                      const factor = baseGrams > 0 ? (grams || 0) / baseGrams : 1;
                       setAiResult(r => ({
                         ...r,
                         foods: r.foods.map((x, j) => j === i ? {
@@ -1737,14 +2003,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                         </div>
                         <div className="shrink-0 flex flex-col items-center gap-0.5">
                           <div className={`px-3 py-1.5 rounded-xl ${t.bgSunken}`}>
-                            <SwipeInput value={qty} min={0} onChange={(newQty) => applyGrams(Math.round(newQty * unitWeight), unit)}
+                            <SwipeInput value={qty} min={0} step={isGram ? 10 : 0.5} onChange={(newQty) => applyGrams(Math.round(newQty * unitWeight), unit)}
                               className={`w-10 bg-transparent body-lg outline-none no-spinners font-bold text-center ${t.textMain}`} />
                           </div>
                           <select value={unit} onChange={(e) => {
-                            const newUnit = e.target.value;
-                            const newUnitWeight = (newUnit === 'g' || newUnit === 'ml') ? 1 : (URT_DICTIONARY[newUnit] || 1);
-                            const newGrams = Math.round(qty * newUnitWeight);
-                            applyGrams(newGrams, newUnit);
+                            applyGrams(f.grams, e.target.value);
                           }} className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}>
                             {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
                           </select>
@@ -1773,23 +2036,27 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                 ))}
               </div>
             </div>
-
-            <label className={`flex items-center gap-2 p-3 rounded-xl border ${t.border} ${t.bgSunken} cursor-pointer`}>
-              <input type="checkbox" checked={saveToDb} onChange={(e) => setSaveToDb(e.target.checked)} className="w-5 h-5 rounded accent-emerald-500" />
-              <span className={`caption font-medium ${t.textMain}`}>Simpan ke Database Custom</span>
-            </label>
           </div>
 
-          {/* PINNED FOOTER: TOMBOL SIMPAN SELALU TERLIHAT */}
+          {/* PINNED FOOTER: TOMBOL BATAL & SIMPAN */}
           <div className={`p-3.5 border-t ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} bg-black/5 dark:bg-white/5 shrink-0`}>
-            <button
-              disabled={!aiResult.foods.length}
-              onClick={confirmAiResult}
-              className={`w-full py-3.5 rounded-2xl ${t.bgAccent} text-white font-bold body-md shadow-glow disabled:opacity-40 flex items-center justify-center gap-2 active:scale-95 transition-all`}
-            >
-              <Check size={18} strokeWidth={2.5} />
-              <span>Simpan ke {activeSessions.find(s => s.id === aiTargetSession)?.label || 'Sesi'} ({aiResult.foods.length} item)</span>
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setAiResult(null)}
+                className={`w-full py-3 rounded-2xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} font-bold body-md active:scale-95 transition-all text-center`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={!aiResult.foods.length}
+                onClick={confirmAiResult}
+                className="w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold body-md shadow-md shadow-emerald-500/20 disabled:opacity-40 active:scale-95 transition-all text-center"
+              >
+                Simpan
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1798,7 +2065,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       {/* ===== SHEET DETAIL SESI (edit/hapus entri) ===== */}
       {detailSession && (() => {
         const sessionPhotos = photosOf(detailSession);
-        let sessionItems = day.meals?.[detailSession] || [];
+        let sessionItems = (isEditingItems && draftMeals !== null) ? draftMeals : (day.meals?.[detailSession] || []);
         
         // Auto-migrate data lama: jika ada foto tapi item Lomy tidak punya photoId, masukkan ke foto pertama
         if (sessionPhotos.length > 0) {
@@ -1837,34 +2104,43 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
         const activeSlideIndex = Math.min(detailSlide, Math.max(0, slides.length - 1));
         const activeSlide = slides[activeSlideIndex] || slides[0] || {};
-        const activeSlideTime = activeSlide.time || sessionDefaultTime;
+        const activeSlideTime = (isEditingItems && draftSlideTimes[activeSlideIndex] !== undefined)
+          ? draftSlideTimes[activeSlideIndex]
+          : (activeSlide.time || sessionDefaultTime);
 
         const handleUpdateSlideTime = (newTime) => {
-          // 1. Update waktu semua item di slide yang sedang aktif
-          const meals = { ...(day.meals || {}) };
-          if (meals[detailSession]) {
+          if (isEditingItems && draftMeals !== null) {
             const currentItemIds = new Set((activeSlide.items || []).map(i => i.id));
-            meals[detailSession] = meals[detailSession].map(item => {
+            const updated = draftMeals.map(item => {
               if (currentItemIds.has(item.id)) {
                 return { ...item, time: newTime };
               }
               return item;
             });
+            setDraftMeals(updated);
+            setDraftSlideTimes(prev => ({ ...prev, [activeSlideIndex]: newTime }));
+          } else {
+            const currentDay = daysMap[selectedYmd] || day || {};
+            const meals = { ...(currentDay.meals || {}) };
+            if (meals[detailSession]) {
+              const currentItemIds = new Set((activeSlide.items || []).map(i => i.id));
+              meals[detailSession] = meals[detailSession].map(item => {
+                if (currentItemIds.has(item.id)) {
+                  return { ...item, time: newTime };
+                }
+                return item;
+              });
+            }
+            const sessionTimes = { ...(currentDay.sessionTimes || {}) };
+            if (activeSlideIndex === 0 || !sessionTimes[detailSession]) {
+              sessionTimes[detailSession] = newTime;
+            }
+            if (activeSlide.photo) {
+              const updatedPhotos = storedPhotos(detailSession).map(p => p.id === activeSlide.photo.id ? { ...p, time: newTime } : p);
+              writePhotos(detailSession, updatedPhotos);
+            }
+            persistDay({ ...currentDay, meals, sessionTimes });
           }
-
-          // 2. Update sessionTimes jika ini slide pertama (atau satu-satunya slide)
-          const sessionTimes = { ...(day.sessionTimes || {}) };
-          if (activeSlideIndex === 0 || !sessionTimes[detailSession]) {
-            sessionTimes[detailSession] = newTime;
-          }
-
-          // 3. Update photo.time jika slide bertipe photo
-          if (activeSlide.photo) {
-            const updatedPhotos = storedPhotos(detailSession).map(p => p.id === activeSlide.photo.id ? { ...p, time: newTime } : p);
-            writePhotos(detailSession, updatedPhotos);
-          }
-
-          persistDay({ ...day, meals, sessionTimes });
         };
 
         return (
@@ -1873,66 +2149,91 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               className={`w-full max-w-sm max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl anim-rise`}>
               
               {/* FIXED HEADER */}
-              <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0 bg-black/5`}>
-                <div className="flex items-start justify-between gap-3">
+              <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0`}>
+                <div className="flex items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 relative group max-w-full">
-                      <input
-                        type="text"
-                        value={sessionTitleInput}
-                        onChange={(e) => setSessionTitleInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleRenameSession(e.currentTarget.value);
-                            e.currentTarget.blur();
-                          }
-                        }}
-                        onBlur={(e) => handleRenameSession(e.target.value)}
-                        placeholder="Nama Sesi..."
-                        className={`bg-transparent outline-none text-xl sm:text-2xl font-black ${t.textMain} w-full pr-7 rounded-lg transition-colors border-b border-transparent focus:border-emerald-500 truncate`}
-                      />
-                      <Pencil size={13} className={`absolute right-1 ${t.textMuted} opacity-40 group-hover:opacity-80 pointer-events-none transition-opacity shrink-0`} />
-                    </div>
+                    <input
+                      type="text"
+                      value={sessionTitleInput}
+                      onChange={(e) => setSessionTitleInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      placeholder="Nama Sesi..."
+                      readOnly={!isEditingItems}
+                      className={`bg-transparent outline-none h2 font-heading font-bold ${t.textMain} w-full rounded-lg transition-colors ${isEditingItems ? 'border-b border-emerald-500 pb-0.5' : 'border-b border-transparent'} truncate ${!isEditingItems ? 'cursor-default select-none' : ''}`}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
                     {detailSession !== 'drink' && (
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <label className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} cursor-pointer active:scale-95 transition-transform`}>
-                          <Clock size={12} className={t.textMuted} />
+                      isEditingItems ? (
+                        <label className={`relative inline-flex items-center px-2.5 py-1 rounded-xl border border-dashed border-emerald-500/50 bg-emerald-500/10 cursor-pointer active:scale-95 transition-all`} title="Ubah jam sesi">
+                          <span className={`text-sm font-bold ${t.textMain} tabular-nums`}>
+                            {formatTimeDisplay(activeSlideTime, timeFormat)}
+                          </span>
                           <input
                             type="time" 
                             value={activeSlideTime}
                             onChange={(e) => handleUpdateSlideTime(e.target.value)}
                             onClick={(e) => { try { e.target.showPicker?.(); } catch {} }}
-                            className={`bg-transparent outline-none ${t.textMain} text-xs font-bold [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none cursor-pointer`}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                           />
                         </label>
-                      </div>
+                      ) : (
+                        <span className={`text-sm font-semibold ${t.textMuted} tabular-nums`}>
+                          {formatTimeDisplay(activeSlideTime, timeFormat)}
+                        </span>
+                      )
+                    )}
+
+                    {!isEditingItems && (
+                      <button
+                        onClick={startEditing}
+                        className={`p-1.5 rounded-xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} active:scale-95 transition-all`}
+                        title="Edit sesi dan menu"
+                        aria-label="Edit sesi"
+                      >
+                        <Pencil size={15} className={t.textAccent} />
+                      </button>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
-                    <button
-                      onClick={() => handleRemoveSession(detailSession)}
-                      className="p-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 active:scale-95 transition-all"
-                      title="Hapus sesi hari ini"
-                      aria-label="Hapus sesi hari ini"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                    <button
-                      onClick={closeDetailSession}
-                      className={`p-2 rounded-xl ${t.btnBg} ${t.textMuted} hover:${t.textMain} active:scale-95 transition-all`}
-                      title="Tutup"
-                      aria-label="Tutup"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
                 </div>
+
+                {/* Page Indicator Bar (Fixed & Consistent across all slides) */}
+                {slides.length > 1 && (
+                  <div className="flex items-center justify-center gap-1.5 pt-2.5">
+                    {slides.map((_, sIdx) => (
+                      <button
+                        key={sIdx}
+                        type="button"
+                        onClick={() => {
+                          setDetailSlide(sIdx);
+                          if (carouselRef.current) {
+                            carouselRef.current.scrollTo({
+                              left: sIdx * carouselRef.current.clientWidth,
+                              behavior: 'smooth'
+                            });
+                          }
+                        }}
+                        aria-label={`Halaman ${sIdx + 1}`}
+                        className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
+                          sIdx === detailSlide
+                            ? 'w-7 bg-emerald-500 shadow-sm shadow-emerald-500/30'
+                            : 'w-2 bg-black/20 dark:bg-white/20 hover:bg-black/30 dark:hover:bg-white/30'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* CAROUSEL */}
               <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex-1 flex w-full overflow-x-auto snap-x snap-mandatory hide-scrollbar"
+                <div ref={carouselRef} className="flex-1 flex w-full overflow-x-auto snap-x snap-mandatory hide-scrollbar"
                      onScroll={(e) => {
                        const idx = Math.round(e.target.scrollLeft / e.target.clientWidth);
                        if (idx !== detailSlide && idx >= 0 && idx < slides.length) setDetailSlide(idx);
@@ -1947,23 +2248,23 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                                   setFullscreenPhotos(slides.filter(s => s.type === 'photo').map(s => s.photo));
                                   setFullscreenIndex(slideIdx);
                                 }} />
-                           <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80 pointer-events-none" />
+                           {isEditingItems && <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/80 pointer-events-none" />}
                            {slide.photo.pending ? (
                              <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 text-white caption font-bold backdrop-blur-md">
                                <Loader2 size={12} className="animate-spin" /> Menyimpan
                              </div>
-                           ) : (
+                           ) : isEditingItems ? (
                              <div className="absolute top-3 right-3 flex items-center gap-2">
-                               <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP"><Download size={16} /></button>
-                               <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95"><Edit2 size={16} /></button>
-                               <button onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)} disabled={aiBusy} className={`p-2 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white backdrop-blur-md active:scale-95 shadow-md shadow-emerald-500/30 ${aiBusy ? 'opacity-50' : ''}`} title="Hitung / Analisa Ulang Gizi" aria-label="Hitung / Analisa Ulang Gizi">
+                               <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP" title="Simpan ke HP"><Download size={16} /></button>
+                               <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" title="Potong / Edit foto" aria-label="Potong foto"><Edit2 size={16} /></button>
+                               <button onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)} disabled={aiBusy} className={`p-2 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white backdrop-blur-md active:scale-95 shadow-md shadow-emerald-500/30 ${aiBusy ? 'opacity-50' : ''}`} title="Hitung Ulang Gizi dengan AI" aria-label="Hitung Ulang Gizi dengan AI">
                                  {aiBusy ? <Loader2 size={16} className="animate-spin" /> : <Calculator size={16} />}
                                </button>
-                               <button onClick={() => removePhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-red-500/40 text-white backdrop-blur-md active:scale-95" aria-label="Hapus foto"><X size={16} /></button>
+                               <button onClick={() => removePhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-red-500/80 hover:bg-red-500 text-white backdrop-blur-md active:scale-95" aria-label="Hapus foto" title="Hapus foto"><X size={16} /></button>
                              </div>
-                           )}
+                           ) : null}
                         </div>
-                      ) : (
+                      ) : isEditingItems ? (
                         <div className={`relative h-24 w-full shrink-0 flex items-center justify-center ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
                            <div className="flex items-center gap-3">
                              <button onClick={() => openCamera((file) => addPhoto(detailSession, file), detailCameraRef)}
@@ -1976,7 +2277,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                              </button>
                            </div>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Items List for this Sub-Session */}
                       <div className="flex-1 overflow-y-auto p-5 pb-8">
@@ -2048,39 +2349,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                            );
                          })()}
 
-                         <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                           <h3 className={`h3 ${t.textMuted}`}>Daftar Menu {slides.length > 1 ? `(${slideIdx + 1}/${slides.length})` : ''}</h3>
-                           <div className="flex items-center gap-1.5 shrink-0">
-                             <button onClick={() => {
-                               setCopySourceSession(detailSession);
-                               setCopySourcePhoto(slide.photo || null);
-                               setCopySelectedItems(slide.items.map(i => i.id));
-                               setCopyActionType('move');
-                             }} disabled={slide.items.length === 0} className={`px-2.5 py-1 rounded-lg ${t.bgSunken} ${t.textMuted} hover:${t.textMain} text-xs font-bold flex items-center gap-1 active:scale-95 transition-all disabled:opacity-40`} title="Pindahkan menu ke sesi lain">
-                               <ArrowRightLeft size={12} /> Pindah
-                             </button>
-                             <button onClick={() => {
-                               setCopySourceSession(detailSession);
-                               setCopySourcePhoto(slide.photo || null);
-                               setCopySelectedItems(slide.items.map(i => i.id));
-                               setCopyActionType('copy');
-                             }} disabled={slide.items.length === 0} className={`px-2.5 py-1 rounded-lg ${t.bgSunken} ${t.textMuted} hover:${t.textMain} text-xs font-bold flex items-center gap-1 active:scale-95 transition-all disabled:opacity-40`} title="Salin menu ke sesi lain">
-                               <Copy size={12} /> Salin
-                             </button>
-                             <button onClick={() => setIsEditingItems(prev => !prev)} disabled={slide.items.length === 0} className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 active:scale-95 transition-all disabled:opacity-40 ${isEditingItems ? `${t.bgAccent} text-white shadow-sm` : `${t.bgSunken} ${t.textAccent}`}`} title={isEditingItems ? 'Selesai mengubah menu' : 'Edit porsi dan hapus menu'}>
-                               {isEditingItems ? (
-                                 <>
-                                   <Check size={12} strokeWidth={2.5} /> Selesai
-                                 </>
-                               ) : (
-                                 <>
-                                   <Pencil size={12} /> Edit
-                                 </>
-                               )}
-                             </button>
-                           </div>
-                         </div>
-                         <div className="space-y-2">
+                         
+                          <div className="divide-y divide-black/5 dark:divide-white/5">
                            {slide.items.map((e) => {
                              const isMealPrep = e.isMealPrep || e.source === 'recipe';
                              const isEaten = e.isEaten !== undefined ? e.isEaten : !isMealPrep;
@@ -2092,34 +2362,65 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                              const qty = Math.round(rawQty * 100) / 100;
 
                              const updateItemGrams = (grams, nextUnit = unit) => {
-                               const meals = { ...(day.meals || {}) };
-                               meals[detailSession] = meals[detailSession].map(x => {
-                                 if (x.id !== e.id) return x;
-                                 const baseGrams = x.baseGrams || x.grams || 1;
-                                 const baseNutrition = x.baseNutrition || x.nutrition || EMPTY_NUTRITION;
-                                 const factor = baseGrams > 0 ? grams / baseGrams : 1;
-                                 return {
-                                   ...x,
-                                   grams,
-                                   unit: nextUnit,
-                                   baseGrams,
-                                   baseNutrition,
-                                   nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
-                                 };
-                               });
-                               persistDay({ ...day, meals });
+                               if (isEditingItems && draftMeals !== null) {
+                                 const updated = draftMeals.map(x => {
+                                   if (x.id !== e.id) return x;
+                                   const baseGrams = x.baseGrams || x.grams || 1;
+                                   const baseNutrition = x.baseNutrition || x.nutrition || EMPTY_NUTRITION;
+                                   const factor = baseGrams > 0 ? grams / baseGrams : 1;
+                                   return {
+                                     ...x,
+                                     grams,
+                                     unit: nextUnit,
+                                     baseGrams,
+                                     baseNutrition,
+                                     nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
+                                   };
+                                 });
+                                 setDraftMeals(updated);
+                               } else {
+                                 const currentDay = daysMap[selectedYmd] || day || {};
+                                 const meals = { ...(currentDay.meals || {}) };
+                                 meals[detailSession] = (meals[detailSession] || []).map(x => {
+                                   if (x.id !== e.id) return x;
+                                   const baseGrams = x.baseGrams || x.grams || 1;
+                                   const baseNutrition = x.baseNutrition || x.nutrition || EMPTY_NUTRITION;
+                                   const factor = baseGrams > 0 ? grams / baseGrams : 1;
+                                   return {
+                                     ...x,
+                                     grams,
+                                     unit: nextUnit,
+                                     baseGrams,
+                                     baseNutrition,
+                                     nutrition: Object.fromEntries(Object.entries(baseNutrition).map(([k, v]) => [k, Math.round(v * factor * 1000) / 1000]))
+                                   };
+                                 });
+                                 persistDay({ ...currentDay, meals });
+                               }
                              };
 
                              const changeItemUnit = (newUnit) => {
-                               const meals = { ...(day.meals || {}) };
-                               meals[detailSession] = meals[detailSession].map(x => {
-                                 if (x.id !== e.id) return x;
-                                 return {
-                                   ...x,
-                                   unit: newUnit
-                                 };
-                               });
-                               persistDay({ ...day, meals });
+                               if (isEditingItems && draftMeals !== null) {
+                                 const updated = draftMeals.map(x => {
+                                   if (x.id !== e.id) return x;
+                                   return {
+                                     ...x,
+                                     unit: newUnit
+                                   };
+                                 });
+                                 setDraftMeals(updated);
+                               } else {
+                                 const currentDay = daysMap[selectedYmd] || day || {};
+                                 const meals = { ...(currentDay.meals || {}) };
+                                 meals[detailSession] = (meals[detailSession] || []).map(x => {
+                                   if (x.id !== e.id) return x;
+                                   return {
+                                     ...x,
+                                     unit: newUnit
+                                   };
+                                 });
+                                 persistDay({ ...currentDay, meals });
+                               }
                              };
 
                              const displayName = (() => {
@@ -2136,106 +2437,148 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                               })();
 
                               return (
-                                 <div key={e.id} className={`p-3.5 rounded-2xl border ${t.border} ${t.bgCard} ${!isEaten ? 'opacity-80' : ''} transition-all`}>
-                                   {/* Top Row: Full Title on left, Qty + Delete on right */}
-                                   <div className="flex items-start justify-between gap-3">
-                                     <div className="min-w-0 flex-1">
-                                       <p className={`body-md font-bold ${t.textMain} leading-snug break-words line-clamp-2`} title={displayName}>
-                                         {displayName}
-                                       </p>
-                                     </div>
+                                <div key={e.id} className={`py-3 first:pt-1 last:pb-1 ${!isEaten ? 'opacity-70' : ''} transition-all`}>
+                                  {isEditingItems ? (
+                                    <div className="flex flex-col gap-1">
+                                      {/* Baris 1: Nama Menu (kiri) & Input Angka + Hapus (kanan) */}
+                                      <div className="flex items-start justify-between gap-3">
+                                        <p className={`body-md font-bold ${t.textMain} leading-snug break-words min-w-0 flex-1`} title={displayName}>
+                                          {displayName}
+                                        </p>
+                                        <div className="shrink-0 flex flex-col items-end gap-1 pt-0.5 w-[88px]">
+                                          {/* Baris 1: Kotak Angka + Tombol Hapus */}
+                                          <div className="flex items-center gap-1.5 w-full">
+                                            <div className={`flex-1 min-w-0 px-1.5 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} flex items-center justify-center`}>
+                                              <SwipeInput
+                                                value={qty}
+                                                min={0}
+                                                step={isGram ? 10 : 0.5}
+                                                onChange={(newQty) => {
+                                                  const targetUnitWeight = getItemUnitWeight(e, unit);
+                                                  const newGrams = Math.round(newQty * targetUnitWeight * 10) / 10;
+                                                  updateItemGrams(newGrams, unit);
+                                                }}
+                                                className={`w-full bg-transparent text-sm outline-none no-spinners font-bold text-center ${t.textMain}`}
+                                              />
+                                            </div>
+                                            <button 
+                                              onClick={() => removeEntry(detailSession, e.id)} 
+                                              className="p-1 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 active:scale-95 transition-all shrink-0"
+                                              title="Hapus menu"
+                                              aria-label="Hapus menu"
+                                            >
+                                              <X size={15} />
+                                            </button>
+                                          </div>
 
-                                     <div className="shrink-0 flex items-center gap-2">
-                                       {isEditingItems ? (
-                                         <>
-                                           <div className="flex flex-col items-center gap-0.5">
-                                             <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken}`}>
-                                               <SwipeInput
-                                                 value={qty}
-                                                 min={0}
-                                                 onChange={(newQty) => {
-                                                   const targetUnitWeight = getItemUnitWeight(e, unit);
-                                                   const newGrams = Math.round(newQty * targetUnitWeight * 10) / 10;
-                                                   updateItemGrams(newGrams, unit);
-                                                 }}
-                                                 className={`w-10 bg-transparent body-md outline-none no-spinners font-bold text-center ${t.textMain}`}
-                                               />
-                                             </div>
-                                             <select
-                                               value={unit}
-                                               onChange={(ev) => changeItemUnit(ev.target.value)}
-                                               className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}
-                                             >
-                                               {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
-                                             </select>
-                                           </div>
-                                           <button 
-                                             onClick={() => removeEntry(detailSession, e.id)} 
-                                             className="p-1.5 rounded-xl text-red-400 shrink-0 hover:bg-red-500/10 active:scale-95 transition-all"
-                                             title="Hapus dari jadwal & kembalikan stok"
-                                             aria-label="Hapus menu"
-                                           >
-                                             <X size={16} />
-                                           </button>
-                                         </>
-                                       ) : (
-                                         <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken} flex flex-col items-center justify-center min-w-[42px]`}>
-                                           <span className={`body-md font-bold ${t.textMain} tabular-nums leading-tight`}>{qty}</span>
-                                           <span className={`text-[10px] font-bold ${t.textMuted} leading-tight`}>{unit}</span>
-                                         </div>
-                                       )}
-                                     </div>
-                                   </div>
+                                          {/* Baris 2: Kotak Satuan (rata kiri dengan kotak angka, chevron sejajar dengan X) */}
+                                          <div className={`w-full px-1.5 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} flex items-center justify-center`}>
+                                            <select
+                                              value={unit}
+                                              onChange={(ev) => changeItemUnit(ev.target.value)}
+                                              className={`w-full bg-transparent text-xs font-bold outline-none cursor-pointer text-center ${t.textMuted}`}
+                                            >
+                                              {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
+                                            </select>
+                                          </div>
+                                        </div>
+                                      </div>
 
-                                   {/* Bottom Row: Tombol Makan (di bawah judul) + Nutrisi & Detail */}
-                                   <div className="flex flex-wrap items-center gap-2.5 mt-2 pt-2 border-t border-black/5 dark:border-white/5">
-                                     {isMealPrep && (
-                                       <button
-                                         onClick={() => toggleEatenStatus(detailSession, e, !isEaten)}
-                                         className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 shrink-0 ${
-                                           isEaten
-                                             ? 'bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30'
-                                             : `${t.bgAccent} text-white shadow-sm hover:opacity-95`
-                                         }`}
-                                         title={isEaten ? 'Klik untuk membatalkan (retract)' : 'Klik untuk menandai sudah dimakan'}
-                                       >
-                                         {isEaten ? <Check size={13} strokeWidth={3} /> : <Utensils size={13} />}
-                                         <span>{isEaten ? 'Dimakan' : 'Makan'}</span>
-                                       </button>
-                                     )}
+                                      {/* Baris 3: Kalori (kiri) & Makro P K L (kanan) */}
+                                      <div className="flex items-center justify-between gap-2 caption">
+                                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                          <span className={`text-xs font-bold ${t.textMain} tabular-nums`}>
+                                            {Math.round(e.nutrition?.kcal || 0)} kkal
+                                          </span>
+                                          {!isGram && <span className={`text-xs ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
+                                          {(e.source === 'recipe' || e.isMealPrep) && (
+                                            <span className="inline-flex items-center gap-1 ml-0.5 text-emerald-500" title="Meal Prep"><ChefHat size={13} strokeWidth={2.5} /></span>
+                                          )}
+                                          {e.source === 'domus' && (
+                                            <span className="inline-flex items-center gap-1 ml-0.5 text-blue-500" title="Domus"><Box size={13} strokeWidth={2.5} /></span>
+                                          )}
+                                          {detailSession === 'drink' && (
+                                            <div className={`px-1.5 py-0.5 rounded border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} shrink-0 ml-1`}>
+                                              <input
+                                                type="time"
+                                                value={e.time || '12:00'}
+                                                onChange={(ev) => {
+                                                  if (draftMeals !== null) {
+                                                    setDraftMeals(draftMeals.map(x => x.id === e.id ? { ...x, time: ev.target.value } : x));
+                                                  }
+                                                }}
+                                                onClick={(ev) => { try { ev.target.showPicker?.(); } catch {} }}
+                                                className={`bg-transparent outline-none text-xs font-bold ${t.textMain} [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
+                                              />
+                                            </div>
+                                          )}
+                                        </div>
 
-                                     <div className={`caption font-medium ${t.textMuted} flex flex-wrap items-center gap-2 min-w-0`}>
-                                       {detailSession === 'drink' && (
-                                         <div className={`px-2 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} shrink-0`}>
-                                           <input
-                                             type="time"
-                                             value={e.time || '12:00'}
-                                             onChange={(ev) => {
-                                               const meals = { ...(day.meals || {}) };
-                                               meals[detailSession] = meals[detailSession].map(x => x.id === e.id ? { ...x, time: ev.target.value } : x);
-                                               persistDay({ ...day, meals });
-                                             }}
-                                             onClick={(ev) => { try { ev.target.showPicker?.(); } catch {} }}
-                                             className={`bg-transparent outline-none text-xs font-bold ${t.textMain} [&::-webkit-calendar-picker-indicator]:hidden cursor-pointer`}
-                                           />
-                                         </div>
-                                       )}
-                                       <span className="flex items-center gap-1.5 flex-wrap">
-                                         <span className={`text-xs font-bold ${t.textMain}`}>{Math.round(e.nutrition?.kcal || 0)} kkal</span>
-                                         <span className="text-[10px] text-green-500 font-semibold">P {Math.round(e.nutrition?.protein || 0)}g</span>
-                                         <span className="text-[10px] text-amber-500 font-semibold">K {Math.round(e.nutrition?.carbs || 0)}g</span>
-                                         <span className="text-[10px] text-red-400 font-semibold">L {Math.round(e.nutrition?.fat || 0)}g</span>
-                                         {!isGram && <span className={`text-[10px] ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
-                                       </span>
-                                       {(e.source === 'recipe' || e.isMealPrep) && (
-                                         <span className="inline-flex items-center gap-1 ml-0.5 text-emerald-500" title="Meal Prep"><ChefHat size={14} strokeWidth={2.5} /></span>
-                                       )}
-                                       {e.source === 'domus' && (
-                                         <span className="inline-flex items-center gap-1 ml-0.5 text-blue-500" title="Domus"><Box size={14} strokeWidth={2.5} /></span>
-                                       )}
-                                     </div>
-                                   </div>
-                                 </div>
+                                        <div className="flex items-center gap-2.5 caption font-semibold tabular-nums shrink-0 text-right">
+                                          <span className="text-xs text-green-500">P {Math.round(e.nutrition?.protein || 0)}g</span>
+                                          <span className="text-xs text-amber-500">K {Math.round(e.nutrition?.carbs || 0)}g</span>
+                                          <span className="text-xs text-red-400">L {Math.round(e.nutrition?.fat || 0)}g</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col gap-1">
+                                      {/* Baris 1: Nama Menu (kiri) & Porsi Bersih (kanan) */}
+                                      <div className="flex items-start justify-between gap-3">
+                                        <p className={`body-md font-bold ${t.textMain} leading-snug break-words min-w-0 flex-1`} title={displayName}>
+                                          {displayName}
+                                        </p>
+                                        <div className="shrink-0 text-right pt-0.5">
+                                          <span className={`text-base font-black tabular-nums ${t.textMain}`}>{qty}</span>
+                                          <span className={`ml-1 text-xs font-bold ${t.textMuted}`}>{unit}</span>
+                                        </div>
+                                      </div>
+
+                                      {/* Baris 2: Kalori (kiri) & Makro P K L (kanan) */}
+                                      <div className="flex items-center justify-between gap-2 caption">
+                                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                          <span className={`text-xs font-bold ${t.textMain} tabular-nums`}>
+                                            {Math.round(e.nutrition?.kcal || 0)} kkal
+                                          </span>
+                                          {!isGram && <span className={`text-xs ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
+                                          {(e.source === 'recipe' || e.isMealPrep) && (
+                                            <span className="inline-flex items-center gap-1 ml-0.5 text-emerald-500" title="Meal Prep"><ChefHat size={13} strokeWidth={2.5} /></span>
+                                          )}
+                                          {e.source === 'domus' && (
+                                            <span className="inline-flex items-center gap-1 ml-0.5 text-blue-500" title="Domus"><Box size={13} strokeWidth={2.5} /></span>
+                                          )}
+                                          {detailSession === 'drink' && (
+                                            <span className={`text-xs font-medium ${t.textMuted} ml-1`}>{formatTimeDisplay(e.time || '12:00', timeFormat)}</span>
+                                          )}
+                                        </div>
+
+                                        <div className="flex items-center gap-2.5 caption font-semibold tabular-nums shrink-0 text-right">
+                                          <span className="text-xs text-green-500">P {Math.round(e.nutrition?.protein || 0)}g</span>
+                                          <span className="text-xs text-amber-500">K {Math.round(e.nutrition?.carbs || 0)}g</span>
+                                          <span className="text-xs text-red-400">L {Math.round(e.nutrition?.fat || 0)}g</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Tombol Makan untuk Meal Prep */}
+                                  {isMealPrep && (
+                                    <div className="mt-2 flex items-center">
+                                      <button
+                                        onClick={() => toggleEatenStatus(detailSession, e, !isEaten)}
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
+                                          isEaten
+                                            ? 'bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25'
+                                            : `${t.bgAccent} text-white shadow-sm hover:opacity-95`
+                                        }`}
+                                        title={isEaten ? 'Klik untuk membatalkan (retract)' : 'Klik untuk menandai sudah dimakan'}
+                                      >
+                                        {isEaten ? <Check size={12} strokeWidth={3} /> : <Utensils size={12} />}
+                                        <span>{isEaten ? 'Dimakan' : 'Makan'}</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               );
                            })}
                          </div>
@@ -2250,13 +2593,83 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                 </div>
               </div>
 
-              {/* Input Manual Picker — Selalu di paling bawah sheet */}
-              <div className={`p-4 border-t ${t.border} bg-black/5 dark:bg-white/5 shrink-0`}>
-                 <button onClick={() => { setAiTargetSession(detailSession); setPickerOpen(true); }}
-                   className={`w-full py-3 rounded-2xl ${t.btnBg} ${t.textMain} body-md font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 border ${t.border}`}>
-                   <Plus size={16} className={t.textAccent} /> Tambah Menu Manual
-                 </button>
-              </div>
+              {/* Tombol Aksi Bawah (Hanya di mode edit) */}
+              {isEditingItems && (() => {
+                const targetSlideItems = (activeSlide.items && activeSlide.items.length > 0) ? activeSlide.items : (sessionItems || []);
+                return (
+                  <div className={`p-4 border-t ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0 flex flex-col gap-2`}>
+                     {/* 1 Baris Aksi Menu & Sesi: Tambah, Pindah, Salin, Hapus */}
+                     <div className="grid grid-cols-4 gap-2">
+                       <button
+                         type="button"
+                         onClick={() => { setAiTargetSession(detailSession); setPickerOpen(true); }}
+                         className="py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-500 active:scale-95 transition-all flex items-center justify-center"
+                         title="Tambah menu"
+                         aria-label="Tambah menu"
+                       >
+                         <Plus size={19} strokeWidth={2.5} />
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => {
+                           setCopySourceSession(detailSession);
+                           setCopySourcePhoto(activeSlide.photo || null);
+                           setCopySelectedItems(targetSlideItems.map(i => i.id));
+                           setCopyActionType('move');
+                         }}
+                         disabled={targetSlideItems.length === 0}
+                         className={`py-2.5 rounded-xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} active:scale-95 transition-all disabled:opacity-40 flex items-center justify-center`}
+                         title="Pindahkan menu ke sesi lain"
+                         aria-label="Pindahkan menu ke sesi lain"
+                       >
+                         <ArrowRightLeft size={18} strokeWidth={2.2} />
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => {
+                           setCopySourceSession(detailSession);
+                           setCopySourcePhoto(activeSlide.photo || null);
+                           setCopySelectedItems(targetSlideItems.map(i => i.id));
+                           setCopyActionType('copy');
+                         }}
+                         disabled={targetSlideItems.length === 0}
+                         className={`py-2.5 rounded-xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} active:scale-95 transition-all disabled:opacity-40 flex items-center justify-center`}
+                         title="Salin menu ke sesi lain"
+                         aria-label="Salin menu ke sesi lain"
+                       >
+                         <Copy size={18} strokeWidth={2.2} />
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => handleRemoveSession(detailSession)}
+                         className="py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-500 active:scale-95 transition-all flex items-center justify-center"
+                         title="Hapus sesi hari ini"
+                         aria-label="Hapus sesi hari ini"
+                       >
+                         <Trash2 size={18} strokeWidth={2.2} />
+                       </button>
+                     </div>
+                     <div className="grid grid-cols-2 gap-2 pt-1 border-t border-black/5 dark:border-white/5">
+                       <button
+                         type="button"
+                         onClick={handleCancelEdit}
+                         className={`w-full py-2.5 rounded-xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} text-sm font-bold active:scale-98 transition-all`}
+                         title="Batal edit"
+                       >
+                         Batal
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => handleSaveEdit(slides)}
+                         className="w-full py-2.5 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 active:scale-98 transition-all text-sm font-bold shadow-md shadow-emerald-500/20"
+                         title="Simpan perubahan"
+                       >
+                         Simpan
+                       </button>
+                     </div>
+                  </div>
+                );
+              })()}
 
               <input ref={detailPhotoRef} type="file" accept="image/*" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
               <input ref={detailCameraRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleDetailPhotoUpload(e, detailSession)} className="hidden" />
@@ -2350,7 +2763,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             className={`w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510] border-white/10' : 'bg-white border-black/10'} shadow-2xl p-6 anim-rise`}>
             
             <div className="space-y-4 mb-6 mt-1">
-               <h3 className={`caption ${t.textMuted} uppercase tracking-wider`}>Makro <span className="normal-case font-normal opacity-60">— ketuk buat lihat sumbernya</span></h3>
+               <h3 className={`caption ${t.textMuted} uppercase tracking-wider`}>Makro <span className="normal-case font-normal opacity-60">— ketuk untuk lihat detail</span></h3>
                <MacroBar mkey="kcal" showSources />
                <MacroBar mkey="protein" showSources />
                <MacroBar mkey="carbs" showSources />
@@ -2497,13 +2910,34 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             }
             
             if (detailSession) {
-               const newEntry = makeEntry({ name: entry.name, grams: entry.grams, unit: entryUnit(entry.unit, entry.isDrink), nutrition: { ...EMPTY_NUTRITION, ...entry.nutrition }, source: 'picker', time: activeSessions.find(s => s.id === detailSession)?.time || new Date().toTimeString().slice(0, 5) });
-               let meals = { ...(day.meals || {}) };
-               meals[detailSession] = [...(meals[detailSession] || []), newEntry];
-               persistDay({ ...day, meals });
-               showToast(`${entry.name} langsung ditambahkan ke ${activeSessions.find(s => s.id === detailSession)?.label}.`);
+               const sessionPhotos = photosOf(detailSession);
+               const targetPhotoId = sessionPhotos[detailSlide]?.id || sessionPhotos[0]?.id || null;
+               const newEntry = makeEntry({
+                 name: entry.name,
+                 grams: entry.grams,
+                 unit: entry.unit || (detailSession === 'drink' ? 'ml' : 'g'),
+                 portion: entry.portion,
+                 nutrition: { ...EMPTY_NUTRITION, ...entry.nutrition },
+                 source: 'picker',
+                 photoId: targetPhotoId,
+                 time: activeSessions.find(s => s.id === detailSession)?.time || new Date().toTimeString().slice(0, 5)
+               });
+
+               if (isEditingItems && draftMeals !== null) {
+                 setDraftMeals(prev => [...(prev || []), newEntry]);
+                 setPickerOpen(false);
+                 showToast(`${entry.name} ditambahkan ke draft.`);
+               } else {
+                 const currentDay = daysMap[selectedYmd] || day || {};
+                 const meals = { ...(currentDay.meals || {}) };
+                 meals[detailSession] = [...(meals[detailSession] || []), newEntry];
+                 persistDay({ ...currentDay, meals });
+                 setPickerOpen(false);
+                 showToast(`${entry.name} langsung ditambahkan ke ${activeSessions.find(s => s.id === detailSession)?.label || 'sesi'}.`);
+               }
             } else {
                appendAiResult([entry], { source: 'picker' });
+               setPickerOpen(false);
                showToast(`${entry.name} ditambahkan ke catatan makan, silakan cek sebelum disimpan.`);
             }
           }}
@@ -2533,25 +2967,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
       {/* ===== FULLSCREEN PHOTO VIEWER ===== */}
       {fullscreenPhotos && fullscreenPhotos.length > 0 && (
-        <div className="fixed inset-0 z-[100] bg-black flex flex-col no-swipe">
-          <div className="absolute top-0 inset-x-0 p-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] flex justify-between items-center z-10 bg-gradient-to-b from-black/80 to-transparent">
-            <span className="text-white font-bold body-md">
-              {fullscreenPhotos.length > 1 ? `${fullscreenIndex + 1} / ${fullscreenPhotos.length}` : ''}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  const currentPhoto = fullscreenPhotos[fullscreenIndex] || fullscreenPhotos[0];
-                  if (currentPhoto) downloadPhoto(detailSession, currentPhoto);
-                }}
-                className="p-2 rounded-full bg-white/20 backdrop-blur-md text-white active:scale-95"
-                title="Unduh foto"
-              >
-                <Download size={20} />
-              </button>
-              <button onClick={() => setFullscreenPhotos(null)} className="p-2 rounded-full bg-white/20 backdrop-blur-md text-white active:scale-95"><X size={20} /></button>
-            </div>
-          </div>
+        <div 
+          className="fixed inset-0 z-[100] bg-black/95 flex flex-col no-swipe select-none cursor-pointer"
+          onClick={() => setFullscreenPhotos(null)}
+        >
+          {/* Area Foto (geser untuk lihat foto lain, ketuk area luar untuk tutup) */}
           <div className="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar"
                ref={fullscreenViewerRef}
                onScroll={(e) => {
@@ -2560,7 +2980,34 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                }}>
             {fullscreenPhotos.map((photo, i) => (
               <div key={photo.id} className="w-full h-full shrink-0 snap-center flex items-center justify-center p-4">
-                <img src={photo.originalUrl || photo.url} alt="" className="max-w-full max-h-full object-contain rounded-xl" />
+                <div 
+                  className="relative inline-flex max-w-full max-h-full items-center justify-center cursor-default"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <img 
+                    src={photo.originalUrl || photo.url} 
+                    alt="" 
+                    className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl" 
+                  />
+
+                  {/* Indikator halaman menempel di sudut foto */}
+                  {fullscreenPhotos.length > 1 && (
+                    <div className="absolute top-3 left-3 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md text-white font-bold text-xs shadow-lg tracking-wider pointer-events-none">
+                      {i + 1} / {fullscreenPhotos.length}
+                    </div>
+                  )}
+
+                  {/* Tombol Unduh menempel langsung di sudut foto */}
+                  <button
+                    type="button"
+                    onClick={() => downloadPhoto(detailSession, photo)}
+                    className="absolute top-3 right-3 p-2.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white active:scale-95 transition-all shadow-lg"
+                    title="Unduh foto"
+                    aria-label="Unduh foto"
+                  >
+                    <Download size={18} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
