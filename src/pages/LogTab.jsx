@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
-import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator, Trash2 } from 'lucide-react';
+import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator, Trash2, ArrowRightLeft } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import RingChart from '../components/RingChart';
 import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity } from '../utils/domusSync';
@@ -95,6 +95,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   useEffect(() => {
     setDetailSlide(0);
+    setIsEditingItems(false);
     if (detailSession) {
       const current = day?.sessionLabels?.[detailSession] || profile?.settings?.sessionLabels?.[detailSession] || MEAL_SESSIONS.find(s => s.id === detailSession)?.label || (detailSession.startsWith('snack') ? `Camilan ${detailSession.replace('snack', '')}` : 'Sesi Baru');
       setSessionTitleInput(current);
@@ -102,6 +103,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   }, [detailSession]);
 
   const [copySourceSession, setCopySourceSession] = useState(null);
+  const [copyActionType, setCopyActionType] = useState('both'); // 'move' | 'copy' | 'both'
+  const [isEditingItems, setIsEditingItems] = useState(false);
   const [copyTargetSessions, setCopyTargetSessions] = useState([]);
   const [copyTargetDate, setCopyTargetDate] = useState(todayYmd);
   const [copySelectedItems, setCopySelectedItems] = useState([]);
@@ -498,6 +501,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   const closeDetailSession = () => {
     handleRenameSession();
+    setIsEditingItems(false);
     setDetailSession(null);
   };
 
@@ -1555,10 +1559,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))', bottom: 'calc(170px + env(safe-area-inset-bottom, 20px))' }}
           onClick={() => setAiResult(null)}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-full overflow-y-auto hide-scrollbar rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
-            <div className="flex items-center gap-2 mb-3">
+            className={`w-full max-w-sm max-h-full flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl overflow-hidden anim-rise`}>
+            {/* PINNED HEADER */}
+            <div className={`p-4 pb-3 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5`}>
               <h2 className={`h2 ${t.textMain}`}>Catat Makanan</h2>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <input type="time"
                   value={aiResult.time || ''}
                   onChange={(e) => setAiResult(r => ({ ...r, time: e.target.value }))}
@@ -1568,11 +1573,14 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                 <button onClick={() => setAiResult(null)} className={`p-2 rounded-xl ${t.btnBg}`}><X size={15} className={t.textMuted} /></button>
               </div>
             </div>
-            {aiResult.photoDataUrl && (
-              <div className="w-24 h-24 rounded-full overflow-hidden mx-auto mb-3 border-2 border-green-500/40">
-                <img src={aiResult.photoDataUrl} alt="foto" className="w-full h-full object-cover" />
-              </div>
-            )}
+
+            {/* SCROLLABLE BODY */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 hide-scrollbar min-h-0">
+              {aiResult.photoDataUrl && (
+                <div className="w-24 h-24 rounded-full overflow-hidden mx-auto border-2 border-green-500/40 shrink-0">
+                  <img src={aiResult.photoDataUrl} alt="foto" className="w-full h-full object-cover" />
+                </div>
+              )}
 
             {/* TOTAL KALORI & PKL (Desain identik dengan rincian sesi) */}
             {(() => {
@@ -1754,25 +1762,37 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               );})}
             </div>
 
-            <p className={`caption font-medium mb-2 ${t.textMuted}`}>Masukkan ke sesi:</p>
-            <div ref={sessionStripRef} className="flex gap-2 overflow-x-auto hide-scrollbar mb-4 -mx-1 px-1">
-              {activeSessions.map(s => (
-                <button key={s.id} data-session={s.id} onClick={() => setAiTargetSession(s.id)}
-                  className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-2xl body-md font-bold transition-all active:scale-95 ${aiTargetSession === s.id ? `${t.bgAccent} text-white shadow-glow` : `${t.bgCardSoft} ${t.textMuted}`}`}>
-                  <span className="text-base">{s.emoji}</span> {s.label}
-                </button>
-              ))}
+            <div>
+              <p className={`caption font-medium mb-2 ${t.textMuted}`}>Masukkan ke sesi:</p>
+              <div ref={sessionStripRef} className="flex gap-2 overflow-x-auto hide-scrollbar -mx-1 px-1">
+                {activeSessions.map(s => (
+                  <button key={s.id} data-session={s.id} onClick={() => setAiTargetSession(s.id)}
+                    className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-2xl body-md font-bold transition-all active:scale-95 ${aiTargetSession === s.id ? `${t.bgAccent} text-white shadow-glow` : `${t.bgCardSoft} ${t.textMuted}`}`}>
+                    <span className="text-base">{s.emoji}</span> {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <label className={`flex items-center gap-2 mb-4 p-3 rounded-xl border ${t.border} ${t.bgSunken} cursor-pointer`}>
-<input type="checkbox" checked={saveToDb} onChange={(e) => setSaveToDb(e.target.checked)} className="w-5 h-5 rounded accent-emerald-500" />
-               <span className={`caption font-medium ${t.textMain}`}>Simpan ke Database Custom</span>
+
+            <label className={`flex items-center gap-2 p-3 rounded-xl border ${t.border} ${t.bgSunken} cursor-pointer`}>
+              <input type="checkbox" checked={saveToDb} onChange={(e) => setSaveToDb(e.target.checked)} className="w-5 h-5 rounded accent-emerald-500" />
+              <span className={`caption font-medium ${t.textMain}`}>Simpan ke Database Custom</span>
             </label>
-            <button disabled={!aiResult.foods.length} onClick={confirmAiResult}
-              className={`w-full py-3 rounded-2xl ${t.bgAccent} body-lg shadow-glow disabled:opacity-40`}>
-              Catat {aiResult.foods.length} item
+          </div>
+
+          {/* PINNED FOOTER: TOMBOL SIMPAN SELALU TERLIHAT */}
+          <div className={`p-3.5 border-t ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} bg-black/5 dark:bg-white/5 shrink-0`}>
+            <button
+              disabled={!aiResult.foods.length}
+              onClick={confirmAiResult}
+              className={`w-full py-3.5 rounded-2xl ${t.bgAccent} text-white font-bold body-md shadow-glow disabled:opacity-40 flex items-center justify-center gap-2 active:scale-95 transition-all`}
+            >
+              <Check size={18} strokeWidth={2.5} />
+              <span>Simpan ke {activeSessions.find(s => s.id === aiTargetSession)?.label || 'Sesi'} ({aiResult.foods.length} item)</span>
             </button>
           </div>
         </div>
+      </div>
       )}
 
       {/* ===== SHEET DETAIL SESI (edit/hapus entri) ===== */}
@@ -1853,49 +1873,60 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               className={`w-full max-w-sm max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/80 border-white/10' : 'bg-white/80 border-black/10'} backdrop-blur-3xl shadow-2xl anim-rise`}>
               
               {/* FIXED HEADER */}
-              <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5 gap-2`}>
-                <div className="flex items-center flex-1 min-w-0 mr-1 relative group">
-                  <input
-                    type="text"
-                    value={sessionTitleInput}
-                    onChange={(e) => setSessionTitleInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleRenameSession(e.currentTarget.value);
-                        e.currentTarget.blur();
-                      }
-                    }}
-                    onBlur={(e) => handleRenameSession(e.target.value)}
-                    placeholder="Nama Sesi..."
-                    className={`bg-transparent outline-none h2 ${t.textMain} w-full pr-6 rounded-lg transition-colors border-b border-transparent focus:border-emerald-500`}
-                  />
-                  <Pencil size={13} className={`absolute right-1 ${t.textMuted} opacity-40 group-hover:opacity-80 pointer-events-none transition-opacity`} />
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {detailSession !== 'drink' && (
-                    <input type="time" 
-                      value={activeSlideTime}
-                      onChange={(e) => handleUpdateSlideTime(e.target.value)}
-                      onClick={(e) => { try { e.target.showPicker?.(); } catch {} }}
-                      className={`bg-transparent outline-none ${t.textMain} caption font-bold border ${t.border} rounded-lg px-2 py-1 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none cursor-pointer`} />
-                  )}
-                  <button
-                    onClick={() => handleRemoveSession(detailSession)}
-                    className="p-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 active:scale-95 transition-all"
-                    title="Hapus sesi hari ini"
-                    aria-label="Hapus sesi hari ini"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                  <button
-                    onClick={closeDetailSession}
-                    className={`p-2 rounded-xl ${t.btnBg} ${t.textMuted} hover:${t.textMain} active:scale-95 transition-all`}
-                    title="Tutup"
-                    aria-label="Tutup"
-                  >
-                    <X size={16} />
-                  </button>
+              <div className={`p-4 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shrink-0 bg-black/5`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 relative group max-w-full">
+                      <input
+                        type="text"
+                        value={sessionTitleInput}
+                        onChange={(e) => setSessionTitleInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleRenameSession(e.currentTarget.value);
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        onBlur={(e) => handleRenameSession(e.target.value)}
+                        placeholder="Nama Sesi..."
+                        className={`bg-transparent outline-none text-xl sm:text-2xl font-black ${t.textMain} w-full pr-7 rounded-lg transition-colors border-b border-transparent focus:border-emerald-500 truncate`}
+                      />
+                      <Pencil size={13} className={`absolute right-1 ${t.textMuted} opacity-40 group-hover:opacity-80 pointer-events-none transition-opacity shrink-0`} />
+                    </div>
+                    {detailSession !== 'drink' && (
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <label className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border ${t.border} ${theme === 'dark' ? 'bg-white/5' : 'bg-black/5'} cursor-pointer active:scale-95 transition-transform`}>
+                          <Clock size={12} className={t.textMuted} />
+                          <input
+                            type="time" 
+                            value={activeSlideTime}
+                            onChange={(e) => handleUpdateSlideTime(e.target.value)}
+                            onClick={(e) => { try { e.target.showPicker?.(); } catch {} }}
+                            className={`bg-transparent outline-none ${t.textMain} text-xs font-bold [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none cursor-pointer`}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                    <button
+                      onClick={() => handleRemoveSession(detailSession)}
+                      className="p-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 active:scale-95 transition-all"
+                      title="Hapus sesi hari ini"
+                      aria-label="Hapus sesi hari ini"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    <button
+                      onClick={closeDetailSession}
+                      className={`p-2 rounded-xl ${t.btnBg} ${t.textMuted} hover:${t.textMain} active:scale-95 transition-all`}
+                      title="Tutup"
+                      aria-label="Tutup"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2017,15 +2048,37 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                            );
                          })()}
 
-                         <div className="flex items-center justify-between mb-3">
+                         <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                            <h3 className={`h3 ${t.textMuted}`}>Daftar Menu {slides.length > 1 ? `(${slideIdx + 1}/${slides.length})` : ''}</h3>
-                           <button onClick={() => {
-                             setCopySourceSession(detailSession);
-                             setCopySourcePhoto(slide.photo || null);
-                             setCopySelectedItems(slide.items.map(i => i.id));
-                           }} className={`px-2.5 py-1 rounded-lg ${t.bgSunken} ${t.textAccent} text-xs font-bold flex items-center gap-1 active:scale-95 transition-transform`}>
-                             <Copy size={12} /> PINDAH / SALIN
-                           </button>
+                           <div className="flex items-center gap-1.5 shrink-0">
+                             <button onClick={() => {
+                               setCopySourceSession(detailSession);
+                               setCopySourcePhoto(slide.photo || null);
+                               setCopySelectedItems(slide.items.map(i => i.id));
+                               setCopyActionType('move');
+                             }} disabled={slide.items.length === 0} className={`px-2.5 py-1 rounded-lg ${t.bgSunken} ${t.textMuted} hover:${t.textMain} text-xs font-bold flex items-center gap-1 active:scale-95 transition-all disabled:opacity-40`} title="Pindahkan menu ke sesi lain">
+                               <ArrowRightLeft size={12} /> Pindah
+                             </button>
+                             <button onClick={() => {
+                               setCopySourceSession(detailSession);
+                               setCopySourcePhoto(slide.photo || null);
+                               setCopySelectedItems(slide.items.map(i => i.id));
+                               setCopyActionType('copy');
+                             }} disabled={slide.items.length === 0} className={`px-2.5 py-1 rounded-lg ${t.bgSunken} ${t.textMuted} hover:${t.textMain} text-xs font-bold flex items-center gap-1 active:scale-95 transition-all disabled:opacity-40`} title="Salin menu ke sesi lain">
+                               <Copy size={12} /> Salin
+                             </button>
+                             <button onClick={() => setIsEditingItems(prev => !prev)} disabled={slide.items.length === 0} className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 active:scale-95 transition-all disabled:opacity-40 ${isEditingItems ? `${t.bgAccent} text-white shadow-sm` : `${t.bgSunken} ${t.textAccent}`}`} title={isEditingItems ? 'Selesai mengubah menu' : 'Edit porsi dan hapus menu'}>
+                               {isEditingItems ? (
+                                 <>
+                                   <Check size={12} strokeWidth={2.5} /> Selesai
+                                 </>
+                               ) : (
+                                 <>
+                                   <Pencil size={12} /> Edit
+                                 </>
+                               )}
+                             </button>
+                           </div>
                          </div>
                          <div className="space-y-2">
                            {slide.items.map((e) => {
@@ -2093,35 +2146,44 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                                      </div>
 
                                      <div className="shrink-0 flex items-center gap-2">
-                                       <div className="flex flex-col items-center gap-0.5">
-                                         <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken}`}>
-                                           <SwipeInput
-                                             value={qty}
-                                             min={0}
-                                             onChange={(newQty) => {
-                                               const targetUnitWeight = getItemUnitWeight(e, unit);
-                                               const newGrams = Math.round(newQty * targetUnitWeight * 10) / 10;
-                                               updateItemGrams(newGrams, unit);
-                                             }}
-                                             className={`w-10 bg-transparent body-md outline-none no-spinners font-bold text-center ${t.textMain}`}
-                                           />
+                                       {isEditingItems ? (
+                                         <>
+                                           <div className="flex flex-col items-center gap-0.5">
+                                             <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken}`}>
+                                               <SwipeInput
+                                                 value={qty}
+                                                 min={0}
+                                                 onChange={(newQty) => {
+                                                   const targetUnitWeight = getItemUnitWeight(e, unit);
+                                                   const newGrams = Math.round(newQty * targetUnitWeight * 10) / 10;
+                                                   updateItemGrams(newGrams, unit);
+                                                 }}
+                                                 className={`w-10 bg-transparent body-md outline-none no-spinners font-bold text-center ${t.textMain}`}
+                                               />
+                                             </div>
+                                             <select
+                                               value={unit}
+                                               onChange={(ev) => changeItemUnit(ev.target.value)}
+                                               className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}
+                                             >
+                                               {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
+                                             </select>
+                                           </div>
+                                           <button 
+                                             onClick={() => removeEntry(detailSession, e.id)} 
+                                             className="p-1.5 rounded-xl text-red-400 shrink-0 hover:bg-red-500/10 active:scale-95 transition-all"
+                                             title="Hapus dari jadwal & kembalikan stok"
+                                             aria-label="Hapus menu"
+                                           >
+                                             <X size={16} />
+                                           </button>
+                                         </>
+                                       ) : (
+                                         <div className={`px-2.5 py-1 rounded-xl ${t.bgSunken} flex flex-col items-center justify-center min-w-[42px]`}>
+                                           <span className={`body-md font-bold ${t.textMain} tabular-nums leading-tight`}>{qty}</span>
+                                           <span className={`text-[10px] font-bold ${t.textMuted} leading-tight`}>{unit}</span>
                                          </div>
-                                         <select
-                                           value={unit}
-                                           onChange={(ev) => changeItemUnit(ev.target.value)}
-                                           className={`bg-transparent text-[10px] font-bold outline-none text-center cursor-pointer ${t.textMuted}`}
-                                         >
-                                           {UNIT_OPTIONS.map(u => <option key={u} value={u} className={theme === 'dark' ? 'bg-[#0a1510]' : 'bg-white'}>{u}</option>)}
-                                         </select>
-                                       </div>
-                                       <button 
-                                         onClick={() => removeEntry(detailSession, e.id)} 
-                                         className="p-1.5 rounded-xl text-red-400 shrink-0 hover:bg-red-500/10 transition-colors"
-                                         title="Hapus dari jadwal & kembalikan stok"
-                                         aria-label="Hapus menu"
-                                       >
-                                         <X size={16} />
-                                       </button>
+                                       )}
                                      </div>
                                    </div>
 
@@ -2208,7 +2270,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm no-swipe" onClick={() => { setCopySourceSession(null); setCopyTargetSessions([]); }}>
           <div onClick={(e) => e.stopPropagation()}
             className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/90 border-white/10' : 'bg-white/90 border-black/10'} backdrop-blur-3xl shadow-2xl p-5 anim-rise`}>
-            <h2 className={`h2 ${t.textMain} mb-4`}>Pindahkan / Salin Menu</h2>
+            <h2 className={`h2 ${t.textMain} mb-4`}>
+              {copyActionType === 'move' ? 'Pindahkan Menu' : copyActionType === 'copy' ? 'Salin Menu' : 'Pindahkan / Salin Menu'}
+            </h2>
             
             <div className="flex-1 overflow-y-auto">
               <div className="flex items-center justify-between mb-2">
@@ -2264,8 +2328,16 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
             <div className="flex gap-2 mt-4 pt-4 border-t border-black/10 dark:border-white/10 shrink-0">
               <button onClick={() => { setCopySourceSession(null); setCopyTargetSessions([]); }} className={`flex-1 py-3 rounded-2xl ${t.btnBg} ${t.textMain} body-md font-bold`}>Batal</button>
-              <button onClick={() => executeCopyOrMove(true)} disabled={copyTargetSessions.length === 0 || copySelectedItems.length === 0} className={`flex-1 py-3 rounded-2xl bg-orange-500 text-white body-md font-bold shadow-sm disabled:opacity-50`}>Pindah</button>
-              <button onClick={() => executeCopyOrMove(false)} disabled={copyTargetSessions.length === 0 || copySelectedItems.length === 0} className={`flex-1 py-3 rounded-2xl ${t.bgAccent} text-white body-md font-bold shadow-sm disabled:opacity-50`}>Salin</button>
+              {copyActionType === 'move' ? (
+                <button onClick={() => executeCopyOrMove(true)} disabled={copyTargetSessions.length === 0 || copySelectedItems.length === 0} className={`flex-1 py-3 rounded-2xl bg-orange-500 text-white body-md font-bold shadow-sm disabled:opacity-50 active:scale-95 transition-transform`}>Pindah</button>
+              ) : copyActionType === 'copy' ? (
+                <button onClick={() => executeCopyOrMove(false)} disabled={copyTargetSessions.length === 0 || copySelectedItems.length === 0} className={`flex-1 py-3 rounded-2xl ${t.bgAccent} text-white body-md font-bold shadow-sm disabled:opacity-50 active:scale-95 transition-transform`}>Salin</button>
+              ) : (
+                <>
+                  <button onClick={() => executeCopyOrMove(true)} disabled={copyTargetSessions.length === 0 || copySelectedItems.length === 0} className={`flex-1 py-3 rounded-2xl bg-orange-500 text-white body-md font-bold shadow-sm disabled:opacity-50 active:scale-95 transition-transform`}>Pindah</button>
+                  <button onClick={() => executeCopyOrMove(false)} disabled={copyTargetSessions.length === 0 || copySelectedItems.length === 0} className={`flex-1 py-3 rounded-2xl ${t.bgAccent} text-white body-md font-bold shadow-sm disabled:opacity-50 active:scale-95 transition-transform`}>Salin</button>
+                </>
+              )}
             </div>
           </div>
         </div>
