@@ -185,8 +185,13 @@ export const extractLyfitDay = (yearDays, ymd) => {
 
   const steps = Number(bio.steps) || 0;
   const stepsKcal = Math.round(steps * 0.04);
-  const burnedKcal = Number(bio.activityCalories) || 0;
+  const burnedKcal = Math.max(
+    Number(bio.activityCalories) || 0,
+    Number(bio.activityCaloriesFloor) || 0
+  );
   const floorKcal = Number(bio.activityCaloriesFloor) || 0;
+
+  const effectiveWorkoutCount = Math.max(totalExercises, completedSessions);
 
   return {
     burnedKcal,
@@ -196,8 +201,8 @@ export const extractLyfitDay = (yearDays, ymd) => {
     bmr: Number(bio.bmr) || null,
     weight: Number(bio.weight) || null,
     height: Number(bio.height) || null,
-    workoutCount: totalExercises,
-    sessionCount: completedSessions || (totalExercises > 0 ? 1 : 0),
+    workoutCount: effectiveWorkoutCount,
+    sessionCount: completedSessions || (effectiveWorkoutCount > 0 ? 1 : 0),
     workoutNames: workouts.map((w) => w.programName || w.name || w.title || w.workoutName || w.programId).filter(Boolean),
     nutritionOverride: bio._manualFlags?.nutritionCalories ? (Number(bio.nutritionCalories) || null) : null,
     workouts,

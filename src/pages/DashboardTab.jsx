@@ -7,7 +7,7 @@ import TargetSettingsModal from '../components/TargetSettingsModal';
 import BiometricSettingsModal from '../components/BiometricSettingsModal';
 import LabResultsCard from '../components/LabResultsCard';
 import { nutrientSources } from '../utils/nutrientSources';
-import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS, calcTEF, calcDynamicTarget } from '../data/nutrition';
+import { NUTRIENTS, DIET_PROFILES, computeDayTotals, getSmartWarnings, getEnergyBalance, MINIMUM_TARGETS, calcTEF, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { STATUS, statusFor, MACRO_COLORS } from '../theme';
 import { MEAL_SESSIONS, getLocalYMD, getMonthKey } from '../data/constants';
 import { pushActivityOverrideToLogym } from '../utils/biometricSync';
@@ -95,55 +95,34 @@ const DashboardTab = ({
   }
 
   const today = daysMap[todayYmd];
-  const totals = useMemo(() => computeDayTotals(today), [today]);
-  const bmrFloor = targets?.bmr || 0;
-  const bmrBase = bmrFloor || 1600;
+  const summary = useMemo(() => computeDaySummary({
+    day: today,
+    targets,
+    lyfitDay: lyfitToday,
+    profile,
+    logymUser: !!logymUser,
+  }), [today, targets, lyfitToday, profile, logymUser]);
 
-  // TEF (Thermic Effect of Food) dihitung dari makronutrisi makanan yang dicatat hari ini
-  const tefCalc = useMemo(() => {
-    return calcTEF({
-      protein: totals.protein,
-      carbs: totals.carbs,
-      fat: totals.fat,
-      kcal: totals.kcal,
-      bmr: bmrBase,
-    });
-  }, [totals, bmrBase]);
-
-  const manualBurn = profile?.settings?.manualBurnKcal || 0;
-  const stepsCount = lyfitToday?.steps || 0;
-  const neatKcal = lyfitToday?.stepsKcal ?? Math.round(stepsCount * 0.04);
-  const workoutCount = lyfitToday?.workoutCount || 0;
-  const sessionCount = lyfitToday?.sessionCount || (workoutCount > 0 ? 1 : 0);
-  const bmrDisplay = lyfitToday?.bmr || bmrFloor || 1600;
-
-  // FIX SINKRONISASI: Jika ada Logym, gunakan total pembakaran nyata dari Logym (BMR + langkah + workout + TEF).
-  // Jika tidak ada data Logym, gunakan BMR + TEF lokal makanan (atau manualBurn jika diisi).
-  const burnedTotal = logymUser 
-    ? (lyfitToday?.burnedKcal || (bmrFloor + tefCalc.total))
-    : Math.max(bmrFloor + tefCalc.total, manualBurn);
-
-  const eatKcal = Math.max(0, burnedTotal - bmrDisplay - neatKcal - tefCalc.total);
-
-  // Kalori Dimakan selalu ditarik dari "Tab Catat" (totals.kcal dari rekam makanan lokal Lomeal).
-  const displayKcal = totals.kcal;
-
-  // Target kalori makan harian fleksibel (Calorie Cycling):
-  // Baseline hari istirahat stabil di targets.kcal (~2000-2300 kkal).
-  // Pada hari latihan / aktivitas tinggi (burnedTotal > baseTdee), target naik proporsional
-  // untuk mengisi glikogen dan mendukung sintesis otot.
-  const baseTdee = targets.tdee || targets.kcal || 0;
-  const programDelta = (targets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
-  const dynamicTarget = logymUser
-    ? calcDynamicTarget(targets, burnedTotal, profile?.physical?.gender)
-    : (targets.kcal || 2000);
-  const targetKcal = dynamicTarget;
-
-  const remaining = Math.round(targetKcal - displayKcal);
+  const totals = summary.totals;
+  const bmrBase = summary.bmr;
+  const bmrDisplay = summary.bmr;
+  const tefCalc = summary.tefCalc;
+  const stepsCount = summary.steps;
+  const neatKcal = summary.neatKcal;
+  const workoutCount = summary.workoutCount;
+  const sessionCount = summary.sessionCount;
+  const burnedTotal = summary.burnedTotal;
+  const eatKcal = summary.eatKcal;
+  const displayKcal = summary.eatenKcal;
+  const baseTdee = summary.baseTdee;
+  const programDelta = summary.programDelta;
+  const dynamicTarget = summary.dynamicTarget;
+  const targetKcal = summary.targetKcal;
+  const remaining = summary.remainingKcal;
   const ringProgress = targetKcal > 0 ? Math.min(1, displayKcal / targetKcal) : 0;
-  const burnedBonus = Math.max(0, burnedTotal - baseTdee);
-  const balance = getEnergyBalance(displayKcal, baseTdee, burnedBonus);
-  const isBulking = programDelta > 0;
+  const burnedBonus = summary.burnedBonus;
+  const balance = summary.balance;
+  const isBulking = summary.isBulking;
   let ringColor;
   let remainingText;
   
@@ -408,7 +387,7 @@ const DashboardTab = ({
                  WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)'
                }}
              >
-                 <img src="/bg-lomeal-coach.webp" alt="" className={`w-full h-full object-cover object-top origin-top scale-[1.3] opacity-90`} />
+                 <img src="/bg-lomeal-coach.webp" alt="" className={`w-full h-full object-cover object-top origin-top scale-[1.45] translate-x-10 opacity-90`} />
              </div>
 
              {/* Konten Kartu */}

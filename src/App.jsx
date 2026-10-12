@@ -977,6 +977,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
         daysMap={daysMap}
         ensureMonth={ensureMonth}
         todayYmd={todayYmd}
+        lyfitToday={dashboardLyfitToday}
+        lyfitYearData={lyfitYearData}
         domusItems={domusItems}
         aiKey={effectiveAiKeys}
         onUnreadChange={setHasUnreadLomyChat}

@@ -141,7 +141,7 @@ assert.equal(tgLogym.tdee, Math.round(1724 * 1.2)); // 2069 kcal
 assert.equal(tgLogym.kcal, 2069 + 240); // 2309 kcal (rest day)
 
 // Dynamic Target (Calorie Cycling)
-import { calcDynamicTarget } from './nutrition.js';
+import { calcDynamicTarget, computeDaySummary } from './nutrition.js';
 // On rest day (burn <= baseTdee or burn = 0) -> target is base target
 assert.equal(calcDynamicTarget(tgLogym, 0), tgLogym.kcal);
 assert.equal(calcDynamicTarget(tgLogym, 2000), tgLogym.kcal);
@@ -149,5 +149,36 @@ assert.equal(calcDynamicTarget(tgLogym, 2000), tgLogym.kcal);
 // On workout day (burn 2666 > baseTdee 2069) -> target expands dynamically!
 assert.equal(calcDynamicTarget(tgLogym, 2666), 2666 + 240); // 2906 kcal!
 
+// ---------- computeDaySummary (SSOT) ----------
+const testDay = {
+  meals: {
+    lunch: [entry(600, { nutrition: { ...EMPTY_NUTRITION, kcal: 600, protein: 40, carbs: 60, fat: 20 } })],
+    dinner: [entry(400, { nutrition: { ...EMPTY_NUTRITION, kcal: 400, protein: 30, carbs: 40, fat: 10 } })],
+  }
+};
+const summaryTest = computeDaySummary({
+  day: testDay,
+  targets: tgLogym,
+  lyfitDay: {
+    bmr: 1700,
+    steps: 5000,
+    stepsKcal: 200,
+    workoutCount: 4,
+    sessionCount: 1,
+    burnedKcal: 2400,
+  },
+  profile: maleBio,
+  logymUser: true,
+});
+assert.equal(summaryTest.eatenKcal, 1000);
+assert.equal(summaryTest.burnedTotal, 2400);
+assert.equal(summaryTest.bmr, 1700);
+assert.equal(summaryTest.steps, 5000);
+assert.equal(summaryTest.workoutCount, 4);
+assert.equal(summaryTest.netDelta, 1000 - 2400); // -1400 kcal (real deficit!)
+assert.equal(summaryTest.dynamicTarget, 2400 + 240); // 2640 kcal
+assert.equal(summaryTest.remainingKcal, 2640 - 1000); // 1640 kcal remaining
+
 console.log('nutrition OK (all tests passed)');
+
 

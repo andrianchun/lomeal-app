@@ -7,12 +7,12 @@ import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS, MONTH_NAMES_ID, getMonthKey } from '../data/constants';
-import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR, calcDynamicTarget } from '../data/nutrition';
+import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
 import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, toDataUrl, PHOTO_KEEPSAKE, PHOTO_THUMB } from '../utils/aiFood';
-import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto, getDayPhotos } from '../utils/foodLog';
+import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto, getDayPhotos, dataUrlToBlob } from '../utils/foodLog';
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
 import { isNativeApp, captureToFile } from '../utils/nativeCamera';
@@ -352,7 +352,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // dan thumbnail ~30KB (dipakai kartu sesi & strip). Tanpa thumb, tiap kartu menarik berkas
   // arsip penuh dan sehari dengan 5 foto habis ~2MB kuota tiap dibuka.
   const uploadPhotoPair = async (sessionId, source) => {
-    const blob = typeof source === 'string' ? await (await fetch(source)).blob() : source;
+    const blob = typeof source === 'string' ? dataUrlToBlob(source) : source;
     const [full, thumb] = await Promise.all([
       compressImage(blob, PHOTO_KEEPSAKE),
       compressImage(blob, PHOTO_THUMB),
@@ -498,29 +498,27 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   const isToday = selectedYmd === todayYmd;
   const isFuture = selectedYmd > todayYmd;
-  const totals = useMemo(() => computeDayTotals(day, !isFuture), [day, isFuture]);
   
   // Base targets: Untuk hari ini (live) & tanggal depan, selalu pakai profile.targets terbaru.
   // Untuk tanggal lampau, pakai day.targetSnapshot (arsip target hari itu).
   const targets = (isToday || isFuture ? profile?.targets : (day.targetSnapshot || profile?.targets)) || {};
-  const dietGoal = targets.dietGoal || profile?.dietGoal || 'maintenance';
-  const baseTdee = targets.tdee || targets.kcal || 0;
-  const kcalDiff = (targets.kcal || 0) - baseTdee;
-  
-  // Hitung target kalori dinamis (Calorie Cycling sinkron dengan DashboardTab)
   const selectedLyfitDay = extractLyfitDay(lyfitYearData, selectedYmd) || (isToday ? lyfitToday : null);
-  const bmrBase = selectedLyfitDay?.bmr || targets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
-  const tefDay = calcTEF({
-    protein: totals.protein,
-    carbs: totals.carbs,
-    fat: totals.fat,
-    kcal: totals.kcal,
-    bmr: bmrBase
-  }).total;
-  const burnedTotal = logymUser ? (selectedLyfitDay?.burnedKcal || (bmrBase + tefDay)) : (baseTdee || 0);
-  const targetKcal = logymUser
-    ? calcDynamicTarget(targets, burnedTotal, profile?.physical?.gender)
-    : (targets.kcal || 2000);
+
+  const summary = useMemo(() => computeDaySummary({
+    day,
+    targets,
+    lyfitDay: selectedLyfitDay,
+    profile,
+    logymUser: !!logymUser,
+    isFuture,
+  }), [day, targets, selectedLyfitDay, profile, logymUser, isFuture]);
+
+  const totals = summary.totals;
+  const dietGoal = targets.dietGoal || profile?.dietGoal || 'maintenance';
+  const baseTdee = summary.baseTdee;
+  const kcalDiff = summary.programDelta;
+  const burnedTotal = summary.burnedTotal;
+  const targetKcal = summary.targetKcal;
 
   // ---------- Date Strip horizontal (±30 hari) ----------
   const dates = useMemo(() => {
@@ -605,7 +603,18 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           }));
         }
       }
-      meals[detailSession] = draftMeals;
+      const sessionPhotos = photosOf(detailSession);
+      let finalizedDraftMeals = draftMeals;
+      if (sessionPhotos.length > 0) {
+        const validPhotoIds = new Set(sessionPhotos.map(p => p.id));
+        finalizedDraftMeals = finalizedDraftMeals.map(item => {
+          if (sessionPhotos.length === 1 || !item.photoId || !validPhotoIds.has(item.photoId)) {
+            return { ...item, photoId: sessionPhotos[0].id };
+          }
+          return item;
+        });
+      }
+      meals[detailSession] = finalizedDraftMeals;
     }
 
     const newDay = { ...currentDay, meals };
@@ -837,12 +846,14 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // pencet "Catat". Sesi target cuma di-auto-pilih untuk item PERTAMA di batch; abis itu
   // ikut pilihan user biar gak ke-reset tiap nambah item baru.
   const appendAiResult = (newFoods, meta = {}) => {
-    setAiResult(prev => prev ? { ...prev, foods: [...prev.foods, ...withBase(newFoods)] } : { foods: withBase(newFoods), time: new Date().toTimeString().slice(0, 5), ...meta });
+    setAiResult(prev => prev ? { ...prev, ...meta, foods: [...prev.foods, ...withBase(newFoods)] } : { foods: withBase(newFoods), time: new Date().toTimeString().slice(0, 5), ...meta });
   };
 
   const runMagicPrompt = async (forcedText = null) => {
     const text = typeof forcedText === 'string' ? forcedText.trim() : chatText.trim();
     if (!text || aiBusy) return;
+
+    chatInputRef.current?.blur();
 
     if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId());
 
@@ -957,9 +968,19 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     const file = e.target.files?.[0];
     e.target.value = null; // langsung direset: foto yang sama masih bisa dipilih lagi tanpa nunggu upload
     if (!file) return;
-    // File mentah langsung dilempar: preview muncul seketika, kompresi ke versi
-    // kenang-kenangan (1600px) dan upload-nya jalan di belakang (addPhoto sudah pegang error-nya).
-    addPhoto(sessionId, file);
+    const newPhotoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    addPhoto(sessionId, file, newPhotoId);
+
+    // Linkkan item di sesi ini ke foto yang baru diunggah
+    if (isEditingItems && draftMeals !== null) {
+      setDraftMeals(prev => (prev || []).map(item => (!item.photoId ? { ...item, photoId: newPhotoId } : item)));
+    } else {
+      const currentDay = daysMap[selectedYmd] || day || {};
+      const meals = { ...(currentDay.meals || {}) };
+      const currentItems = meals[sessionId] || [];
+      const updatedItems = currentItems.map(item => (!item.photoId ? { ...item, photoId: newPhotoId } : item));
+      persistDay({ ...currentDay, meals: { ...meals, [sessionId]: updatedItems } });
+    }
   };
 
   const handleReanalyzeSessionPhoto = async (sessionId, photo) => {
@@ -1776,15 +1797,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         </div>
       </div>
 
-      {/* ===== SHEET KONFIRMASI HASIL Lomy (batch — smart bar tetap aktif di bawahnya buat nambah item lagi) =====
-          Mulai di bawah header (bukan top-0) biar gak numpuk header, dan belakangnya di-blur+dim
-          + gak bisa di-scroll selama sheet ini kebuka (lihat useEffect scroll-lock di atas). */}
+      {/* ===== MODAL KONFIRMASI CATAT MAKANAN (Lomy / Batch) =====
+          Full-screen backdrop menutup layar rapi tanpa celah gantung di bawah. */}
       {aiResult && (
-        <div id="ai-result-sheet" className="fixed inset-x-0 z-40 flex flex-col justify-end items-center p-4 no-swipe bg-black/40 backdrop-blur-sm"
-          style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))', bottom: 'calc(170px + env(safe-area-inset-bottom, 20px))' }}
+        <div id="ai-result-sheet" className="fixed inset-0 z-50 flex items-center justify-center p-4 no-swipe bg-black/60 backdrop-blur-sm"
           onClick={() => setAiResult(null)}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-full flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl overflow-hidden anim-rise`}>
+            className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl overflow-hidden anim-rise`}>
             {/* PINNED HEADER */}
             <div className={`p-4 pb-3 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5`}>
               <h2 className={`h2 ${t.textMain}`}>Catat Makanan</h2>
@@ -1983,6 +2002,15 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               );})}
             </div>
 
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className={`w-full py-2.5 px-3 rounded-2xl border border-dashed ${t.border} ${t.bgSunken} hover:${t.textMain} ${t.textMuted} caption font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all`}
+            >
+              <Plus size={15} className={t.textAccent} />
+              <span>Tambah Makanan Lain</span>
+            </button>
+
             <div>
               <p className={`caption font-medium mb-2 ${t.textMuted}`}>Masukkan ke sesi:</p>
               <div ref={sessionStripRef} className="flex gap-2 overflow-x-auto hide-scrollbar -mx-1 px-1">
@@ -2025,10 +2053,14 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         const sessionPhotos = photosOf(detailSession);
         let sessionItems = (isEditingItems && draftMeals !== null) ? draftMeals : (day.meals?.[detailSession] || []);
         
-        // Auto-migrate data lama: jika ada foto tapi item Lomy tidak punya photoId, masukkan ke foto pertama
+        // Auto-migrate / auto-link foto sesi:
+        // 1. Kalau cuma ada 1 foto di sesi ini: SEMUA item otomatis nempel ke foto itu (tidak boleh terpisah jadi 2 slide).
+        // 2. Kalau ada >1 foto: item yang belum punya photoId atau photoId-nya orphan (tidak cocok ke foto mana pun)
+        //    dimasukkan ke foto pertama.
         if (sessionPhotos.length > 0) {
+          const validPhotoIds = new Set(sessionPhotos.map(p => p.id));
           sessionItems = sessionItems.map(item => {
-            if (!item.photoId && item.source === 'ai') {
+            if (sessionPhotos.length === 1 || !item.photoId || !validPhotoIds.has(item.photoId)) {
               return { ...item, photoId: sessionPhotos[0].id };
             }
             return item;
@@ -2225,7 +2257,19 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                       ) : isEditingItems ? (
                         <div className={`relative h-24 w-full shrink-0 flex items-center justify-center ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
                            <div className="flex items-center gap-3">
-                             <button onClick={() => openCamera((file) => addPhoto(detailSession, file), detailCameraRef)}
+                             <button onClick={() => openCamera((file) => {
+                                const newPhotoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                                addPhoto(detailSession, file, newPhotoId);
+                                if (isEditingItems && draftMeals !== null) {
+                                  setDraftMeals(prev => (prev || []).map(item => (!item.photoId ? { ...item, photoId: newPhotoId } : item)));
+                                } else {
+                                  const currentDay = daysMap[selectedYmd] || day || {};
+                                  const meals = { ...(currentDay.meals || {}) };
+                                  const currentItems = meals[detailSession] || [];
+                                  const updatedItems = currentItems.map(item => (!item.photoId ? { ...item, photoId: newPhotoId } : item));
+                                  persistDay({ ...currentDay, meals: { ...meals, [detailSession]: updatedItems } });
+                                }
+                              }, detailCameraRef)}
                                className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform border ${t.border}`} aria-label="Jepret foto">
                                <Camera size={20} />
                              </button>

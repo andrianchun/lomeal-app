@@ -8,7 +8,8 @@ import { makeEntry } from '../utils/foodLog';
 import renderMiniMarkdown from '../utils/renderMiniMarkdown';
 import { db } from '../firebase';
 import useWakeLock from '../hooks/useWakeLock';
-import { EMPTY_NUTRITION, NUTRIENTS } from '../data/nutrition';
+import { EMPTY_NUTRITION, NUTRIENTS, computeDaySummary } from '../data/nutrition';
+import { extractLyfitDay } from '../utils/lyfitSync';
 import { getLocalYMD, getMonthKey } from '../data/constants';
 
 const sendBackgroundNotification = async (title, body) => {
@@ -81,6 +82,8 @@ export default function LomyAIChat({
   daysMap,
   ensureMonth,
   todayYmd = getLocalYMD(),
+  lyfitToday = null,
+  lyfitYearData = null,
   domusItems = [],
   aiKey,
   onUnreadChange,
@@ -294,31 +297,46 @@ export default function LomyAIChat({
     const targets = profile?.targets || {};
     const labelOf = (k) => NUTRIENTS.find((n) => n.key === k)?.label || k;
 
-    const totalsFor = (ymd) => {
-      const out = {};
-      for (const items of Object.values(daysMap?.[ymd]?.meals || {})) {
-        for (const it of items || []) {
-          for (const k of KEYS) out[k] = (out[k] || 0) + (Number(it.nutrition?.[k]) || 0);
-        }
-      }
-      return out;
-    };
+    // Single Source of Truth hari ini
+    const todayDay = daysMap?.[todayYmd];
+    const todaySummary = computeDaySummary({
+      day: todayDay,
+      targets,
+      lyfitDay: lyfitToday,
+      profile,
+      logymUser: !!logymUser,
+    });
 
-    const today = totalsFor(todayYmd);
+    const todayTotals = todaySummary.totals;
     const todayLine = KEYS.map((k) => {
-      const v = Math.round(today[k] || 0);
+      const v = Math.round(todayTotals[k] || 0);
       return targets[k] ? `${labelOf(k)}: ${v}/${Math.round(targets[k])}` : `${labelOf(k)}: ${v}`;
     }).join(', ');
 
+    // Single Source of Truth 6 hari sebelumnya
     const week = [];
     for (let i = 6; i >= 1; i--) {
       const ymd = shiftYmd(todayYmd, -i);
-      const tt = totalsFor(ymd);
-      if (!tt.kcal) { week.push(`${ymd}: tidak ada catatan`); continue; }
-      week.push(`${ymd}: ${KEYS.map((k) => `${labelOf(k)} ${Math.round(tt[k] || 0)}`).join(', ')}`);
+      const pastDay = daysMap?.[ymd];
+      const pastLyfit = extractLyfitDay(lyfitYearData, ymd);
+      const pastSum = computeDaySummary({
+        day: pastDay,
+        targets: pastDay?.targetSnapshot || targets,
+        lyfitDay: pastLyfit,
+        profile,
+        logymUser: !!logymUser,
+      });
+
+      if (!pastSum.eatenKcal && !pastSum.burnedTotal) {
+        week.push(`${ymd}: tidak ada catatan aktivitas/makanan`);
+        continue;
+      }
+      week.push(
+        `${ymd}: Dimakan ${pastSum.eatenKcal} kkal, Total Dibakar ${pastSum.burnedTotal} kkal (Net Delta: ${pastSum.netDelta > 0 ? '+' : ''}${pastSum.netDelta} kkal) | Makro: P ${Math.round(pastSum.totals.protein)}g, K ${Math.round(pastSum.totals.carbs)}g, L ${Math.round(pastSum.totals.fat)}g`
+      );
     }
 
-    const eaten = Object.values(daysMap?.[todayYmd]?.meals || {}).flat().map((e) => e.name).slice(0, 20);
+    const eaten = Object.values(todayDay?.meals || {}).flat().map((e) => e.name).slice(0, 25);
 
     const domusStockStr = domusItems && domusItems.length > 0
       ? domusItems.slice(0, 30).map(d => `${d.name} (${d.quantity || 1} ${d.unit || 'pcs'})`).join(', ')
@@ -332,23 +350,44 @@ export default function LomyAIChat({
       ? 'Laki-laki / Pria (Gunakan sapaan "Bro" / "Kak" atau namanya)'
       : 'Tidak spesifik (Gunakan nama langsung atau "kamu")';
 
+    const programGoal = profile?.dietGoal || targets?.dietGoal || 'maintenance';
+    const goalText = programGoal === 'cutting' ? 'Cutting (Defisit kalori)' : programGoal === 'bulk' ? 'Bulk (Surplus kalori)' : 'Maintenance (Kalori seimbang)';
+
     return [
       `Nama Pengguna: ${userName}`,
       `Gender Pengguna: ${genderLabel}`,
       profile?.physical?.weight ? `Berat Badan: ${profile.physical.weight} kg` : null,
       profile?.physical?.height ? `Tinggi Badan: ${profile.physical.height} cm` : null,
       `Tanggal hari ini: ${todayYmd}`,
-      profile?.dietProfile ? `Program diet: ${profile.dietProfile}` : null,
+      profile?.dietProfile ? `Program diet makro: ${profile.dietProfile}` : null,
+      `Fase program kalori: ${goalText}`,
       profile?.goal ? `Target utama: ${profile.goal}` : null,
       asList(profile?.medicalHistory).length ? `Riwayat medis: ${asList(profile.medicalHistory).join(', ')}` : null,
       asList(profile?.allergies).length ? `Alergi/Pantangan: ${asList(profile.allergies).join(', ')}` : null,
-      targets.kcal ? `Target harian: ${KEYS.filter((k) => targets[k]).map((k) => `${labelOf(k)} ${Math.round(targets[k])}`).join(', ')}` : null,
-      `Asupan hari ini — ${todayLine}`,
-      eaten.length ? `Yang sudah dimakan hari ini: ${eaten.join(', ')}` : 'Belum ada makanan yang dicatat hari ini.',
-      `6 hari sebelumnya:\n${week.join('\n')}`,
+      targets.kcal ? `Target nutrisi harian: ${KEYS.filter((k) => targets[k]).map((k) => `${labelOf(k)} ${Math.round(targets[k])}`).join(', ')}` : null,
+      '',
+      `=== RINGKASAN ENERGI & METABOLISME HARI INI (SINGLE SOURCE OF TRUTH APLIKASI) ===`,
+      `- Total Kalori Dimakan (Asupan Makanan Terdata): ${todaySummary.eatenKcal} kkal`,
+      `- Total Kalori Dibakar (TDEE Riil): ${todaySummary.burnedTotal} kkal`,
+      `  * Rincian 4 Komponen Pembakaran:`,
+      `    1. BMR (Metabolisme Basal / Istirahat Tubuh): ${todaySummary.bmr} kkal`,
+      `    2. TEF (Efek Termik Pengolahan Makanan): ${todaySummary.tef} kkal`,
+      `    3. NEAT (Langkah / Gerak Harian ${todaySummary.steps.toLocaleString('id-ID')} langkah): ${todaySummary.neatKcal} kkal`,
+      `    4. EAT (Latihan & Olahraga Logym ${todaySummary.workoutCount} gerakan, ${todaySummary.sessionCount} sesi): ${todaySummary.eatKcal} kkal`,
+      `- Target Asupan Kalori Hari Ini: ${todaySummary.targetKcal} kkal (Target dasar istirahat: ${todaySummary.baseTdee} kkal, ${todaySummary.targetKcal !== todaySummary.baseTdee ? 'naik karena aktivitas fisik/Calorie Cycling' : 'stabil'})`,
+      `- Sisa Kalori Terhadap Target Makan: ${todaySummary.remainingKcal >= 0 ? `${todaySummary.remainingKcal} kkal tersisa` : `${Math.abs(todaySummary.remainingKcal)} kkal melebihi target`}`,
+      `- Keseimbangan Energi & Net Metabolisme:`,
+      `  * Net Metabolisme Riil (Kalori Dimakan - Total Kalori Dibakar): ${todaySummary.netDelta > 0 ? `+${todaySummary.netDelta} kkal (SURPLUS riil metabolisme)` : `${todaySummary.netDelta} kkal (DEFISIT riil metabolisme)`}`,
+      `  * Status Kepatuhan: ${todaySummary.balance.state.toUpperCase()} (Fase: ${goalText})`,
+      '',
+      `Rincian Nutrisi Dimakan Hari Ini: ${todayLine}`,
+      eaten.length ? `Daftar makanan yang sudah dicatat hari ini: ${eaten.join(', ')}` : 'Belum ada makanan yang dicatat hari ini.',
+      '',
+      `Riwayat 6 hari sebelumnya:\n${week.join('\n')}`,
+      '',
       `Stok bahan makanan di dapur (Domus):\n${domusStockStr}`,
     ].filter(Boolean).join('\n');
-  }, [daysMap, todayYmd, profile, user, domusItems]);
+  }, [daysMap, todayYmd, profile, user, domusItems, lyfitToday, lyfitYearData, logymUser]);
 
   const handleNewChat = () => {
     setActiveSessionId(null);

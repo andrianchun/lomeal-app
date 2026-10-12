@@ -52,20 +52,42 @@ export const saveDay = async (uid, ymd, { photos, ...dayData }) => {
   }
 };
 
+export const dataUrlToBlob = (dataUrl) => {
+  if (!dataUrl) return null;
+  if (dataUrl instanceof Blob) return dataUrl;
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
+    return new Blob([dataUrl]);
+  }
+  try {
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/webp';
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  } catch (err) {
+    console.warn("dataUrlToBlob failed, fallback to Blob:", err);
+    return new Blob([dataUrl]);
+  }
+};
+
 // ---------- FOTO SESI (file di Firebase Storage, URL-nya di photos_YYYY-MM-DD) ----------
 // Dulu foto disimpan base64 (~100KB/biji) langsung di dokumen log bulanan. 8 foto sebulan aja
 // udah nembus limit 1 MiB/dokumen Firestore, dan begitu lewat SEMUA penyimpanan bulan itu gagal
 // — termasuk sekadar ngetik nama makanan. Sekarang: file naik ke Storage, Firestore cuma nyimpen
 // URL-nya (~100 byte), dipisah per hari biar dokumen bulanan gak kesenggol sama sekali.
 export const uploadMealPhoto = async (uid, ymd, sessionId, dataUrl) => {
-  const blob = await (await fetch(dataUrl)).blob();
+  const blob = dataUrlToBlob(dataUrl);
   return uploadImageToFirebase(blob, `lomeal_users/${uid}/meal_photos/${ymd}_${sessionId}_${Date.now()}.webp`);
 };
 
 // Foto resep (hero + tiap langkah) — sama alasannya seperti foto sesi: dokumen `recipes`
 // isinya satu array untuk SEMUA resep, jadi base64 di sana pasti nembus limit 1 MiB.
 export const uploadRecipePhoto = async (uid, recipeId, dataUrl) => {
-  const blob = await (await fetch(dataUrl)).blob();
+  const blob = dataUrlToBlob(dataUrl);
   return uploadImageToFirebase(blob, `lomeal_users/${uid}/recipe_photos/${recipeId}_${Date.now()}.webp`);
 };
 

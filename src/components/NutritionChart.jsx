@@ -2,7 +2,7 @@ import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import { getLocalYMD } from '../data/constants';
 import { formatNumber } from '../utils/numberFormat';
-import { computeDayTotals, calcTEF, calcDynamicTarget } from '../data/nutrition';
+import { computeDayTotals, calcTEF, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 
 const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
@@ -39,53 +39,35 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
 
       bioEntries.forEach(entry => {
           const d = new Date(entry.dateStr);
-          const totals = computeDayTotals(entry.dayData);
           const lyfitDay = extractLyfitDay(lyfitYearData, entry.dateStr);
-          const eaten = totals.kcal || 0;
-          
-          let dayTargets = (entry.dateStr >= todayStr ? targets : entry.dayData?.targetSnapshot) || targets;
-          const baseTdee = dayTargets?.tdee || dayTargets?.kcal || 0;
-          const bmrBase = lyfitDay?.bmr || dayTargets?.bmr || 1600;
+          const dayTargets = (entry.dateStr >= todayStr ? targets : entry.dayData?.targetSnapshot) || targets;
 
-          // Hitung TEF hari itu
-          const tefDay = calcTEF({
-            protein: totals.protein,
-            carbs: totals.carbs,
-            fat: totals.fat,
-            kcal: eaten,
-            bmr: bmrBase,
-          }).total;
-
-          // Total kalori dibakar riil hari itu
-          const burnedActual = lyfitDay?.burnedKcal || (bmrBase + tefDay);
-          const tdeeEffective = lyfitDay?.burnedKcal ? burnedActual : (baseTdee || burnedActual);
-          
-          const targetDeltaVal = (dayTargets?.kcal || baseTdee) - baseTdee; // 0=maint, neg=cut, pos=bulk
-          const targetKcalDay = dayTargets?.kcal || baseTdee;
-          const dynamicTargetDay = lyfitDay?.burnedKcal
-            ? calcDynamicTarget(dayTargets, burnedActual)
-            : targetKcalDay;
+          const summary = computeDaySummary({
+            day: entry.dayData,
+            targets: dayTargets,
+            lyfitDay,
+            logymUser: true,
+          });
 
           let delta = null;
-          if (eaten > 0 && tdeeEffective > 0) {
-             // Net metabolisme nyata: Kalori Dimakan - Kalori Dibakar Aktual
-             delta = Math.round(eaten - tdeeEffective);
+          if (summary.eatenKcal > 0 && summary.burnedTotal > 0) {
+             delta = summary.netDelta;
           }
 
           data.push({
               name: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
               dateFull: entry.dateStr,
-              nutritionCalories: eaten > 0 ? eaten : null,
-              activityCalories: burnedActual > 0 ? burnedActual : null,
+              nutritionCalories: summary.eatenKcal > 0 ? summary.eatenKcal : null,
+              activityCalories: summary.burnedTotal > 0 ? summary.burnedTotal : null,
               delta: delta,
-              protein: totals.protein > 0 ? totals.protein : null,
-              fat: totals.fat > 0 ? totals.fat : null,
-              carbs: totals.carbs > 0 ? totals.carbs : null,
-              targetCalories: dynamicTargetDay || null,
+              protein: summary.totals.protein > 0 ? summary.totals.protein : null,
+              fat: summary.totals.fat > 0 ? summary.totals.fat : null,
+              carbs: summary.totals.carbs > 0 ? summary.totals.carbs : null,
+              targetCalories: summary.targetKcal || null,
               targetProtein: dayTargets?.protein || null,
               targetFat: dayTargets?.fat || null,
               targetCarbs: dayTargets?.carbs || null,
-              targetDelta: targetDeltaVal,
+              targetDelta: summary.programDelta,
           });
       });
       return data;
@@ -280,29 +262,74 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                         ))}
                     </defs>
                     <Tooltip 
-                       formatter={(value, name, props) => {
-                           if (props.dataKey === 'delta') {
-                             return [`${value > 0 ? '+' : ''}${formatNumber(value, language)} kkal`, 'Delta'];
-                           }
-                           if (props.dataKey === 'targetDelta') {
-                             return [`${value > 0 ? '+' : ''}${formatNumber(value, language)} kkal`, 'Target Delta'];
-                           }
-                           if (props.dataKey === 'nutritionCalories') {
-                             return [`${formatNumber(value, language)} kkal`, 'Dimakan'];
-                           }
-                           if (props.dataKey === 'activityCalories') {
-                             return [`${formatNumber(value, language)} kkal`, 'Dibakar'];
-                           }
-                           if (props.dataKey === 'targetCalories') {
-                             return [`${formatNumber(value, language)} kkal`, 'Target Kalori'];
-                           }
-                           let unit = (activeMetric === 'calories' || activeMetric === 'delta') ? ' kkal' : ' g';
-                           return [`${formatNumber(value, language)}${unit}`, name];
-                       }}
                        cursor={{ fill: theme === 'dark' ? '#27272a' : '#f4f4f5' }} 
-                       contentStyle={{ backgroundColor: theme === 'dark' ? '#18181b' : '#ffffff', borderRadius: '16px', border: '1px solid ' + t.border, padding: '10px 14px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.2)' }} 
-                       itemStyle={{ padding: 0, margin: 0, marginTop: '4px' }} 
-                       labelStyle={{ color: theme === 'dark' ? '#a1a1aa' : '#71717a', marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }} 
+                       content={({ active, payload, label }) => {
+                           if (!active || !payload || !payload.length) return null;
+                           return (
+                               <div 
+                                   style={{ 
+                                       backgroundColor: theme === 'dark' ? '#18181b' : '#ffffff', 
+                                       borderRadius: '16px', 
+                                       border: '1px solid ' + (t?.border || (theme === 'dark' ? '#27272a' : '#e4e4e7')), 
+                                       padding: '10px 14px', 
+                                       fontSize: '11px', 
+                                       fontWeight: 'bold', 
+                                       boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.2)' 
+                                   }}
+                               >
+                                   <div style={{ color: theme === 'dark' ? '#a1a1aa' : '#71717a', marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                       {label}
+                                   </div>
+                                   {payload.map((item, idx) => {
+                                       let name = item.name;
+                                       let formattedVal = '';
+                                       let color = item.color;
+
+                                       if (item.dataKey === 'delta') {
+                                           name = 'Delta';
+                                           formattedVal = `${item.value > 0 ? '+' : ''}${formatNumber(item.value, language)} kkal`;
+                                           color = item.value >= 0 
+                                               ? (theme === 'dark' ? '#4ade80' : '#059669') 
+                                               : (theme === 'dark' ? '#f87171' : '#dc2626');
+                                       } else if (item.dataKey === 'targetDelta') {
+                                           name = 'Target Delta';
+                                           formattedVal = `${item.value > 0 ? '+' : ''}${formatNumber(item.value, language)} kkal`;
+                                           color = theme === 'dark' ? '#facc15' : '#ca8a04';
+                                       } else if (item.dataKey === 'nutritionCalories') {
+                                           name = 'Dimakan';
+                                           formattedVal = `${formatNumber(item.value, language)} kkal`;
+                                           color = theme === 'dark' ? '#4ade80' : '#059669';
+                                       } else if (item.dataKey === 'activityCalories') {
+                                           name = 'Dibakar';
+                                           formattedVal = `${formatNumber(item.value, language)} kkal`;
+                                           color = theme === 'dark' ? '#60a5fa' : '#2563eb';
+                                       } else if (item.dataKey === 'targetCalories') {
+                                           name = 'Target Kalori';
+                                           formattedVal = `${formatNumber(item.value, language)} kkal`;
+                                           color = theme === 'dark' ? '#facc15' : '#ca8a04';
+                                       } else {
+                                           let unit = (activeMetric === 'calories' || activeMetric === 'delta') ? ' kkal' : ' g';
+                                           formattedVal = `${formatNumber(item.value, language)}${unit}`;
+                                           if (item.dataKey && item.dataKey.startsWith('target')) {
+                                               color = theme === 'dark' ? '#facc15' : '#ca8a04';
+                                           } else if (activeMetric === 'protein') {
+                                               color = theme === 'dark' ? '#fbbf24' : '#d97706';
+                                           } else if (activeMetric === 'fat') {
+                                               color = theme === 'dark' ? '#f87171' : '#dc2626';
+                                           } else if (activeMetric === 'carbs') {
+                                               color = theme === 'dark' ? '#38bdf8' : '#0284c7';
+                                           }
+                                       }
+
+                                       return (
+                                           <div key={idx} style={{ marginTop: '4px', color: color || (theme === 'dark' ? '#f4f4f5' : '#09090b') }}>
+                                               {name} : {formattedVal}
+                                           </div>
+                                       );
+                                   })}
+                               </div>
+                           );
+                       }}
                     />
                     <XAxis dataKey="name" stroke={theme === 'dark' ? '#a1a1aa' : '#64748b'} fontSize={10} tickLine={false} axisLine={false} />
                     <YAxis domain={yDomain} hide={true} />
@@ -330,7 +357,8 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
                         <Bar 
                             dataKey="delta" 
                             name="Delta" 
-                            radius={[50, 50, 50, 50]}
+                            fill={theme === 'dark' ? '#3daa5c' : '#059669'}
+                            radius={[50, 50, 0, 0]}
                             isAnimationActive={false} 
                             maxBarSize={28}
                         >

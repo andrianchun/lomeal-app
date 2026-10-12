@@ -431,3 +431,104 @@ export const getEnergyBalance = (eatenKcal, tdee, burnedBonus = 0) => {
   if (diff < -100) return { state: 'deficit', diff };
   return { state: 'maintenance', diff };
 };
+
+/**
+ * SINGLE SOURCE OF TRUTH (SSOT) UNTUK RINGKASAN METABOLISME & NUTRISI HARIAN.
+ * Digunakan secara konsisten di seluruh aplikasi:
+ * - DashboardTab (Ring Chart, Status Bar, Modal Breakdown Energi)
+ * - NutritionChart (Tren Kalori, Delta, Bar Chart)
+ * - LogTab (Header Ringkasan Harian)
+ * - HistoryTab (Kalender & Dot Kepatuhan)
+ * - LomyAIChat (Context Block & System Prompt Coach Lomy)
+ */
+export const computeDaySummary = ({
+  day,              // Objek hari dari daysMap[ymd]
+  targets = {},     // Target nutrisi profil (atau snapshot hari)
+  lyfitDay = null,  // Data Lyfit/Logym untuk tanggal bersangkutan (extractLyfitDay atau lyfitToday)
+  profile = {},     // Profil pengguna (gender, settings, dsb.)
+  logymUser = true, // Status koneksi Logym
+  isFuture = false, // Apakah tanggal di masa depan (untuk LogTab/HistoryTab)
+} = {}) => {
+  const totals = computeDayTotals(day, !isFuture);
+  const eatenKcal = totals.kcal || 0;
+
+  const bmrFloor = targets?.bmr || 0;
+  const bmrBase = bmrFloor || (profile?.physical ? calcBMR(profile.physical) : (profile ? calcBMR(profile) : 0)) || 1600;
+  const bmr = lyfitDay?.bmr || bmrBase;
+
+  // 1. TEF (Thermic Effect of Food / Efek Termik Makanan)
+  const tefCalc = calcTEF({
+    protein: totals.protein,
+    carbs: totals.carbs,
+    fat: totals.fat,
+    kcal: eatenKcal,
+    bmr: bmr,
+  });
+  const tef = tefCalc.total;
+
+  // 2. NEAT (Langkah / Gerak spontan harian)
+  const steps = Number(lyfitDay?.steps) || 0;
+  const neatKcal = lyfitDay?.stepsKcal ?? Math.round(steps * 0.04);
+
+  // 3. Olahraga (EAT dari Logym)
+  const workoutCount = Number(lyfitDay?.workoutCount) || 0;
+  const sessionCount = Number(lyfitDay?.sessionCount) || (workoutCount > 0 ? 1 : 0);
+  const workoutNames = Array.isArray(lyfitDay?.workoutNames) ? lyfitDay.workoutNames : [];
+
+  // 4. Total Kalori Dibakar (TDEE Riil Harian)
+  const manualBurn = Number(profile?.settings?.manualBurnKcal) || 0;
+  let burnedTotal = 0;
+  if (logymUser) {
+    burnedTotal = Number(lyfitDay?.burnedKcal) || (bmr + tef + neatKcal);
+  } else {
+    burnedTotal = Math.max(bmr + tef + neatKcal, manualBurn);
+  }
+
+  // EAT (Latihan fisik) = Total Dibakar - BMR - NEAT - TEF
+  const eatKcal = Math.max(0, burnedTotal - bmr - neatKcal - tef);
+
+  // Target Kalori & Calorie Cycling (Target naik jika burnedTotal > baseTdee)
+  const baseTdee = targets?.tdee || targets?.kcal || 0;
+  const programDelta = (targets?.kcal || 0) - baseTdee; // 0=maint, neg=cut, pos=bulk
+  const dynamicTarget = logymUser
+    ? calcDynamicTarget(targets, burnedTotal, profile?.physical?.gender || profile?.gender)
+    : (targets?.kcal || 2000);
+  const targetKcal = dynamicTarget;
+
+  // Sisa kalori terhadap target makan harian
+  const remainingKcal = Math.round(targetKcal - eatenKcal);
+
+  // Net Metabolisme Riil: Kalori Dimakan - Total Kalori Dibakar
+  // > 0 = SURPLUS riil (tubuh surplus energi)
+  // < 0 = DEFISIT riil (tubuh defisit energi)
+  const netDelta = (eatenKcal > 0 || burnedTotal > 0) ? Math.round(eatenKcal - burnedTotal) : 0;
+
+  // Energy Balance
+  const burnedBonus = Math.max(0, burnedTotal - baseTdee);
+  const balance = getEnergyBalance(eatenKcal, baseTdee, burnedBonus);
+
+  return {
+    totals,
+    eatenKcal,
+    bmr,
+    tefCalc,
+    tef,
+    steps,
+    neatKcal,
+    workoutCount,
+    sessionCount,
+    workoutNames,
+    eatKcal,
+    burnedTotal,
+    baseTdee,
+    programDelta,
+    targetKcal,
+    dynamicTarget,
+    remainingKcal,
+    netDelta,
+    balance,
+    burnedBonus,
+    isBulking: programDelta > 0,
+    isCutting: programDelta < 0,
+  };
+};

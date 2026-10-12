@@ -13,7 +13,7 @@ import {
   MEAL_SESSIONS, DAY_NAMES_ID, MONTH_NAMES_ID, getLocalYMD, 
   getMonthKey, DEFAULT_SESSION_TIMES, weekStripDates, WATER_STEP_ML 
 } from '../data/constants';
-import { computeDayTotals, NUTRIENTS, EMPTY_NUTRITION, addNutrition, calcTEF, calcBMR, calcDynamicTarget } from '../data/nutrition';
+import { computeDayTotals, NUTRIENTS, EMPTY_NUTRITION, addNutrition, calcTEF, calcBMR, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 import { STATUS } from '../theme';
 import { URT_DICTIONARY, normalizeUnit, UNIT_OPTIONS, getItemUnitWeight } from '../utils/urtMapping';
@@ -571,22 +571,18 @@ const HistoryTab = ({
     }
 
     const lyfitDay = extractLyfitDay(lyfitYearData, ymd) || (isToday ? lyfitToday : null);
-    const totals = computeDayTotals(dayData || {}, !isFuture);
-    const bmrBase = lyfitDay?.bmr || baseTargets?.bmr || (profile?.physical ? calcBMR(profile.physical) : 1600);
-    const tefDay = calcTEF({
-      protein: totals.protein,
-      carbs: totals.carbs,
-      fat: totals.fat,
-      kcal: totals.kcal,
-      bmr: bmrBase
-    }).total;
-
-    const burnedTotal = lyfitDay?.burnedKcal || (bmrBase + tefDay);
-    const dynamicKcal = calcDynamicTarget(baseTargets, burnedTotal, profile?.physical?.gender);
+    const summary = computeDaySummary({
+      day: dayData || {},
+      targets: baseTargets,
+      lyfitDay,
+      profile,
+      logymUser: !!logymUser,
+      isFuture,
+    });
 
     return {
       ...baseTargets,
-      kcal: dynamicKcal,
+      kcal: summary.targetKcal,
     };
   }, [todayStr, profile?.targets, profile?.physical, lyfitYearData, lyfitToday, logymUser]);
 

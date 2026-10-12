@@ -407,7 +407,15 @@ ATURAN UTAMA & GAYA PERCAKAPAN (EFISIENSI TOKEN):
 }
 </food_proposal>
    - Nilai session harus salah satu dari: "breakfast" (Sarapan), "lunch" (Makan Siang), "dinner" (Makan Malam), atau "snack" (Camilan).
-   - JANGAN gunakan markdown code block (\`\`\`json) di dalam tag <food_proposal>.${memoryBlock}${customBlock}
+   - JANGAN gunakan markdown code block (\`\`\`json) di dalam tag <food_proposal>.
+11. ATURAN MATEMATIKA KALORI & SINGLE SOURCE OF TRUTH (SANGAT KRUSIAL!):
+   - DILARANG KERAS MENGARANG ATAU MENGHITUNG SENDIRI angka kalori terbakar, target, atau status surplus/defisit!
+   - Selalu rujuk dan kutip angka riil yang ada pada blok "=== RINGKASAN ENERGI & METABOLISME HARI INI ===" di bawah.
+   - Pahami fisiologi energi dengan benar:
+     a. Total Kalori Dibakar (TDEE Riil) BUKAN HANYA dari olahraga, melainkan BMR (metabolisme basal istirahat) + TEF (efek termik pengolahan makanan) + NEAT (langkah/gerak harian) + EAT (latihan beban/olahraga Logym).
+     b. Net Metabolisme Riil dihitung dari: Total Kalori Dimakan - Total Kalori Dibakar (TDEE Riil).
+        DILARANG KERAS mengurangi kalori makan HANYA dengan kalori olahraga saja lalu menyebutnya "Net Calories" atau "Defisit/Surplus"! Itu kesalahan fatal dan tidak ilmiah!
+     c. Jika pengguna bertanya tentang kalori terbakar hari ini, sebutkan Total Kalori Dibakar secara utuh sesuai data aplikasi, lalu rincikan komponennya (BMR, langkah kaki, dan latihan di Logym).${memoryBlock}${customBlock}
 
 DATA PENGGUNA TERKINI:
 ${contextBlock || 'Belum ada data riwayat.'}`;
@@ -727,9 +735,17 @@ export const PHOTO_THUMB = { maxSide: 400, maxChars: 120000, quality: 0.7 };
 
 export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {
   const img = new Image();
-  const url = URL.createObjectURL(file);
+  const isDataUrl = typeof file === 'string' && file.startsWith('data:');
+  let url = '';
+  try {
+    url = isDataUrl ? file : URL.createObjectURL(file);
+  } catch (err) {
+    return reject(err);
+  }
   img.onload = () => {
-    URL.revokeObjectURL(url);
+    if (!isDataUrl && url) {
+      try { URL.revokeObjectURL(url); } catch {}
+    }
     const canvas = document.createElement('canvas');
     let { width, height } = img;
     if (Math.max(width, height) > maxSide) {
@@ -749,7 +765,12 @@ export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality 
     }
     resolve({ base64: dataUrl.split(',')[1], dataUrl, mimeType: 'image/webp' });
   };
-  img.onerror = reject;
+  img.onerror = (e) => {
+    if (!isDataUrl && url) {
+      try { URL.revokeObjectURL(url); } catch {}
+    }
+    reject(e);
+  };
   img.src = url;
 });
 
