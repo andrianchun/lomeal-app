@@ -23,3 +23,20 @@ export const captureToFile = async () => {
   const blob = await (await fetch(photo.webPath)).blob();
   return new File([blob], `lomeal-${Date.now()}.${photo.format || 'jpg'}`, { type: blob.type || 'image/jpeg' });
 };
+
+// Ambil foto dari GALERI HP secara native di APK.
+// Keuntungan vs <input type="file">: file di-copy ke cache lokal Capacitor dan dibaca sebagai blob utuh,
+// sehingga tidak pernah kehilangan izin akses content:// URI saat proses async berjalan.
+export const pickFromGallery = async () => {
+  if (!isNativeApp()) return null;
+  const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
+  const photo = await Camera.getPhoto({
+    source: CameraSource.Photos,
+    resultType: CameraResultType.Uri,
+    correctOrientation: true,
+    quality: 90,
+  });
+  const blob = await (await fetch(photo.webPath)).blob();
+  return new File([blob], `lomeal-gallery-${Date.now()}.${photo.format || 'jpg'}`, { type: blob.type || 'image/jpeg' });
+};
+

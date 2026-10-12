@@ -15,7 +15,7 @@ import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, to
 import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto, getDayPhotos, dataUrlToBlob } from '../utils/foodLog';
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
-import { isNativeApp, captureToFile } from '../utils/nativeCamera';
+import { isNativeApp, captureToFile, pickFromGallery } from '../utils/nativeCamera';
 import { zeroDomusItemStock, updateDomusItemQuantity, requestShoppingListDomus, matchDomusItem } from '../utils/domusSync';
 import { deductStock, formatStock, itemStock } from '../utils/stockConverter';
 import { nutrientSources } from '../utils/nutrientSources';
@@ -208,6 +208,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const [waterEdit, setWaterEdit] = useState(false);
   const [listening, setListening] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraLoadingText, setCameraLoadingText] = useState('Membuka Kamera...');
   const [rackExpanded, setRackExpanded] = useState(false);
   const [saveToDb, setSaveToDb] = useState(false); // Default jangan simpan ke custom DB agar tidak menumpuk
   const [fullscreenPhotos, setFullscreenPhotos] = useState(null);
@@ -371,13 +372,30 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // foto belasan MP) dan upload jalan di belakang. Preview disimpan terpisah dari daftar
   // tersimpan supaya gak ketiban snapshot Firestore yang datang di tengah proses.
   const addPhoto = async (sessionId, fileOrDataUrl, forcedId = null) => {
-    const isFile = typeof fileOrDataUrl !== 'string';
+    const isString = typeof fileOrDataUrl === 'string';
     const tempId = forcedId || `p_${Date.now()}`;
-    const localUrl = isFile ? URL.createObjectURL(fileOrDataUrl) : fileOrDataUrl;
+    let sourceToUpload = fileOrDataUrl;
+    let localUrl = fileOrDataUrl;
+
+    if (!isString && fileOrDataUrl) {
+      try {
+        // Segera baca ke ArrayBuffer/Blob murni agar tidak terpengaruh siklus hidup input/file handle Android
+        const buf = await fileOrDataUrl.arrayBuffer();
+        sourceToUpload = new Blob([buf], { type: fileOrDataUrl.type || 'image/jpeg' });
+        localUrl = URL.createObjectURL(sourceToUpload);
+      } catch {
+        try {
+          localUrl = URL.createObjectURL(fileOrDataUrl);
+        } catch {
+          localUrl = '';
+        }
+      }
+    }
+
     setPendingPhotos((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: tempId, url: localUrl, pending: true }] }));
     await new Promise(r => setTimeout(r, 50)); // Jeda 50ms agar UI merender preview SEBELUM thread diblokir kompresi!
     try {
-      const { url, thumbUrl } = await uploadPhotoPair(sessionId, fileOrDataUrl);
+      const { url, thumbUrl } = await uploadPhotoPair(sessionId, sourceToUpload);
       await writePhotos(sessionId, [
         ...storedPhotos(sessionId),
         { id: tempId, url, originalUrl: url, thumbUrl, originalThumbUrl: thumbUrl },
@@ -386,7 +404,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       showAlert(`Gagal menyimpan foto: ${e.message}`);
     } finally {
       setPendingPhotos((prev) => ({ ...prev, [sessionId]: (prev[sessionId] || []).filter((p) => p.id !== tempId) }));
-      if (isFile) URL.revokeObjectURL(localUrl);
+      if (!isString && localUrl && localUrl.startsWith('blob:')) URL.revokeObjectURL(localUrl);
     }
   };
 
@@ -394,12 +412,34 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // Di browser: jatuh balik ke <input capture> — web gak boleh nulis ke galeri.
   const openCamera = async (onFile, inputRef) => {
     if (isNativeApp()) {
+      setCameraLoadingText('Membuka Kamera...');
       setCameraLoading(true);
       try {
         const file = await captureToFile();
         if (file) return onFile(file);
       } catch (e) {
         if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka kamera: ${e.message}`);
+        return;
+      } finally {
+        setCameraLoading(false);
+      }
+    }
+    inputRef.current?.click();
+  };
+
+  // Di APK: pilih dari galeri native (@capacitor/camera).
+  // Keuntungan: file disalin ke cache lokal dan dibaca sebagai blob utuh di memori,
+  // sehingga izin akses content:// tidak pernah kedaluwarsa saat proses AI/upload.
+  // Di browser: jatuh balik ke <input type="file">.
+  const openGallery = async (onFile, inputRef) => {
+    if (isNativeApp()) {
+      setCameraLoadingText('Membuka Galeri...');
+      setCameraLoading(true);
+      try {
+        const file = await pickFromGallery();
+        if (file) return onFile(file);
+      } catch (e) {
+        if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka galeri: ${e.message}`);
         return;
       } finally {
         setCameraLoading(false);
@@ -964,9 +1004,10 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  const handleDetailPhotoUpload = (e, sessionId) => {
-    const file = e.target.files?.[0];
-    e.target.value = null; // langsung direset: foto yang sama masih bisa dipilih lagi tanpa nunggu upload
+  const handleDetailPhotoUpload = (eOrFile, sessionId) => {
+    const isEvent = eOrFile && eOrFile.target;
+    const file = isEvent ? eOrFile.target.files?.[0] : eOrFile;
+    if (isEvent) eOrFile.target.value = ''; // reset agar file yang sama bisa dipilih lagi tanpa macet
     if (!file) return;
     const newPhotoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     addPhoto(sessionId, file, newPhotoId);
@@ -1143,9 +1184,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       sessionTimes[aiTargetSession] = newEntries[0].time;
       newDay.sessionTimes = sessionTimes;
     }
-    // Foto ikut disimpan (nambah, gak nimpa). Yang diarsip versi 1600px dari file aslinya —
-    // photoDataUrl cuma versi kecil 800px yang tadi dikirim ke Lomy.
-    if (photoId) addPhoto(aiTargetSession, photoFile || photoDataUrl, photoId);
+    // Foto ikut disimpan (nambah, gak nimpa). Prioritaskan photoDataUrl (in-memory)
+    // agar kebal dari kadaluwarsa izin Android content:// URI saat proses unggah file/galeri.
+    if (photoId) addPhoto(aiTargetSession, photoDataUrl || photoFile, photoId);
     
     // Simpan ke DB Custom jika dicentang — LEWATI yang namanya sudah ada (di database bawaan
     // maupun custom). Dulu tiap catatan selalu bikin entri baru, jadi "matcha latte" numpuk
@@ -1702,7 +1743,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                disabled={aiBusy}
                isListening={listening}
                onSelectCamera={() => openCamera(runPhotoScan, cameraRef)}
-               onSelectGallery={() => galleryRef.current?.click()}
+               onSelectGallery={() => openGallery(runPhotoScan, galleryRef)}
                onSelectMic={toggleVoice}
              />
           </div>
@@ -2257,23 +2298,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                       ) : isEditingItems ? (
                         <div className={`relative h-24 w-full shrink-0 flex items-center justify-center ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
                            <div className="flex items-center gap-3">
-                             <button onClick={() => openCamera((file) => {
-                                const newPhotoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                                addPhoto(detailSession, file, newPhotoId);
-                                if (isEditingItems && draftMeals !== null) {
-                                  setDraftMeals(prev => (prev || []).map(item => (!item.photoId ? { ...item, photoId: newPhotoId } : item)));
-                                } else {
-                                  const currentDay = daysMap[selectedYmd] || day || {};
-                                  const meals = { ...(currentDay.meals || {}) };
-                                  const currentItems = meals[detailSession] || [];
-                                  const updatedItems = currentItems.map(item => (!item.photoId ? { ...item, photoId: newPhotoId } : item));
-                                  persistDay({ ...currentDay, meals: { ...meals, [detailSession]: updatedItems } });
-                                }
-                              }, detailCameraRef)}
+                             <button onClick={() => openCamera((file) => handleDetailPhotoUpload(file, detailSession), detailCameraRef)}
                                className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform border ${t.border}`} aria-label="Jepret foto">
                                <Camera size={20} />
                              </button>
-                             <button onClick={() => detailPhotoRef.current?.click()}
+                             <button onClick={() => openGallery((file) => handleDetailPhotoUpload(file, detailSession), detailPhotoRef)}
                                className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform border ${t.border}`} aria-label="Pilih dari galeri">
                                <Image size={20} />
                              </button>
@@ -3015,11 +3044,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           </div>
         </div>
       )}
-      {/* ===== GLOBAL CAMERA LOADING OVERLAY ===== */}
+      {/* ===== GLOBAL CAMERA / GALLERY LOADING OVERLAY ===== */}
       {cameraLoading && (
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300">
           <Loader2 size={48} className="text-white animate-spin mb-4" />
-          <p className="text-white font-medium body-md tracking-wide">Membuka Kamera...</p>
+          <p className="text-white font-medium body-md tracking-wide">{cameraLoadingText}</p>
         </div>
       )}
 
