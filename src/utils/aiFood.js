@@ -247,7 +247,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
 
     abortIfCancelled(signal);
 
-    const aiChat = httpsCallable(functions, 'lomealAiChat');
+    const aiChat = httpsCallable(functions, 'lomealAiChat', { timeout: 120000 });
     try {
       const res = await aiChat({
         messages: [{ role: 'user', content: parts }],

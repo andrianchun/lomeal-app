@@ -220,7 +220,27 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [chatText, setChatText] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [aiAbortController, setAiAbortController] = useState(null);
-  const [aiResult, setAiResult] = useState(null);
+  const [aiResult, setAiResultState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('lomeal_pending_ai_result');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const setAiResult = (valOrUpdater) => {
+    setAiResultState(prev => {
+      const next = typeof valOrUpdater === 'function' ? valOrUpdater(prev) : valOrUpdater;
+      try {
+        if (next) {
+          localStorage.setItem('lomeal_pending_ai_result', JSON.stringify(next));
+        } else {
+          localStorage.removeItem('lomeal_pending_ai_result');
+        }
+      } catch (e) {
+        console.warn('Gagal sync aiResult ke localStorage:', e);
+      }
+      return next;
+    });
+  };
   const [aiTargetSession, setAiTargetSession] = useState('lunch');
 
   // Coach Lomy Floating AI Chat states
@@ -805,7 +825,21 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     // id ≥ 3000 = notifikasi sesi masak (timer/ongoing) — balikin user ke tab Program,
     // ProgramTab yang nyambung lagi ke sesi masak terakhir dari localStorage.
     LocalNotifications.addListener('localNotificationActionPerformed', (ev) => {
-      navigate((ev?.notification?.id ?? 0) >= COOK_NOTIF_ONGOING ? '/program' : '/log');
+      const notif = ev?.notification;
+      const extra = notif?.extra;
+      if (extra?.type === 'ai_scan_done' || extra?.type === 'ai_scan_failed') {
+        if (extra.targetSession) {
+          try {
+            localStorage.setItem('lomeal_open_session_on_launch', JSON.stringify({
+              sessionId: extra.targetSession,
+              ymd: extra.ymd || null
+            }));
+          } catch {}
+        }
+        navigate('/log');
+        return;
+      }
+      navigate((notif?.id ?? 0) >= COOK_NOTIF_ONGOING ? '/program' : '/log');
     }).then(l => listener = l);
 
     (async () => {

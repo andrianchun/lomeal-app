@@ -183,7 +183,7 @@ export const calcTEF = ({ protein = 0, carbs = 0, fat = 0, kcal = 0, bmr = 0 } =
     return {
       total: Math.round(tefP + tefC + tefF),
       hasMacros: true,
-      macros: { protein: p, carbs: c, fat: f },
+      macros: { protein: Math.round(p), carbs: Math.round(c), fat: Math.round(f) },
       breakdown: {
         protein: Math.round(tefP),
         carbs: Math.round(tefC),
@@ -420,6 +420,7 @@ export const computeDayTotals = (day, defaultEaten = true) => {
       }
     });
   });
+  totals.kcal = Math.round(totals.kcal || 0);
   return totals;
 };
 
@@ -450,11 +451,11 @@ export const computeDaySummary = ({
   isFuture = false, // Apakah tanggal di masa depan (untuk LogTab/HistoryTab)
 } = {}) => {
   const totals = computeDayTotals(day, !isFuture);
-  const eatenKcal = totals.kcal || 0;
+  const eatenKcal = Math.round(totals.kcal || 0);
 
   const bmrFloor = targets?.bmr || 0;
   const bmrBase = bmrFloor || (profile?.physical ? calcBMR(profile.physical) : (profile ? calcBMR(profile) : 0)) || 1600;
-  const bmr = lyfitDay?.bmr || bmrBase;
+  const bmr = Math.round(lyfitDay?.bmr || bmrBase);
 
   // 1. TEF (Thermic Effect of Food / Efek Termik Makanan)
   const tefCalc = calcTEF({
@@ -464,11 +465,11 @@ export const computeDaySummary = ({
     kcal: eatenKcal,
     bmr: bmr,
   });
-  const tef = tefCalc.total;
+  const tef = Math.round(tefCalc.total);
 
   // 2. NEAT (Langkah / Gerak spontan harian)
   const steps = Number(lyfitDay?.steps) || 0;
-  const neatKcal = lyfitDay?.stepsKcal ?? Math.round(steps * 0.04);
+  const neatKcal = Math.round(lyfitDay?.stepsKcal ?? Math.round(steps * 0.04));
 
   // 3. Olahraga (EAT dari Logym)
   const workoutCount = Number(lyfitDay?.workoutCount) || 0;
@@ -479,20 +480,20 @@ export const computeDaySummary = ({
   const manualBurn = Number(profile?.settings?.manualBurnKcal) || 0;
   let burnedTotal = 0;
   if (logymUser) {
-    burnedTotal = Number(lyfitDay?.burnedKcal) || (bmr + tef + neatKcal);
+    burnedTotal = Math.round(Number(lyfitDay?.burnedKcal) || (bmr + tef + neatKcal));
   } else {
-    burnedTotal = Math.max(bmr + tef + neatKcal, manualBurn);
+    burnedTotal = Math.round(Math.max(bmr + tef + neatKcal, manualBurn));
   }
 
   // EAT (Latihan fisik) = Total Dibakar - BMR - NEAT - TEF
-  const eatKcal = Math.max(0, burnedTotal - bmr - neatKcal - tef);
+  const eatKcal = Math.max(0, Math.round(burnedTotal - bmr - neatKcal - tef));
 
   // Target Kalori & Calorie Cycling (Target naik jika burnedTotal > baseTdee)
-  const baseTdee = targets?.tdee || targets?.kcal || 0;
-  const programDelta = (targets?.kcal || 0) - baseTdee; // 0=maint, neg=cut, pos=bulk
+  const baseTdee = Math.round(targets?.tdee || targets?.kcal || 0);
+  const programDelta = Math.round((targets?.kcal || 0) - baseTdee); // 0=maint, neg=cut, pos=bulk
   const dynamicTarget = logymUser
-    ? calcDynamicTarget(targets, burnedTotal, profile?.physical?.gender || profile?.gender)
-    : (targets?.kcal || 2000);
+    ? Math.round(calcDynamicTarget(targets, burnedTotal, profile?.physical?.gender || profile?.gender))
+    : Math.round(targets?.kcal || 2000);
   const targetKcal = dynamicTarget;
 
   // Sisa kalori terhadap target makan harian
@@ -504,7 +505,7 @@ export const computeDaySummary = ({
   const netDelta = (eatenKcal > 0 || burnedTotal > 0) ? Math.round(eatenKcal - burnedTotal) : 0;
 
   // Energy Balance
-  const burnedBonus = Math.max(0, burnedTotal - baseTdee);
+  const burnedBonus = Math.max(0, Math.round(burnedTotal - baseTdee));
   const balance = getEnergyBalance(eatenKcal, baseTdee, burnedBonus);
 
   return {

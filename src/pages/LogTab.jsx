@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
-import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator, Trash2, ArrowRightLeft, Database, CornerUpLeft } from 'lucide-react';
+import { Camera, Image, Mic, Send, Plus, GlassWater, Pencil, Loader2, X, RotateCw, ChevronRight, ChevronLeft, Check, Pill, Syringe, Tablets, Beaker, ShieldPlus, Coffee, CupSoda, Copy, Clock, Flame, Droplets, Target, Utensils, Search, Calendar, Edit2, Play, ChevronDown, Activity, AlignLeft, ChefHat, Box, Download, Calculator, Trash2, ArrowRightLeft, Database, CornerUpLeft, Sparkles } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import RingChart from '../components/RingChart';
 import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity } from '../utils/domusSync';
@@ -25,6 +25,8 @@ import SwipeInput from '../components/SwipeInput';
 import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS, getItemUnitWeight, parseQuickInput, calculateGramsFromURT } from '../utils/urtMapping';
 import { formatTimeDisplay } from '../utils/numberFormat';
 import useBackClose from '../hooks/useBackClose';
+import { sendLocalNotification } from '../utils/notifications';
+import { acquireAiWakeLock, releaseAiWakeLock } from '../utils/aiWakeLock';
 
 // Simpan baseline (gram & gizi) tetap di tiap item hasil Lomy begitu muncul di preview —
 // tanpa ini, edit gramasi dihitung sebagai rasio ke NILAI SEBELUMNYA (bukan ke baseline
@@ -79,6 +81,19 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       ensureMonth(getMonthKey(selectedYmd));
     }
   }, [selectedYmd, ensureMonth]);
+
+  // === Buka sesi otomatis jika datang dari klik notifikasi ===
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('lomeal_open_session_on_launch');
+      if (raw) {
+        localStorage.removeItem('lomeal_open_session_on_launch');
+        const parsed = JSON.parse(raw);
+        if (parsed?.ymd) setSelectedYmd(parsed.ymd);
+        if (parsed?.sessionId) setDetailSession(parsed.sessionId);
+      }
+    } catch {}
+  }, []);
 
   const [pickerOpen, setPickerOpen] = useState(false); // FoodPicker terbuka? (nambah ke batch aiResult yang sama)
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
@@ -648,8 +663,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       if (sessionPhotos.length > 0) {
         const validPhotoIds = new Set(sessionPhotos.map(p => p.id));
         finalizedDraftMeals = finalizedDraftMeals.map(item => {
-          if (sessionPhotos.length === 1 || !item.photoId || !validPhotoIds.has(item.photoId)) {
-            return { ...item, photoId: sessionPhotos[0].id };
+          if (item.photoId && !validPhotoIds.has(item.photoId)) {
+            return { ...item, photoId: null };
           }
           return item;
         });
@@ -683,10 +698,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         if (idx === 0 || !sessionTimes[detailSession]) {
           sessionTimes[detailSession] = newTime;
         }
-        const sessionPhotos = photosOf(detailSession);
-        const targetPhoto = sessionPhotos[idx];
-        if (targetPhoto) {
-          const updatedPhotos = storedPhotos(detailSession).map(p => p.id === targetPhoto.id ? { ...p, time: newTime } : p);
+        const targetSlide = slides[idx];
+        if (targetSlide?.photo) {
+          const updatedPhotos = storedPhotos(detailSession).map(p => p.id === targetSlide.photo.id ? { ...p, time: newTime } : p);
           writePhotos(detailSession, updatedPhotos);
         }
       });
@@ -1004,7 +1018,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  const handleDetailPhotoUpload = (eOrFile, sessionId) => {
+  const handleDetailPhotoUpload = (eOrFile, sessionId, targetItemIds = null) => {
     const isEvent = eOrFile && eOrFile.target;
     const file = isEvent ? eOrFile.target.files?.[0] : eOrFile;
     if (isEvent) eOrFile.target.value = ''; // reset agar file yang sama bisa dipilih lagi tanpa macet
@@ -1012,15 +1026,17 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     const newPhotoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     addPhoto(sessionId, file, newPhotoId);
 
-    // Linkkan item di sesi ini ke foto yang baru diunggah
-    if (isEditingItems && draftMeals !== null) {
-      setDraftMeals(prev => (prev || []).map(item => (!item.photoId ? { ...item, photoId: newPhotoId } : item)));
-    } else {
-      const currentDay = daysMap[selectedYmd] || day || {};
-      const meals = { ...(currentDay.meals || {}) };
-      const currentItems = meals[sessionId] || [];
-      const updatedItems = currentItems.map(item => (!item.photoId ? { ...item, photoId: newPhotoId } : item));
-      persistDay({ ...currentDay, meals: { ...meals, [sessionId]: updatedItems } });
+    // Linkkan item di slide ini (jika ada targetItemIds) ke foto yang baru diunggah
+    if (targetItemIds && targetItemIds.size > 0) {
+      if (isEditingItems && draftMeals !== null) {
+        setDraftMeals(prev => (prev || []).map(item => (targetItemIds.has(item.id) && !item.photoId ? { ...item, photoId: newPhotoId } : item)));
+      } else {
+        const currentDay = daysMap[selectedYmd] || day || {};
+        const meals = { ...(currentDay.meals || {}) };
+        const currentItems = meals[sessionId] || [];
+        const updatedItems = currentItems.map(item => (targetItemIds.has(item.id) && !item.photoId ? { ...item, photoId: newPhotoId } : item));
+        persistDay({ ...currentDay, meals: { ...meals, [sessionId]: updatedItems } });
+      }
     }
   };
 
@@ -1042,6 +1058,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     const controller = new AbortController();
     setAiAbortController(controller);
     setAiBusy(true);
+    await acquireAiWakeLock();
 
     try {
       const photoBase64 = await toDataUrl(photo.url);
@@ -1057,7 +1074,15 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       }
       if (!items.length) throw new Error('Lomy tidak menemukan makanan.');
       
-      const newEntries = items.map(f => makeEntry({ name: f.name, grams: f.grams, unit: 'g', nutrition: { ...EMPTY_NUTRITION, ...f.nutrition }, source: 'ai', photoId: photo.id }));
+      const newEntries = items.map(f => makeEntry({
+        name: f.name,
+        grams: f.grams,
+        unit: 'g',
+        nutrition: { ...EMPTY_NUTRITION, ...f.nutrition },
+        source: 'ai',
+        photoId: photo.id,
+        time: photo.time || new Date().toTimeString().slice(0, 5)
+      }));
       const existingItems = day.meals?.[sessionId] || [];
       
       const stringSimilarity = (a, b) => {
@@ -1093,13 +1118,27 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         }
       }
       
+      if (isEditingItems && draftMeals !== null) {
+        setDraftMeals(prev => [...(prev || []), ...newEntries]);
+      }
       persistDay({ ...day, meals: { ...(day.meals || {}), [sessionId]: sorted } });
+
+      if (typeof document !== 'undefined' && document.hidden) {
+        const sessionName = activeSessions.find(s => s.id === sessionId)?.label || 'sesi';
+        sendLocalNotification({
+          title: 'Analisis Ulang Selesai 🍽️',
+          body: `${sessionName}: Berhasil menghitung gizi (${items.map(i => i.name).slice(0, 3).join(', ')}).`,
+          extra: { type: 'ai_scan_done', targetSession: sessionId, ymd: selectedYmd }
+        });
+      }
+
       showAlert('Berhasil dianalisa! Silakan hapus item yang berlipat/salah.');
     } catch (err) {
       if (err.name === 'AbortError') return refundAiUsage(user.uid);
       console.error(err);
       showAlert(err.message || 'Gagal menganalisa foto.');
     } finally {
+      releaseAiWakeLock();
       setAiBusy(false);
       setAiAbortController(null);
     }
@@ -1109,14 +1148,21 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     if (!file || aiBusy) return;
     if (!(await guardAi())) return;
 
-    if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId());
+    const targetSession = detailSession || getNearestSessionId();
+    if (!aiResult) setAiTargetSession(targetSession);
 
     const controller = new AbortController();
     setAiAbortController(controller);
     setAiBusy(true);
+    await acquireAiWakeLock();
     await new Promise(r => setTimeout(r, 50)); // Jeda 50ms agar UI tulisan "Memproses..." dirender instan!
+    
+    let photoDataUrl = null;
+    const photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+
     try {
       const { base64, dataUrl, mimeType } = await compressImageForAI(file);
+      photoDataUrl = dataUrl;
       const res = await analyzeSmartPhoto(aiKey, base64, mimeType, controller.signal);
       
       let items = [];
@@ -1127,13 +1173,51 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       }
       
       if (items.length) {
-         appendAiResult(items, { photoDataUrl: dataUrl, photoFile: file, isOcr: res.type === 'label' });
+         appendAiResult(items, { photoDataUrl: dataUrl, photoFile: file, isOcr: res.type === 'label', photoId });
+
+         if (typeof document !== 'undefined' && document.hidden) {
+           const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
+           const foodSummary = items.map(i => i.name).slice(0, 3).join(', ');
+           sendLocalNotification({
+             title: 'Scan Makanan Selesai 🍽️',
+             body: `${sessionName}: Ditemukan ${foodSummary}. Ketuk untuk meninjau & simpan.`,
+             extra: { type: 'ai_scan_done', targetSession, ymd: selectedYmd }
+           });
+         }
+      } else {
+         // Jika AI tidak mengenali makanan, tetap simpan foto ke sesi agar foto makanan user tidak hilang
+         try {
+           await addPhoto(targetSession, file, photoId);
+           setDetailSession(targetSession);
+         } catch (saveErr) {
+           console.warn('Gagal simpan foto:', saveErr);
+         }
+         await showAlert('Lomy tidak mengenali makanan di foto. Foto tetap disimpan di sesi makanan agar kamu bisa mengisi manual atau coba hitung ulang nanti.');
       }
-      else await showAlert('Lomy tidak mengenali makanan di foto. Coba sudut/cahaya lain, atau input manual.');
     } catch (e) {
       if (e.name === 'AbortError') return refundAiUsage(user.uid);
-      await showAlert(`Gagal memindai foto: ${e.message}`);
+      console.error('[runPhotoScan error]', e);
+
+      // JIKA GAGAL BACKEND / NETWORK: Fotonya disimpan ke galeri sesi, tetap nampilin foto tapi kosongan, ada tombol analisis ulang!
+      try {
+        await addPhoto(targetSession, photoDataUrl || file, photoId);
+        setDetailSession(targetSession);
+      } catch (saveErr) {
+        console.warn('Gagal menyimpan foto ke sesi saat scan gagal:', saveErr);
+      }
+
+      if (typeof document !== 'undefined' && document.hidden) {
+        const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
+        sendLocalNotification({
+          title: 'Pemindaian Foto Tertunda',
+          body: `Foto telah disimpan ke ${sessionName}. Ketuk untuk membuka dan analisis ulang saat siap.`,
+          extra: { type: 'ai_scan_failed', targetSession, ymd: selectedYmd }
+        });
+      }
+
+      await showAlert(`Gagal memindai foto (${e.message}). Foto telah aman disimpan di sesi makanan agar tidak hilang. Kamu bisa menekan tombol Analisis Ulang kapan saja.`);
     } finally { 
+      releaseAiWakeLock();
       setAiBusy(false); 
       setAiAbortController(null);
     }
@@ -1422,16 +1506,89 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     return nearest?.id || 'lunch';
   };
 
+  const computeSessionSlides = (sessionId, targetDay = day, isEditing = isEditingItems, draftList = draftMeals) => {
+    if (!sessionId) return [];
+    const sessionPhotos = photosOf(sessionId);
+    let sessionItems = (isEditing && draftList !== null) ? draftList : (targetDay.meals?.[sessionId] || []);
+    const validPhotoIds = new Set(sessionPhotos.map(p => p.id));
+    const itemsByPhoto = {};
+    const unlinkedItems = [];
+
+    sessionItems.forEach(item => {
+      if (item.photoId && validPhotoIds.has(item.photoId)) {
+        if (!itemsByPhoto[item.photoId]) itemsByPhoto[item.photoId] = [];
+        itemsByPhoto[item.photoId].push(item);
+      } else {
+        unlinkedItems.push(item);
+      }
+    });
+
+    const sessionDefaultTime = activeSessions.find(s => s.id === sessionId)?.time || '12:00';
+    const toMins = (t) => {
+      if (!t) return 720;
+      const [h, m] = String(t).split(':').map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+
+    // 1. Slide foto
+    const photoSlides = sessionPhotos.map((p, idx) => {
+      const items = itemsByPhoto[p.id] || [];
+      const slideTime = items.find(i => i.time)?.time || p.time || (idx === 0 ? sessionDefaultTime : '12:00');
+      return { type: 'photo', photo: p, items, time: slideTime };
+    });
+
+    // 2. Slide manual (tanpa foto) — kelompokkan jika jamnya terpisah (> 45 menit)
+    const manualSlides = [];
+    if (unlinkedItems.length > 0) {
+      const sorted = [...unlinkedItems].sort((a, b) => toMins(a.time || sessionDefaultTime) - toMins(b.time || sessionDefaultTime));
+      const groups = [];
+      let curGroup = [];
+      let curGroupTime = null;
+
+      sorted.forEach(item => {
+        const itemMins = toMins(item.time || sessionDefaultTime);
+        if (!curGroup.length) {
+          curGroup = [item];
+          curGroupTime = itemMins;
+        } else if (itemMins - curGroupTime <= 45) {
+          curGroup.push(item);
+        } else {
+          groups.push(curGroup);
+          curGroup = [item];
+          curGroupTime = itemMins;
+        }
+      });
+      if (curGroup.length) groups.push(curGroup);
+
+      groups.forEach(grp => {
+        const slideTime = grp[0]?.time || sessionDefaultTime;
+        manualSlides.push({ type: 'manual', items: grp, time: slideTime });
+      });
+    }
+
+    let slides = [...photoSlides, ...manualSlides];
+
+    // Urutkan slide secara kronologis: camilan pagi di kiri, camilan sore di sebelah kanannya
+    slides.sort((a, b) => toMins(a.time) - toMins(b.time));
+
+    if (slides.length === 0) {
+      slides.push({ type: 'manual', items: [], time: sessionDefaultTime });
+    }
+
+    return slides;
+  };
+
   const MacroBar = ({ mkey, showSources = false }) => {
-    const target = mkey === 'kcal' ? (targetKcal || targets.kcal || 1) : (targets[mkey] || 1);
-    const value = totals[mkey] || 0;
+    const rawTarget = mkey === 'kcal' ? (targetKcal || targets.kcal || 1) : (targets[mkey] || 1);
+    const target = Math.round(rawTarget);
+    const value = Math.round(totals[mkey] || 0);
     const actualPct = (value / target) * 100;
     const barWidth = Math.min(100, Math.max(0, actualPct));
     const mc = mkey === 'kcal' ? { label: 'Kalori', hex: value > (target || Infinity) ? '#cd4a4a' : '#3daa5c' } : MACRO_COLORS[mkey];
     const sources = showSources && expandedNutrient === mkey ? nutrientSources(day, mkey) : null;
     const isCut = dietGoal === 'cutting' || dietGoal === 'cut';
     const isBulk = dietGoal === 'bulk' || dietGoal === 'bulking';
-    const kcalDiff = (targets.kcal || 0) - baseTdee;
+    const kcalDiff = Math.round((targets.kcal || 0) - baseTdee);
 
     return (
         <div>
@@ -1451,7 +1608,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             )}
             <div className="flex items-center gap-2">
               {mkey !== 'kcal' && <span className="caption font-black bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded" style={{ color: mc.hex }}>{Math.round(actualPct)}%</span>}
-              <span className={`caption ${t.textMain}`}>{Math.round(value)}<span className={t.textMuted}>/{target}{mkey==='kcal'?'':'g'}</span></span>
+              <span className={`caption ${t.textMain}`}>{value}<span className={t.textMuted}>/{target}{mkey==='kcal'?'':'g'}</span></span>
             </div>
           </div>
           <div className={`h-2 rounded-full overflow-hidden ${t.bgSunken}`}>
@@ -1521,7 +1678,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           {session.id === 'drink' ? (
             <>{displayWaterMl} mL {sTotals.kcal > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : ''}</>
           ) : (
-            <>{formatTimeDisplay(session.time, timeFormat)} {eatenEntries.length > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : (allPlanned ? '· Direncanakan' : '')}</>
+            <>{formatTimeDisplay(session.time, timeFormat)} {eatenEntries.length > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : (allPlanned ? '· Direncanakan' : (sessionPhotos.length > 0 ? '· Foto tersimpan' : ''))}</>
           )}
         </p>
       </button>
@@ -2091,48 +2248,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
       {/* ===== SHEET DETAIL SESI (edit/hapus entri) ===== */}
       {detailSession && (() => {
-        const sessionPhotos = photosOf(detailSession);
-        let sessionItems = (isEditingItems && draftMeals !== null) ? draftMeals : (day.meals?.[detailSession] || []);
-        
-        // Auto-migrate / auto-link foto sesi:
-        // 1. Kalau cuma ada 1 foto di sesi ini: SEMUA item otomatis nempel ke foto itu (tidak boleh terpisah jadi 2 slide).
-        // 2. Kalau ada >1 foto: item yang belum punya photoId atau photoId-nya orphan (tidak cocok ke foto mana pun)
-        //    dimasukkan ke foto pertama.
-        if (sessionPhotos.length > 0) {
-          const validPhotoIds = new Set(sessionPhotos.map(p => p.id));
-          sessionItems = sessionItems.map(item => {
-            if (sessionPhotos.length === 1 || !item.photoId || !validPhotoIds.has(item.photoId)) {
-              return { ...item, photoId: sessionPhotos[0].id };
-            }
-            return item;
-          });
-        }
-
-        const itemsByPhoto = {};
-        const noPhotoItems = [];
-        
-        sessionItems.forEach(item => {
-          if (item.photoId && sessionPhotos.some(p => p.id === item.photoId)) {
-            if (!itemsByPhoto[item.photoId]) itemsByPhoto[item.photoId] = [];
-            itemsByPhoto[item.photoId].push(item);
-          } else {
-            noPhotoItems.push(item);
-          }
-        });
-
+        const slides = computeSessionSlides(detailSession);
         const sessionDefaultTime = activeSessions.find(s => s.id === detailSession)?.time || '12:00';
-
-        const slides = sessionPhotos.map((p, idx) => {
-          const items = itemsByPhoto[p.id] || [];
-          const slideTime = items.find(i => i.time)?.time || p.time || (idx === 0 ? sessionDefaultTime : '12:00');
-          return { type: 'photo', photo: p, items, time: slideTime };
-        });
-
-        if (noPhotoItems.length > 0 || slides.length === 0) {
-          const slideTime = noPhotoItems.find(i => i.time)?.time || (slides.length === 0 ? sessionDefaultTime : new Date().toTimeString().slice(0, 5));
-          slides.push({ type: 'manual', items: noPhotoItems, time: slideTime });
-        }
-
+        const sessionItems = (isEditingItems && draftMeals !== null) ? draftMeals : (day.meals?.[detailSession] || []);
         const activeSlideIndex = Math.min(detailSlide, Math.max(0, slides.length - 1));
         const activeSlide = slides[activeSlideIndex] || slides[0] || {};
         const activeSlideTime = (isEditingItems && draftSlideTimes[activeSlideIndex] !== undefined)
@@ -2284,25 +2402,33 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                              <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 text-white caption font-bold backdrop-blur-md">
                                <Loader2 size={12} className="animate-spin" /> Menyimpan
                              </div>
-                           ) : isEditingItems ? (
+                           ) : (
                              <div className="absolute top-3 right-3 flex items-center gap-2">
-                               <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP" title="Simpan ke HP"><Download size={16} /></button>
-                               <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" title="Potong / Edit foto" aria-label="Potong foto"><Edit2 size={16} /></button>
-                               <button onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)} disabled={aiBusy} className={`p-2 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white backdrop-blur-md active:scale-95 shadow-md shadow-emerald-500/30 ${aiBusy ? 'opacity-50' : ''}`} title="Hitung Ulang Gizi dengan AI" aria-label="Hitung Ulang Gizi dengan AI">
-                                 {aiBusy ? <Loader2 size={16} className="animate-spin" /> : <Calculator size={16} />}
-                               </button>
-                               <button onClick={() => removePhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-red-500/80 hover:bg-red-500 text-white backdrop-blur-md active:scale-95" aria-label="Hapus foto" title="Hapus foto"><X size={16} /></button>
+                               {isEditingItems && (
+                                 <>
+                                   <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP" title="Simpan ke HP"><Download size={16} /></button>
+                                   <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" title="Potong / Edit foto" aria-label="Potong foto"><Edit2 size={16} /></button>
+                                 </>
+                               )}
+                               {(isEditingItems || slide.items.length === 0) && (
+                                 <button onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)} disabled={aiBusy} className={`p-2 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white backdrop-blur-md active:scale-95 shadow-md shadow-emerald-500/30 ${aiBusy ? 'opacity-50' : ''}`} title="Hitung Ulang Gizi dengan AI" aria-label="Hitung Ulang Gizi dengan AI">
+                                   {aiBusy ? <Loader2 size={16} className="animate-spin" /> : <Calculator size={16} />}
+                                 </button>
+                               )}
+                               {(isEditingItems || slide.items.length === 0) && (
+                                 <button onClick={() => removePhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-red-500/80 hover:bg-red-500 text-white backdrop-blur-md active:scale-95" aria-label="Hapus foto" title="Hapus foto"><X size={16} /></button>
+                               )}
                              </div>
-                           ) : null}
+                           )}
                         </div>
                       ) : isEditingItems ? (
                         <div className={`relative h-24 w-full shrink-0 flex items-center justify-center ${theme === 'dark' ? 'bg-black/40' : 'bg-black/5'} overflow-hidden`}>
                            <div className="flex items-center gap-3">
-                             <button onClick={() => openCamera((file) => handleDetailPhotoUpload(file, detailSession), detailCameraRef)}
+                             <button onClick={() => openCamera((file) => handleDetailPhotoUpload(file, detailSession, new Set((slide.items || []).map(i => i.id))), detailCameraRef)}
                                className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform border ${t.border}`} aria-label="Jepret foto">
                                <Camera size={20} />
                              </button>
-                             <button onClick={() => openGallery((file) => handleDetailPhotoUpload(file, detailSession), detailPhotoRef)}
+                             <button onClick={() => openGallery((file) => handleDetailPhotoUpload(file, detailSession, new Set((slide.items || []).map(i => i.id))), detailPhotoRef)}
                                className={`p-3 rounded-full ${t.btnBg} ${t.textAccent} active:scale-95 transition-transform border ${t.border}`} aria-label="Pilih dari galeri">
                                <Image size={20} />
                              </button>
@@ -2324,9 +2450,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                              : slide.items.reduce((acc, e) => addNutrition(acc, e.nutrition), { ...EMPTY_NUTRITION });
 
                            const kcal = Math.round(displayTotals.kcal || 0);
-                           const p = Math.round((displayTotals.protein || 0) * 10) / 10;
-                           const c = Math.round((displayTotals.carbs || 0) * 10) / 10;
-                           const f = Math.round((displayTotals.fat || 0) * 10) / 10;
+                           const p = Math.round(displayTotals.protein || 0);
+                           const c = Math.round(displayTotals.carbs || 0);
+                           const f = Math.round(displayTotals.fat || 0);
 
                            const totalMacroKcal = (p * 4) + (c * 4) + (f * 9);
                            const pPct = totalMacroKcal > 0 ? ((p * 4) / totalMacroKcal) * 100 : 0;
@@ -2614,9 +2740,30 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                            })}
                          </div>
                          {slide.items.length === 0 && (
-                           <div className={`p-4 text-center rounded-2xl border border-dashed ${t.border}`}>
-                             <p className={`caption ${t.textMuted}`}>Tidak ada menu di grup ini.</p>
-                           </div>
+                           slide.type === 'photo' ? (
+                             <div className={`mt-2 p-5 text-center rounded-3xl border border-dashed ${t.border} flex flex-col items-center gap-3.5 ${t.bgCard}`}>
+                               <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                                 <Sparkles size={24} />
+                               </div>
+                               <div>
+                                 <p className={`body-md font-bold ${t.textMain}`}>Foto Belum Dianalisis</p>
+                                 <p className={`caption ${t.textMuted} mt-1 max-w-[260px]`}>Makanan sudah habis? Tenang, foto aman tersimpan. Ketuk tombol di bawah untuk hitung gizi otomatis.</p>
+                               </div>
+                               <button
+                                 type="button"
+                                 onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)}
+                                 disabled={aiBusy}
+                                 className={`w-full py-3 px-4 rounded-2xl ${t.bgAccent} text-white font-bold body-md flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 active:scale-95 transition-all ${aiBusy ? 'opacity-50' : ''}`}
+                               >
+                                 {aiBusy ? <Loader2 size={18} className="animate-spin" /> : <Calculator size={18} />}
+                                 <span>{aiBusy ? 'Sedang Menghitung...' : 'Analisis Ulang dengan AI'}</span>
+                               </button>
+                             </div>
+                           ) : (
+                             <div className={`p-4 text-center rounded-2xl border border-dashed ${t.border}`}>
+                               <p className={`caption ${t.textMuted}`}>Tidak ada menu di grup ini.</p>
+                             </div>
+                           )
                          )}
                        </div>
                     </div>
@@ -2941,8 +3088,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             }
             
             if (detailSession) {
-               const sessionPhotos = photosOf(detailSession);
-               const targetPhotoId = sessionPhotos[detailSlide]?.id || sessionPhotos[0]?.id || null;
+               const currentSlides = computeSessionSlides(detailSession);
+               const activeSlideIndex = Math.min(detailSlide, Math.max(0, currentSlides.length - 1));
+               const curSlide = currentSlides[activeSlideIndex] || currentSlides[0];
+               const targetPhotoId = (curSlide?.type === 'photo' && curSlide?.photo?.id) ? curSlide.photo.id : null;
+               const targetTime = curSlide?.time || activeSessions.find(s => s.id === detailSession)?.time || new Date().toTimeString().slice(0, 5);
                const newEntry = makeEntry({
                  name: entry.name,
                  grams: entry.grams,
@@ -2951,7 +3101,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                  nutrition: { ...EMPTY_NUTRITION, ...entry.nutrition },
                  source: 'picker',
                  photoId: targetPhotoId,
-                 time: activeSessions.find(s => s.id === detailSession)?.time || new Date().toTimeString().slice(0, 5)
+                 time: targetTime
                });
 
                if (isEditingItems && draftMeals !== null) {

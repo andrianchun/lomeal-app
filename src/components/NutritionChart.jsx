@@ -57,17 +57,17 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
           data.push({
               name: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
               dateFull: entry.dateStr,
-              nutritionCalories: summary.eatenKcal > 0 ? summary.eatenKcal : null,
-              activityCalories: summary.burnedTotal > 0 ? summary.burnedTotal : null,
-              delta: delta,
-              protein: summary.totals.protein > 0 ? summary.totals.protein : null,
-              fat: summary.totals.fat > 0 ? summary.totals.fat : null,
-              carbs: summary.totals.carbs > 0 ? summary.totals.carbs : null,
-              targetCalories: summary.targetKcal || null,
-              targetProtein: dayTargets?.protein || null,
-              targetFat: dayTargets?.fat || null,
-              targetCarbs: dayTargets?.carbs || null,
-              targetDelta: summary.programDelta,
+              nutritionCalories: summary.eatenKcal > 0 ? Math.round(summary.eatenKcal) : null,
+              activityCalories: summary.burnedTotal > 0 ? Math.round(summary.burnedTotal) : null,
+              delta: delta != null ? Math.round(delta) : null,
+              protein: summary.totals.protein > 0 ? Math.round(summary.totals.protein) : null,
+              fat: summary.totals.fat > 0 ? Math.round(summary.totals.fat) : null,
+              carbs: summary.totals.carbs > 0 ? Math.round(summary.totals.carbs) : null,
+              targetCalories: summary.targetKcal ? Math.round(summary.targetKcal) : null,
+              targetProtein: dayTargets?.protein ? Math.round(dayTargets.protein) : null,
+              targetFat: dayTargets?.fat ? Math.round(dayTargets.fat) : null,
+              targetCarbs: dayTargets?.carbs ? Math.round(dayTargets.carbs) : null,
+              targetDelta: summary.programDelta != null ? Math.round(summary.programDelta) : null,
           });
       });
       return data;
@@ -287,29 +287,29 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
 
                                        if (item.dataKey === 'delta') {
                                            name = 'Delta';
-                                           formattedVal = `${item.value > 0 ? '+' : ''}${formatNumber(item.value, language)} kkal`;
+                                           formattedVal = `${item.value > 0 ? '+' : ''}${formatNumber(Math.round(item.value), language, 0)} kkal`;
                                            color = item.value >= 0 
                                                ? (theme === 'dark' ? '#4ade80' : '#059669') 
                                                : (theme === 'dark' ? '#f87171' : '#dc2626');
                                        } else if (item.dataKey === 'targetDelta') {
                                            name = 'Target Delta';
-                                           formattedVal = `${item.value > 0 ? '+' : ''}${formatNumber(item.value, language)} kkal`;
+                                           formattedVal = `${item.value > 0 ? '+' : ''}${formatNumber(Math.round(item.value), language, 0)} kkal`;
                                            color = theme === 'dark' ? '#facc15' : '#ca8a04';
                                        } else if (item.dataKey === 'nutritionCalories') {
                                            name = 'Dimakan';
-                                           formattedVal = `${formatNumber(item.value, language)} kkal`;
+                                           formattedVal = `${formatNumber(Math.round(item.value), language, 0)} kkal`;
                                            color = theme === 'dark' ? '#4ade80' : '#059669';
                                        } else if (item.dataKey === 'activityCalories') {
                                            name = 'Dibakar';
-                                           formattedVal = `${formatNumber(item.value, language)} kkal`;
+                                           formattedVal = `${formatNumber(Math.round(item.value), language, 0)} kkal`;
                                            color = theme === 'dark' ? '#60a5fa' : '#2563eb';
                                        } else if (item.dataKey === 'targetCalories') {
                                            name = 'Target Kalori';
-                                           formattedVal = `${formatNumber(item.value, language)} kkal`;
+                                           formattedVal = `${formatNumber(Math.round(item.value), language, 0)} kkal`;
                                            color = theme === 'dark' ? '#facc15' : '#ca8a04';
                                        } else {
                                            let unit = (activeMetric === 'calories' || activeMetric === 'delta') ? ' kkal' : ' g';
-                                           formattedVal = `${formatNumber(item.value, language)}${unit}`;
+                                           formattedVal = `${formatNumber(Math.round(item.value), language, 0)}${unit}`;
                                            if (item.dataKey && item.dataKey.startsWith('target')) {
                                                color = theme === 'dark' ? '#facc15' : '#ca8a04';
                                            } else if (activeMetric === 'protein') {

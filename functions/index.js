@@ -21,7 +21,7 @@ const detectKeyProvider = (key) => {
     return null;
 };
 
-const GOOGLE_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro', 'gemini-2.0-flash-lite'];
+const GOOGLE_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash-8b'];
 const OPENAI_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
 const ANTHROPIC_MODELS = ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
 
@@ -53,21 +53,35 @@ async function callGoogle(key, model, systemPrompt, contents) {
         generationConfig: { temperature: 0, topP: 0.1 }
     };
     for (let i = 0; i < chain.length; i++) {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${chain[i]}:generateContent?key=${key}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
         const isLast = i === chain.length - 1;
-        if ([400, 403, 404, 429, 503].includes(res.status) && !isLast) continue;
-        if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`Google API Error (${res.status}): ${errText.substring(0, 150)}`);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 25000); // 25 detik per model agar tidak memakan deadline fungsi
+        try {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${chain[i]}:generateContent?key=${key}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            clearTimeout(timer);
+            if ([400, 403, 404, 429, 503].includes(res.status) && !isLast) continue;
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Google API Error (${res.status}): ${errText.substring(0, 150)}`);
+            }
+            const data = await res.json();
+            return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        } catch (fetchErr) {
+            clearTimeout(timer);
+            if (fetchErr.name === 'AbortError' && !isLast) {
+                console.warn(`Model ${chain[i]} timeout 25s, mencoba fallback model berikutnya...`);
+                continue;
+            }
+            if (!isLast && isFallbackable(fetchErr.message)) continue;
+            throw fetchErr;
         }
-        const data = await res.json();
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     }
-    throw new Error('All Gemini models failed (429) for this key.');
+    throw new Error('All Gemini models failed (429/timeout) for this key.');
 }
 
 async function callOpenAI(key, model, messages) {
@@ -104,12 +118,12 @@ const isFallbackable = (errMsg) => {
     const statusMatch = (errMsg || '').match(/\((\d{3})\)/);
     const status = statusMatch ? parseInt(statusMatch[1], 10) : null;
     return (status !== null && (status === 401 || status === 403 || status === 404 || status === 429 || status >= 500)) ||
-        (errMsg || '').includes('All Gemini models failed') || (errMsg || '').includes('fetch failed');
+        (errMsg || '').includes('All Gemini models failed') || (errMsg || '').includes('fetch failed') || (errMsg || '').includes('timeout');
 };
 
 // ---------- Endpoints ----------
 
-exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall(async (data, context) => {
+exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB' }).https.onCall(async (data, context) => {
     if (!context.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
 
     const { messages, provider = 'google', model = '' } = data || {};

@@ -244,7 +244,7 @@ const DashboardTab = ({
         <div className="relative z-20 px-5 pb-5 pt-[54px]">
           <div className="flex flex-col items-end gap-4">
             <RingChart size={148} stroke={12} progress={ringProgress} color={ringColor} glass>
-              <span className={`text-3xl font-black tabular-nums ${t.textMain}`}>{Math.abs(remaining).toLocaleString('id-ID')}</span>
+              <span className={`text-3xl font-black tabular-nums ${t.textMain}`}>{Math.round(Math.abs(remaining)).toLocaleString('id-ID')}</span>
               <span className={`caption ${t.textMuted}`}>{remainingText}</span>
             </RingChart>
 
@@ -275,7 +275,7 @@ const DashboardTab = ({
                   <p className={`h3 ${t.textMuted} group-hover:text-sky-400 transition-colors`}>
                     Kalori Dibakar
                   </p>
-                  <p className="text-xl font-black tabular-nums text-sky-400 mt-0.5">{Number(burnedTotal).toLocaleString('id-ID')}</p>
+                  <p className="text-xl font-black tabular-nums text-sky-400 mt-0.5">{Math.round(Number(burnedTotal) || 0).toLocaleString('id-ID')}</p>
                   {logymUser ? (
                     <div className={`caption ${t.textMuted} mt-0.5 flex items-center justify-end gap-1.5`}>
                       <span className="px-1 py-0.5 rounded bg-sky-500/20 text-sky-500 text-[8px] uppercase font-bold tracking-wider">LOGYM</span>
@@ -518,7 +518,7 @@ const DashboardTab = ({
                 </span>
                 <div className="flex items-baseline gap-1">
                   <span className="text-2xl font-black text-emerald-500 dark:text-emerald-400">
-                    {Number(burnedTotal).toLocaleString('id-ID')}
+                    {Math.round(Number(burnedTotal) || 0).toLocaleString('id-ID')}
                   </span>
                   <span className={`caption ${t.textMuted}`}>kkal</span>
                 </div>
@@ -539,7 +539,7 @@ const DashboardTab = ({
                   </div>
                   <div className="text-right shrink-0">
                     <span className={`body-lg font-black ${t.textMain} whitespace-nowrap`}>
-                      {Number(bmrDisplay).toLocaleString('id-ID')}{' '}
+                      {Math.round(Number(bmrDisplay) || 0).toLocaleString('id-ID')}{' '}
                       <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
                     </span>
                   </div>
@@ -553,12 +553,12 @@ const DashboardTab = ({
                       NEAT (Aktivitas Spontan)
                     </div>
                     <p className={`caption ${t.textMuted} mt-0.5 leading-snug`}>
-                      Gerak spontan harian ({Number(stepsCount).toLocaleString('id-ID')} langkah) non-olahraga.
+                      Gerak spontan harian ({Math.round(Number(stepsCount) || 0).toLocaleString('id-ID')} langkah) non-olahraga.
                     </p>
                   </div>
                   <div className="text-right shrink-0">
                     <span className={`body-lg font-black ${t.textMain} whitespace-nowrap`}>
-                      {Number(neatKcal).toLocaleString('id-ID')}{' '}
+                      {Math.round(Number(neatKcal) || 0).toLocaleString('id-ID')}{' '}
                       <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
                     </span>
                   </div>
@@ -579,7 +579,7 @@ const DashboardTab = ({
                   </div>
                   <div className="text-right shrink-0">
                     <span className={`body-lg font-black ${t.textMain} whitespace-nowrap`}>
-                      {Number(eatKcal).toLocaleString('id-ID')}{' '}
+                      {Math.round(Number(eatKcal) || 0).toLocaleString('id-ID')}{' '}
                       <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
                     </span>
                   </div>
@@ -594,9 +594,9 @@ const DashboardTab = ({
                     </div>
                     {tefCalc.hasMacros ? (
                       <div className={`caption ${t.textMuted} mt-1 space-y-0.5 leading-snug`}>
-                        <div>• Protein ({tefCalc.macros.protein}g × 25% = ~{tefCalc.breakdown.protein} kkal)</div>
-                        <div>• Karbo ({tefCalc.macros.carbs}g × 7.5% = ~{tefCalc.breakdown.carbs} kkal)</div>
-                        <div>• Lemak ({tefCalc.macros.fat}g × 2% = ~{tefCalc.breakdown.fat} kkal)</div>
+                        <div>• Protein ({Math.round(tefCalc.macros.protein)}g × 25% = ~{Math.round(tefCalc.breakdown.protein)} kkal)</div>
+                        <div>• Karbo ({Math.round(tefCalc.macros.carbs)}g × 7.5% = ~{Math.round(tefCalc.breakdown.carbs)} kkal)</div>
+                        <div>• Lemak ({Math.round(tefCalc.macros.fat)}g × 2% = ~{Math.round(tefCalc.breakdown.fat)} kkal)</div>
                       </div>
                     ) : (
                       <p className={`caption ${t.textMuted} mt-0.5 leading-snug`}>
@@ -606,7 +606,7 @@ const DashboardTab = ({
                   </div>
                   <div className="text-right shrink-0">
                     <span className={`body-lg font-black ${t.textMain} whitespace-nowrap`}>
-                      {Number(tefCalc.total).toLocaleString('id-ID')}{' '}
+                      {Math.round(Number(tefCalc.total) || 0).toLocaleString('id-ID')}{' '}
                       <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
                     </span>
                   </div>
