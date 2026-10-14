@@ -22,10 +22,11 @@ const detectKeyProvider = (key) => {
 };
 
 const GOOGLE_MODELS = [
-    'gemini-3.8-flash',
-    'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
-    'gemini-flash-lite-latest'
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.8-flash'
 ];
 const OPENAI_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
 const ANTHROPIC_MODELS = ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
@@ -48,7 +49,7 @@ async function checkRateLimit(uid) {
 // ---------- Provider callers (server-side: tanpa masalah CORS) ----------
 
 async function callGoogle(key, model, systemPrompt, contents) {
-    const preferred = GOOGLE_MODELS.includes(model) ? model : 'gemini-3.8-flash';
+    const preferred = GOOGLE_MODELS.includes(model) ? model : 'gemini-3.5-flash-lite';
     const chain = [preferred, ...GOOGLE_MODELS.filter(m => m !== preferred)];
     const payload = {
         system_instruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
@@ -265,7 +266,7 @@ exports.lomealTrendCatcher = functions.region(REGION).pubsub.schedule('every 24 
         try {
             const keys = getSharedKeys().filter(k => detectKeyProvider(k) === 'google');
             if (keys.length > 0) {
-                const res = await callGoogle(keys[0], 'gemini-3.8-flash', '', [{ parts: [{ text: prompt }] }]);
+                const res = await callGoogle(keys[0], 'gemini-3.5-flash-lite', '', [{ parts: [{ text: prompt }] }]);
                 const parsed = JSON.parse(res);
                 if (parsed.foods && parsed.foods.length > 0) {
                     await db.collection('lomeal_pending_foods').add({

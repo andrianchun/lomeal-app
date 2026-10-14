@@ -17,11 +17,11 @@ import { LAB_MARKERS } from '../data/labPanels';
 import { acquireAiWakeLock, releaseAiWakeLock } from './aiWakeLock';
 
 const MODELS = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'gemini-flash-lite-latest',
-  'gemini-flash-latest'
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.8-flash'
 ];
 
 export const humanizeAiError = (err, context = 'photo') => {
@@ -40,8 +40,8 @@ export const humanizeAiError = (err, context = 'photo') => {
     return 'Ukuran foto terlalu besar. Silakan coba foto lainnya.';
   }
   
-  if (lower.includes('network') || lower.includes('fetch failed') || lower.includes('koneksi') || lower.includes('offline') || lower.includes('failed to fetch')) {
-    return 'Koneksi internet bermasalah. Periksa jaringan Anda dan coba lagi.';
+  if (lower.includes('network') || lower.includes('fetch failed') || lower.includes('koneksi') || lower.includes('offline') || lower.includes('failed to fetch') || lower.includes('unavailable') || lower.includes('timeout')) {
+    return 'Koneksi internet tidak stabil atau sempat terputus saat sinyal berpindah. Coba scan ulang ya.';
   }
   
   if (lower.includes('api_key_invalid')) {
@@ -168,6 +168,24 @@ const abortIfCancelled = (signal) => {
 // selalu memuntahkan resep yang itu-itu juga dan sering minimalis. Makanya bisa dioverride.
 const EXTRACT_CONFIG = { temperature: 0, topP: 0.1 };
 
+async function fetchWithRetry(url, options, maxRetries = 2) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      if (options?.signal?.aborted) throw err;
+      const msg = (err.message || '').toLowerCase();
+      const isNetworkErr = err.name === 'TypeError' || msg.includes('network') || msg.includes('fetch') || msg.includes('failed') || msg.includes('timeout') || msg.includes('offline');
+      if (isNetworkErr && attempt < maxRetries) {
+        console.warn(`[AI Network Retry] Sinyal terputus/berpindah jaringan (${err.message}). Menunggu sinyal stabil (percobaan ${attempt + 1}/${maxRetries})...`);
+        await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 async function callGeminiWithKey(apiKey, parts, signal = null, opts = {}) {
   const models = opts.models || MODELS;
   const generationConfig = opts.generationConfig || EXTRACT_CONFIG;
@@ -186,7 +204,7 @@ async function callGeminiWithKey(apiKey, parts, signal = null, opts = {}) {
         ...(isBearer ? { 'Authorization': `Bearer ${cleanKey}` } : { 'x-goog-api-key': cleanKey }),
       };
 
-      const res = await fetch(url, {
+      const res = await fetchWithRetry(url, {
         method: 'POST',
         headers,
         body: JSON.stringify({ contents: [{ parts }], generationConfig }),
@@ -204,7 +222,7 @@ async function callGeminiWithKey(apiKey, parts, signal = null, opts = {}) {
 
       // If bearer returned 401 or 404, try query parameter fallback
       if (isBearer && (res.status === 401 || res.status === 404)) {
-        const altRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`, {
+        const altRes = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts }], generationConfig }),
@@ -275,11 +293,26 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
 
     const aiChat = httpsCallable(functions, 'lomealAiChat', { timeout: 120000 });
     try {
-      const res = await aiChat({
-        messages: [{ role: 'user', content: parts }],
-        provider: 'google',
-        model: 'gemini-3.8-flash'
-      });
+      let res;
+      try {
+        res = await aiChat({
+          messages: [{ role: 'user', content: parts }],
+          provider: 'google',
+          model: 'gemini-3.5-flash-lite'
+        });
+      } catch (callErr) {
+        if (/network|fetch|unavailable|offline|timeout/i.test(callErr.message || '')) {
+          console.warn('[AI Network Retry] Panggilan fungsi cloud terputus, mencoba ulang dalam 1.5 detik...');
+          await new Promise(r => setTimeout(r, 1500));
+          res = await aiChat({
+            messages: [{ role: 'user', content: parts }],
+            provider: 'google',
+            model: 'gemini-3.5-flash-lite'
+          });
+        } else {
+          throw callErr;
+        }
+      }
       abortIfCancelled(signal);
       let text = res.data?.text || '{}';
       text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
@@ -533,7 +566,7 @@ export const streamLomyChat = async (apiKey, messages, contextBlock = '', onChun
       const res = await aiChat({
         messages: [{ role: 'system', content: systemPrompt }, ...messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || m.content }))],
         provider: 'google',
-        model: 'gemini-3.8-flash'
+        model: 'gemini-3.5-flash-lite'
       });
       const text = res.data?.text || '';
       if (text) {
@@ -670,7 +703,7 @@ Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang d
     null,
     // Menyusun resep itu tugas kreatif dengan banyak batasan: model 8b terlalu lemah, dan
     // temperature 0 bikin tiap generate menghasilkan resep yang sama persis.
-    { models: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'], generationConfig: { temperature: 0.9, topP: 0.95 } },
+    { models: ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-3.8-flash'], generationConfig: { temperature: 0.9, topP: 0.95 } },
   );
   return { ...res, ingredients: (res.ingredients || []).map(i => ({ ...i, nutrition: clampNutrition(i.nutrition) })) };
 };
@@ -756,7 +789,7 @@ export const toDataUrl = async (src) => {
 //  - PHOTO_THUMB   : yang dipajang di kartu sesi & strip. Tanpa ini tiap kartu mengunduh
 //                    berkas arsip penuh — 5 foto sehari ≈ 2MB kuota data tiap hari dibuka.
 export const PHOTO_KEEPSAKE = { maxSide: 2048, maxChars: 2000000, quality: 0.88 };
-export const PHOTO_AI = { maxSide: 1600, maxChars: 2500000, quality: 0.9 };
+export const PHOTO_AI = { maxSide: 1024, maxChars: 450000, quality: 0.8 };
 export const PHOTO_THUMB = { maxSide: 400, maxChars: 120000, quality: 0.7 };
 
 export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {
