@@ -407,13 +407,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       }
     }
 
-    setPendingPhotos((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: tempId, url: localUrl, pending: true }] }));
+    setPendingPhotos((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: tempId, url: localUrl, pending: true, time: new Date().toTimeString().slice(0, 5) }] }));
     await new Promise(r => setTimeout(r, 50)); // Jeda 50ms agar UI merender preview SEBELUM thread diblokir kompresi!
     try {
       const { url, thumbUrl } = await uploadPhotoPair(sessionId, sourceToUpload);
       await writePhotos(sessionId, [
         ...storedPhotos(sessionId),
-        { id: tempId, url, originalUrl: url, thumbUrl, originalThumbUrl: thumbUrl },
+        { id: tempId, url, originalUrl: url, thumbUrl, originalThumbUrl: thumbUrl, time: new Date().toTimeString().slice(0, 5) },
       ]);
     } catch (e) {
       showAlert(`Gagal menyimpan foto: ${e.message}`);
@@ -1680,7 +1680,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           {session.id === 'drink' ? (
             <>{displayWaterMl} mL {sTotals.kcal > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : ''}</>
           ) : (
-            <>{formatTimeDisplay(session.time, timeFormat)} {eatenEntries.length > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : (allPlanned ? '· Direncanakan' : (sessionPhotos.length > 0 ? '· Foto tersimpan' : ''))}</>
+            <>{formatTimeDisplay(session.time, timeFormat)} {eatenEntries.length > 0 ? `· ${Math.round(sTotals.kcal)} kkal` : (allPlanned ? '· Direncanakan' : '')}</>
           )}
         </p>
       </button>
