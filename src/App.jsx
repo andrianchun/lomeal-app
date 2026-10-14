@@ -936,7 +936,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
     return {
       burnedKcal: finalBurnedKcal > 0 ? finalBurnedKcal : (hist?.burnedKcal || null),
-      floorKcal: hist?.floorKcal || Math.round(bmr + neatKcal),
+      floorKcal: hist?.floorKcal || Math.round(bmr + maxStepsKcal),
       steps: maxSteps,
       stepsKcal: maxStepsKcal,
       bmr,
