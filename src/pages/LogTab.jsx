@@ -25,7 +25,7 @@ import SwipeInput from '../components/SwipeInput';
 import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS, getItemUnitWeight, parseQuickInput, calculateGramsFromURT } from '../utils/urtMapping';
 import { formatTimeDisplay } from '../utils/numberFormat';
 import useBackClose from '../hooks/useBackClose';
-import { sendLocalNotification } from '../utils/notifications';
+import { sendLocalNotification, requestNotificationPermission } from '../utils/notifications';
 import { acquireAiWakeLock, releaseAiWakeLock } from '../utils/aiWakeLock';
 
 // Simpan baseline (gram & gizi) tetap di tiap item hasil Lomy begitu muncul di preview —
@@ -1055,6 +1055,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     if (!ok) return;
 
     if (!(await guardAi())) return;
+    requestNotificationPermission().catch(() => {});
 
     const controller = new AbortController();
     setAiAbortController(controller);
@@ -1124,14 +1125,12 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       }
       persistDay({ ...day, meals: { ...(day.meals || {}), [sessionId]: sorted } });
 
-      if (typeof document !== 'undefined' && document.hidden) {
-        const sessionName = activeSessions.find(s => s.id === sessionId)?.label || 'sesi';
-        sendLocalNotification({
-          title: 'Analisis Ulang Selesai 🍽️',
-          body: `${sessionName}: Berhasil menghitung gizi (${items.map(i => i.name).slice(0, 3).join(', ')}).`,
-          extra: { type: 'ai_scan_done', targetSession: sessionId, ymd: selectedYmd }
-        });
-      }
+      const sessionName = activeSessions.find(s => s.id === sessionId)?.label || 'sesi';
+      sendLocalNotification({
+        title: 'Analisis Ulang Selesai 🍽️',
+        body: `${sessionName}: Berhasil menghitung gizi (${items.map(i => i.name).slice(0, 3).join(', ')}).`,
+        extra: { type: 'ai_scan_done', targetSession: sessionId, ymd: selectedYmd, targetTab: '/log' }
+      });
 
       showAlert('Berhasil dianalisa! Silakan hapus item yang berlipat/salah.');
     } catch (err) {
@@ -1148,6 +1147,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const runPhotoScan = async (file) => {
     if (!file || aiBusy) return;
     if (!(await guardAi())) return;
+    requestNotificationPermission().catch(() => {});
 
     const targetSession = detailSession || getNearestSessionId();
     if (!aiResult) setAiTargetSession(targetSession);
@@ -1176,15 +1176,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       if (items.length) {
          appendAiResult(items, { photoDataUrl: dataUrl, photoFile: file, isOcr: res.type === 'label', photoId });
 
-         if (typeof document !== 'undefined' && document.hidden) {
-           const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
-           const foodSummary = items.map(i => i.name).slice(0, 3).join(', ');
-           sendLocalNotification({
-             title: 'Scan Makanan Selesai 🍽️',
-             body: `${sessionName}: Ditemukan ${foodSummary}. Ketuk untuk meninjau & simpan.`,
-             extra: { type: 'ai_scan_done', targetSession, ymd: selectedYmd }
-           });
-         }
+         const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
+         const foodSummary = items.map(i => i.name).slice(0, 3).join(', ');
+         sendLocalNotification({
+           title: 'Scan Makanan Selesai 🍽️',
+           body: `${sessionName}: Ditemukan ${foodSummary}. Ketuk untuk meninjau & simpan.`,
+           extra: { type: 'ai_scan_done', targetSession, ymd: selectedYmd, targetTab: '/log' }
+         });
       } else {
          // Jika AI tidak mengenali makanan, tetap simpan foto ke sesi agar foto makanan user tidak hilang
          try {
@@ -1207,14 +1205,12 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         console.warn('Gagal menyimpan foto ke sesi saat scan gagal:', saveErr);
       }
 
-      if (typeof document !== 'undefined' && document.hidden) {
-        const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
-        sendLocalNotification({
-          title: 'Pemindaian Foto Tertunda',
-          body: `Foto telah disimpan ke ${sessionName}. Ketuk untuk membuka dan analisis ulang saat siap.`,
-          extra: { type: 'ai_scan_failed', targetSession, ymd: selectedYmd }
-        });
-      }
+      const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
+      sendLocalNotification({
+        title: 'Pemindaian Foto Tertunda',
+        body: `Foto telah disimpan ke ${sessionName}. Ketuk untuk membuka dan analisis ulang saat siap.`,
+        extra: { type: 'ai_scan_failed', targetSession, ymd: selectedYmd, targetTab: '/log' }
+      });
 
       const friendlyErr = humanizeAiError(e, 'photo');
       await showAlert(`${friendlyErr} Foto telah aman disimpan di sesi makanan agar tidak hilang. Kamu bisa menekan tombol Analisis Ulang kapan saja.`);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Download } from 'lucide-react';
+import { Download, Loader2, CheckCircle2, ChevronRight } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth';
 import { auth } from './firebase';
@@ -32,6 +32,7 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import useDialog from './hooks/useDialog';
 import useToast from './hooks/useToast';
 import { clearAll as clearAllBackCloseables, closeTopModal } from './utils/backCloseStack';
+import { initNotificationChannels, requestNotificationPermission } from './utils/notifications';
 
 const MEAL_REMINDER_ID = 1001;
 const TAB_ORDER = ['dashboard', 'log', 'history', 'program', 'fooddb'];
@@ -93,6 +94,12 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [otaState, setOtaState] = useState({ open: false, force: false, url: '', version: '', notes: '' });
   // __APP_VERSION__ di-inject dari package.json oleh vite (lihat vite.config.js).
   const [currentVer, setCurrentVer] = useState(__APP_VERSION__);
+
+  // Inisialisasi channel notifikasi prioritas tinggi & izin notifikasi Android/Web
+  useEffect(() => {
+    initNotificationChannels();
+    requestNotificationPermission().catch(() => {});
+  }, []);
 
   useEffect(() => {
     const isNative = Capacitor.isNativePlatform();
@@ -242,6 +249,15 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     });
   };
   const [aiTargetSession, setAiTargetSession] = useState('lunch');
+
+  // Munculkan toast notifikasi jika scan selesai saat user sedang di tab lain
+  const prevAiResultRef = useRef(aiResult);
+  useEffect(() => {
+    if (!prevAiResultRef.current && aiResult && location.pathname !== '/log') {
+      showToast('🍽️ Scan makanan selesai! Ketuk banner di bawah untuk meninjau.', 'success');
+    }
+    prevAiResultRef.current = aiResult;
+  }, [aiResult, location.pathname, showToast]);
 
   // Coach Lomy Floating AI Chat states
   const [isLomyChatOpen, setIsLomyChatOpen] = useState(false);
@@ -846,8 +862,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       try {
         await LocalNotifications.requestPermissions();
         const pending = await LocalNotifications.getPending();
-        if (pending.notifications.length > 0) {
-            await LocalNotifications.cancel({ notifications: pending.notifications });
+        const reminderNotifs = pending.notifications.filter(n => n.id >= 2000 && n.id < 3000);
+        if (reminderNotifs.length > 0) {
+            await LocalNotifications.cancel({ notifications: reminderNotifs });
         }
         
         const notifs = [];
@@ -992,6 +1009,38 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
         <Route path="/fooddb" element={<FoodDbTab {...commonProps} />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
+
+      {/* Floating Status Bar saat AI sedang analisis di background & user pindah tab */}
+      {aiBusy && location.pathname !== '/log' && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 max-w-[92vw] flex items-center gap-2.5 px-4 py-2.5 rounded-full shadow-2xl border border-emerald-500/30 bg-zinc-950/90 text-white backdrop-blur-xl">
+          <Loader2 size={16} className="animate-spin text-emerald-400 shrink-0" />
+          <span className="text-xs font-semibold truncate">Lomy sedang menganalisis foto makanan...</span>
+          {aiAbortController && (
+            <button
+              onClick={() => {
+                aiAbortController.abort();
+                setAiAbortController(null);
+                setAiBusy(false);
+              }}
+              className="ml-1 px-2.5 py-0.5 rounded-full bg-white/10 hover:bg-white/20 text-[11px] text-zinc-300 font-bold active:scale-95 transition-all"
+            >
+              Batal
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Floating Success Pill saat AI selesai & hasil pending belum ditinjau sementara user di tab lain */}
+      {!aiBusy && aiResult && location.pathname !== '/log' && (
+        <button
+          onClick={() => navigate('/log')}
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 max-w-[92vw] flex items-center gap-2 px-4 py-2.5 rounded-full shadow-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs active:scale-95 transition-all border border-emerald-400/30"
+        >
+          <CheckCircle2 size={16} className="text-white shrink-0" />
+          <span className="truncate">Scan Selesai! Ketuk untuk meninjau ({aiResult.foods?.length || 0} menu)</span>
+          <ChevronRight size={14} className="shrink-0 text-white/80" />
+        </button>
+      )}
 
       <BottomNav t={t} activeTab={path} setActiveTab={setActiveTab} />
 

@@ -41,6 +41,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Kamera native (src/utils/nativeCamera.js) — jepret + saveToGallery otomatis.
          Tanpa ini @capacitor/camera gagal diam-diam di APK (OTA gak bisa nge-patch izin native). -->
