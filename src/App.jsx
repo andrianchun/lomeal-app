@@ -914,19 +914,22 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       bmr,
     }).total);
 
-    // Hitungan kalori terbakar lokal dari Health Connect (jika Logym belum dibuka)
-    const neatKcal = maxStepsKcal;
-    const hcActiveBurn = Number(hcActivity?.burnedKcal) || 0;
-    const extraActive = Math.max(0, hcActiveBurn - neatKcal);
-    const localHcTdee = (maxSteps > 0 || hcActiveBurn > 0)
-      ? Math.round(bmr + tef + neatKcal + extraActive)
-      : 0;
-
-    // Kalori dari Logym (fast sync atau history)
+    // Hitungan kalori terbakar:
+    // 1. Jika Logym sudah menghitung kalori hari ini (fast sync atau history), jadikan basis utama Logym.
+    //    Tambahkan HANYA selisih langkah baru dari Health Connect jika user berjalan lebih banyak sebelum Logym dibuka lagi.
+    const logymSteps = Math.max(histSteps, fastSteps);
     const logymBurned = Math.max(Number(fast?.kcal) || 0, Number(hist?.burnedKcal) || 0);
 
-    // Kalori total final
-    const finalBurnedKcal = Math.max(logymBurned, localHcTdee);
+    let finalBurnedKcal = 0;
+    if (logymBurned > 0) {
+      const extraSteps = Math.max(0, maxSteps - logymSteps);
+      const extraStepsKcal = Math.round(extraSteps * 0.04);
+      finalBurnedKcal = logymBurned + extraStepsKcal;
+    } else if (maxSteps > 0 || logymUser) {
+      // 2. Jika Logym belum dibuka hari ini sama sekali, gunakan rumus yang persis sama dengan Logym:
+      //    TDEE = BMR + TEF + NEAT (langkah * 0.04)
+      finalBurnedKcal = Math.round(bmr + tef + maxStepsKcal);
+    }
 
     // Jika tidak ada data aktivitas sama sekali dan bukan user Logym
     if (!hist && !fast && !hcActivity && !logymUser) return null;
