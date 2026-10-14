@@ -53,6 +53,7 @@ import NotificationPanel from './components/NotificationPanel';
 import UpdaterAlert from './components/UpdaterAlert';
 import CoachLomyFloat from './components/CoachLomyFloat';
 import LomyAIChat from './components/LomyAIChat';
+import TabErrorBoundary from './components/TabErrorBoundary';
 import { createCommunityPost } from './utils/communityApi';
 
 const AppContent = ({ user, profile, logymUser, onLogout }) => {
@@ -1121,11 +1122,11 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardTab {...commonProps} />} />
-        <Route path="/log" element={<LogTab {...commonProps} />} />
-        <Route path="/history" element={<HistoryTab {...commonProps} />} />
-        <Route path="/program" element={<ProgramTab {...commonProps} />} />
-        <Route path="/fooddb" element={<FoodDbTab {...commonProps} />} />
+        <Route path="/dashboard" element={<TabErrorBoundary tabName="Dashboard"><DashboardTab {...commonProps} /></TabErrorBoundary>} />
+        <Route path="/log" element={<TabErrorBoundary tabName="Catat Makanan"><LogTab {...commonProps} /></TabErrorBoundary>} />
+        <Route path="/history" element={<TabErrorBoundary tabName="Riwayat"><HistoryTab {...commonProps} /></TabErrorBoundary>} />
+        <Route path="/program" element={<TabErrorBoundary tabName="Program"><ProgramTab {...commonProps} /></TabErrorBoundary>} />
+        <Route path="/fooddb" element={<TabErrorBoundary tabName="Database Makanan"><FoodDbTab {...commonProps} /></TabErrorBoundary>} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
 

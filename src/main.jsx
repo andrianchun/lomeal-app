@@ -35,56 +35,12 @@ const blockAppReady = () => {
 if (Capacitor.isNativePlatform()) {
   readyTimer = setTimeout(markAppReady, READY_DELAY_MS);
 }
-
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    // Jangan laporkan bundle ini sehat ke Capgo — biar rollback otomatis bisa menyelamatkan
-    // user dari bundle yang crash, daripada mereka harus hapus data aplikasi manual.
-    blockAppReady();
-    this.setState({ errorInfo });
-    console.error("React Error:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{ padding: '20px', backgroundColor: 'black', color: 'red', minHeight: '100vh', fontFamily: 'monospace' }}>
-          <h2>Something went wrong.</h2>
-          <p style={{ color: '#fca5a5', lineHeight: 1.5 }}>
-            Coba muat ulang dulu. Kalau tetap gagal, tutup paksa aplikasinya lalu buka lagi —
-            versi yang bermasalah akan dikembalikan otomatis ke versi sebelumnya.
-          </p>
-          <button
-            onClick={() => window.location.reload()}
-            style={{ padding: '10px 18px', margin: '8px 0 16px', borderRadius: 12, border: '1px solid #ef4444', background: '#ef4444', color: 'white', fontWeight: 700 }}
-          >
-            Muat Ulang
-          </button>
-          <details style={{ whiteSpace: 'pre-wrap' }}>
-            {this.state.error && this.state.error.toString()}
-            <br />
-            {this.state.errorInfo && this.state.errorInfo.componentStack}
-          </details>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
+import RootErrorBoundary from './components/RootErrorBoundary.jsx'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <ErrorBoundary>
+    <RootErrorBoundary onCatch={blockAppReady}>
       <App />
-    </ErrorBoundary>
+    </RootErrorBoundary>
   </React.StrictMode>,
-)
+)
