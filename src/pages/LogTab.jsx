@@ -1132,7 +1132,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         extra: { type: 'ai_scan_done', targetSession: sessionId, ymd: selectedYmd, targetTab: '/log' }
       });
 
-      showAlert('Berhasil dianalisa! Silakan hapus item yang berlipat/salah.');
+      showToast?.('Berhasil dianalisis! 🍽️');
     } catch (err) {
       if (err.name === 'AbortError') return refundAiUsage(user.uid);
       console.error(err);
