@@ -35,7 +35,7 @@ Kembalikan JSON: {"type":"label","name":"nama produk","servingSize":"takaran ter
     generationConfig: { temperature: 0, topP: 0.1 }
   };
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${API_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)

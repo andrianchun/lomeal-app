@@ -21,7 +21,12 @@ const detectKeyProvider = (key) => {
     return null;
 };
 
-const GOOGLE_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash-8b'];
+const GOOGLE_MODELS = [
+    'gemini-3.8-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest'
+];
 const OPENAI_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
 const ANTHROPIC_MODELS = ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
 
@@ -43,7 +48,7 @@ async function checkRateLimit(uid) {
 // ---------- Provider callers (server-side: tanpa masalah CORS) ----------
 
 async function callGoogle(key, model, systemPrompt, contents) {
-    const preferred = GOOGLE_MODELS.includes(model) ? model : 'gemini-2.0-flash';
+    const preferred = GOOGLE_MODELS.includes(model) ? model : 'gemini-3.8-flash';
     const chain = [preferred, ...GOOGLE_MODELS.filter(m => m !== preferred)];
     const payload = {
         system_instruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
@@ -181,7 +186,7 @@ exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, m
         }
     }
     throw new HttpsError('resource-exhausted',
-        `Semua key server untuk ${provider} sedang limit. ${lastError ? lastError.message.substring(0, 100) : ''}`);
+        'Maaf, saat ini server sedang sibuk. Silakan ulangi kembali beberapa saat lagi.');
 });
 
 exports.lomealAiVision = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB' }).https.onCall(async (data, context) => {
@@ -240,7 +245,7 @@ exports.lomealAiVision = functions.region(REGION).runWith({ timeoutSeconds: 120,
         }
     }
     throw new HttpsError('resource-exhausted',
-        `Semua key server untuk ${provider} sedang limit. ${lastError ? lastError.message.substring(0, 100) : ''}`);
+        'Maaf, saat ini server sedang sibuk. Silakan ulangi kembali beberapa saat lagi.');
 });
 
 // Salinan bridgeLomealAuth yang dulu pernah ada di sini (gak pernah beneran ke-deploy/dipanggil —
@@ -260,7 +265,7 @@ exports.lomealTrendCatcher = functions.region(REGION).pubsub.schedule('every 24 
         try {
             const keys = getSharedKeys().filter(k => detectKeyProvider(k) === 'google');
             if (keys.length > 0) {
-                const res = await callGoogle(keys[0], 'gemini-1.5-flash', '', [{ parts: [{ text: prompt }] }]);
+                const res = await callGoogle(keys[0], 'gemini-3.8-flash', '', [{ parts: [{ text: prompt }] }]);
                 const parsed = JSON.parse(res);
                 if (parsed.foods && parsed.foods.length > 0) {
                     await db.collection('lomeal_pending_foods').add({

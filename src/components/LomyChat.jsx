@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { X, Send, Sparkles, Square, Trash2 } from 'lucide-react';
-import { streamLomyChat } from '../utils/aiFood';
+import { streamLomyChat, humanizeAiError } from '../utils/aiFood';
 import { checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
 import { AI_DAILY_LIMIT, getLocalYMD, getMonthKey } from '../data/constants';
 import { NUTRIENTS } from '../data/nutrition';
@@ -159,7 +159,7 @@ export default function LomyChat({ t, user, aiKey, profile, daysMap, ensureMonth
         await refundAiUsage(user.uid);
         setMessages((prev) => {
           const next = [...prev];
-          next[next.length - 1] = { role: 'assistant', text: `⚠️ ${err.message}`, error: true };
+          next[next.length - 1] = { role: 'assistant', text: `⚠️ ${humanizeAiError(err, 'chat')}`, error: true };
           return next;
         });
       }

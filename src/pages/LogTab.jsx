@@ -11,7 +11,7 @@ import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TAR
 import { extractLyfitDay } from '../utils/lyfitSync';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase';
 import { MACRO_COLORS, statusFor } from '../theme';
-import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, toDataUrl, PHOTO_KEEPSAKE, PHOTO_THUMB } from '../utils/aiFood';
+import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, toDataUrl, PHOTO_KEEPSAKE, PHOTO_THUMB, humanizeAiError } from '../utils/aiFood';
 import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto, getDayPhotos, dataUrlToBlob } from '../utils/foodLog';
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
@@ -999,11 +999,12 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
          saveGlobalPatternCache(text, res.foods);
          appendAiResult(res.foods, { isOffline: false, source: 'text_ai' });
          setChatText('');
+      } else {
+         await showAlert('Lomy tidak menemukan makanan pada teks itu. Coba lebih spesifik, mis. "nasi 1 centong, ayam goreng 1 potong".');
       }
-      else await showAlert('Lomy tidak menemukan makanan pada teks itu. Coba lebih spesifik, mis. "nasi 1 centong, ayam goreng 1 potong".');
     } catch (e) {
       if (e.name === 'AbortError') return refundAiUsage(user.uid); // dibatalin user — kuota dibalikin
-      await showAlert(`Maaf, gagal memproses: ${e.message}`);
+      await showAlert(humanizeAiError(e, 'text'));
     } finally {
       setAiBusy(false);
       setAiAbortController(null);
@@ -1136,7 +1137,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     } catch (err) {
       if (err.name === 'AbortError') return refundAiUsage(user.uid);
       console.error(err);
-      showAlert(err.message || 'Gagal menganalisa foto.');
+      showAlert(humanizeAiError(err, 'photo'));
     } finally {
       releaseAiWakeLock();
       setAiBusy(false);
@@ -1215,7 +1216,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         });
       }
 
-      await showAlert(`Gagal memindai foto (${e.message}). Foto telah aman disimpan di sesi makanan agar tidak hilang. Kamu bisa menekan tombol Analisis Ulang kapan saja.`);
+      const friendlyErr = humanizeAiError(e, 'photo');
+      await showAlert(`${friendlyErr} Foto telah aman disimpan di sesi makanan agar tidak hilang. Kamu bisa menekan tombol Analisis Ulang kapan saja.`);
     } finally { 
       releaseAiWakeLock();
       setAiBusy(false); 

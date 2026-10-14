@@ -6,7 +6,7 @@ import { EMPTY_NUTRITION, DIET_PROFILES, DIET_GOALS, ACTIVITY_LEVELS } from '../
 import { MEAL_SESSIONS, DEFAULT_SESSION_TIMES, macroText, getLocalYMD, DAY_NAMES_ID, heroForRecipe, formatDuration } from '../data/constants';
 import { STATUS } from '../theme';
 import { makeEntry } from '../utils/foodLog';
-import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from '../utils/aiFood';
+import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput, humanizeAiError } from '../utils/aiFood';
 import { createDomusItem, requestShoppingListDomus, updateDomusItemQuantity, zeroDomusItemStock, discardDomusItem, addPortionsToDomusItem, cookEntry, matchDomusItem } from '../utils/domusSync';
 import { deductStock, stockInGrams, itemStock, formatStock, unitToGrams } from '../utils/stockConverter';
 import { blockingShortages, formatShortfall, ingredientAvailability } from '../utils/recipeStock.js';
@@ -606,7 +606,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
       if (err.message === 'RATE_LIMIT_EXCEEDED') {
         showAlert('Limit harian habis! Masukkan API Key pribadimu di Pengaturan untuk lanjut buat resep.');
       } else {
-        showAlert(`Gagal membuat resep: ${err.message}`);
+        showAlert(humanizeAiError(err, 'recipe'));
       }
     }
   };

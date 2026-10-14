@@ -5,7 +5,7 @@ import { LineChart, Line, XAxis, YAxis, ReferenceArea, ResponsiveContainer, Tool
 import { LAB_PANELS, LAB_MARKERS, findMarker, markerStatus, referenceText, LAB_DISCLAIMER } from '../data/labPanels';
 import { AI_DAILY_LIMIT, getLocalYMD } from '../data/constants';
 import { subscribeLabResults, saveLabResults, checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
-import { compressImageForAI, toDataUrl, extractLabResultsFromImage } from '../utils/aiFood';
+import { compressImageForAI, toDataUrl, extractLabResultsFromImage, humanizeAiError } from '../utils/aiFood';
 import useBackClose from '../hooks/useBackClose';
 
 const STATUS_COLOR = { low: 'text-sky-500', high: 'text-red-500', normal: 'text-emerald-500' };
@@ -155,7 +155,7 @@ const LabResultsCard = ({ t, theme, user, aiKey, profile, saveProfilePatch, show
         });
       } catch (e) {
         await refundAiUsage(user.uid);
-        showAlert(e.message === 'OUT_OF_SCOPE' ? 'Foto itu sepertinya bukan lembar hasil lab.' : `Gagal memindai: ${e.message}`);
+        showAlert(humanizeAiError(e, 'lab'));
       }
     } finally {
       setBusy(false);

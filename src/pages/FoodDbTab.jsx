@@ -8,7 +8,7 @@ import { AI_DAILY_LIMIT } from '../data/constants';
 import { NUTRIENTS, EMPTY_NUTRITION } from '../data/nutrition';
 import SupplementBuilder from '../components/SupplementBuilder';
 import MedicineBuilder from '../components/MedicineBuilder';
-import { compressImageForAI, analyzeSmartPhoto } from '../utils/aiFood';
+import { compressImageForAI, analyzeSmartPhoto, humanizeAiError } from '../utils/aiFood';
 import { playSoundEffect } from '../utils/audio';
 import { checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
 import { isNativeApp, captureToFile } from '../utils/nativeCamera';
@@ -400,7 +400,7 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
         : 'Makanan di piring berhasil ditebak Lomy! Silakan simpan ke database.');
     } catch (err) {
       if (err.name === 'AbortError') return refundAiUsage(user.uid); // dibatalin user — kuota dibalikin
-      await showAlert(err.message === 'OUT_OF_SCOPE' ? 'Foto ini tidak terbaca sebagai tabel gizi atau makanan.' : `Gagal scan: ${err.message}`);
+      await showAlert(humanizeAiError(err, 'photo'));
     } finally {
       setOcrStatus('');
       setScanning(false);
