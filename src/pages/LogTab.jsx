@@ -1125,10 +1125,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       }
       persistDay({ ...day, meals: { ...(day.meals || {}), [sessionId]: sorted } });
 
-      const sessionName = activeSessions.find(s => s.id === sessionId)?.label || 'sesi';
       sendLocalNotification({
-        title: 'Analisis Ulang Selesai 🍽️',
-        body: `${sessionName}: Berhasil menghitung gizi (${items.map(i => i.name).slice(0, 3).join(', ')}).`,
+        title: 'Analisis Gizi Berhasil',
+        body: 'Ketuk untuk melihat detailnya',
         extra: { type: 'ai_scan_done', targetSession: sessionId, ymd: selectedYmd, targetTab: '/log' }
       });
 
@@ -1176,11 +1175,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       if (items.length) {
          appendAiResult(items, { photoDataUrl: dataUrl, photoFile: file, isOcr: res.type === 'label', photoId });
 
-         const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
-         const foodSummary = items.map(i => i.name).slice(0, 3).join(', ');
          sendLocalNotification({
-           title: 'Scan Makanan Selesai 🍽️',
-           body: `${sessionName}: Ditemukan ${foodSummary}. Ketuk untuk meninjau & simpan.`,
+           title: 'Analisis Gizi Berhasil',
+           body: 'Ketuk untuk melihat detailnya',
            extra: { type: 'ai_scan_done', targetSession, ymd: selectedYmd, targetTab: '/log' }
          });
       } else {

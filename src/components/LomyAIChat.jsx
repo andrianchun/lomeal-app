@@ -23,6 +23,8 @@ const sendBackgroundNotification = async (title, body) => {
             body: body ? (body.length > 120 ? body.slice(0, 117) + '...' : body) : 'Jawaban analisismu sudah siap!',
             schedule: { at: new Date(Date.now() + 100) },
             sound: 'beep.wav',
+            smallIcon: 'ic_stat_lomeal',
+            iconColor: '#10B981',
             extra: { type: 'lomy_chat' },
           },
         ],
@@ -31,7 +33,7 @@ const sendBackgroundNotification = async (title, body) => {
       if (Notification.permission === 'granted') {
         new Notification(title || 'Coach Lomy', {
           body: body ? (body.length > 120 ? body.slice(0, 117) + '...' : body) : 'Jawaban analisismu sudah siap!',
-          icon: '/bg-dashboard.webp',
+          icon: '/pwa-192x192.png',
         });
       } else if (Notification.permission === 'default') {
         Notification.requestPermission().then((perm) => {

@@ -76,6 +76,8 @@ export default function useCookTimers({ recipeId, recipeName, servings, soundEna
           body: `${alive.length} timer jalan · ketuk untuk buka`,
           ongoing: true,
           autoCancel: false,
+          smallIcon: 'ic_stat_lomeal',
+          iconColor: '#10B981',
           schedule: { at: new Date(Date.now() + 1000) },
         }],
       });
@@ -102,6 +104,8 @@ export default function useCookTimers({ recipeId, recipeName, servings, soundEna
           id: timer.notifId,
           title: `⏰ ${timer.label} selesai!`,
           body: `${recipeName} — waktunya cek masakan.`,
+          smallIcon: 'ic_stat_lomeal',
+          iconColor: '#10B981',
           schedule: { at: new Date(timer.endsAt), allowWhileIdle: true },
         }],
       }).catch((e) => console.warn('Jadwal timer gagal:', e));

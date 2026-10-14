@@ -1005,6 +1005,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
                 title: 'Lomeal',
                 body: `Waktunya ${s.label.toLowerCase()}! Jangan lupa dicatat ya 🍽️`,
                 schedule: { at: targetTime, allowWhileIdle: true },
+                smallIcon: 'ic_stat_lomeal',
+                iconColor: '#10B981',
               });
             }
           });

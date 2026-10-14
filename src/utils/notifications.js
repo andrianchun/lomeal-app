@@ -65,6 +65,8 @@ export const sendLocalNotification = async ({ id, title, body, extra = {} }) => 
             schedule: { at: new Date(Date.now() + 100) },
             channelId: NOTIF_CHANNEL_AI,
             sound: 'beep.wav',
+            smallIcon: 'ic_stat_lomeal',
+            iconColor: '#10B981',
             extra,
           },
         ],
@@ -73,7 +75,7 @@ export const sendLocalNotification = async ({ id, title, body, extra = {} }) => 
       if (Notification.permission === 'granted') {
         new Notification(title || 'Lomeal', {
           body: body || '',
-          icon: '/bg-dashboard.webp',
+          icon: '/pwa-192x192.png',
         });
       } else if (Notification.permission === 'default') {
         Notification.requestPermission().then((perm) => {
