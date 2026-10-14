@@ -61,6 +61,7 @@ const parseLyfitProfile = (data) => {
     userApiKeys,
     theme: settings.theme || null,
     displayName: data.displayName || null,
+    logymSync: data.logymSync || null,
   };
 };
 

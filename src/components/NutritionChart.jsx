@@ -5,7 +5,7 @@ import { formatNumber } from '../utils/numberFormat';
 import { computeDayTotals, calcTEF, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 
-const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
+const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, lyfitToday, targets = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
   const chartMetricsList = [
       { key: 'calories', label: 'Kalori', color: theme === 'dark' ? '#7c85d4' : '#4f46e5', type: 'grouped',
         subMetrics: [
@@ -39,7 +39,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, targets = {}, s
 
       bioEntries.forEach(entry => {
           const d = new Date(entry.dateStr);
-          const lyfitDay = extractLyfitDay(lyfitYearData, entry.dateStr);
+          const lyfitDay = entry.dateStr === todayStr ? (lyfitToday || extractLyfitDay(lyfitYearData, entry.dateStr)) : extractLyfitDay(lyfitYearData, entry.dateStr);
           const dayTargets = (entry.dateStr >= todayStr ? targets : entry.dayData?.targetSnapshot) || targets;
 
           const summary = computeDaySummary({

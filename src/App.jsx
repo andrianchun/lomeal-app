@@ -21,8 +21,8 @@ import {
   pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym, pushNutritionBioToLogym,
   pushNutritionBatchToLogym,
 } from './utils/biometricSync';
-import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
-import { computeDayTotals, calcTargets } from './data/nutrition';
+import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcReadTodayActivity, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
+import { computeDayTotals, calcTargets, calcBMR, calcTEF } from './data/nutrition';
 import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from './utils/aiFood';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -658,10 +658,18 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   // Mirror biometrik dari Logym (gender/dob/height/weight/activityLevel) — ARAH DATA doang, delta
   // bulking/cutting (nutritionGoal) sekarang murni milik Lomeal (lihat efek pushTargetsToLogym
   // di bawah) jadi gak perlu lagi dibaca balik/dicek kontradiksinya di sini.
+  const [logymFastSync, setLogymFastSync] = useState(null);
+
   useEffect(() => {
-    if (!logymUser) return undefined;
+    if (!logymUser) {
+      setLogymFastSync(null);
+      return undefined;
+    }
     return subscribeLyfitProfile(logymUser.uid, (p) => {
       if (!p) return;
+      if (p.logymSync?.today) {
+        setLogymFastSync(p.logymSync.today);
+      }
       const incoming = {};
       ['gender', 'dob', 'height', 'weight', 'activityLevel'].forEach((k) => { if (p[k]) incoming[k] = p[k]; });
       if (Object.keys(incoming).length === 0) return;
@@ -750,13 +758,47 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
   // --- Health Connect ---
   const [healthAvailable, setHealthAvailable] = useState(false);
-  const [hcBurnedKcal, setHcBurnedKcal] = useState(null);
+  const [hcActivity, setHcActivity] = useState(null); // { steps, burnedKcal }
   useEffect(() => { hcAvailable().then(setHealthAvailable); }, []);
-  useEffect(() => {
-    if (!settings.healthConnectEnabled) { setHcBurnedKcal(null); return; }
-    hcReadBurnedCalories(todayYmd).then(setHcBurnedKcal);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+  const refreshHealth = useCallback(() => {
+    if (!settings.healthConnectEnabled) {
+      setHcActivity(null);
+      return;
+    }
+    hcReadTodayActivity(todayYmd).then((act) => {
+      if (act) setHcActivity(act);
+    });
   }, [settings.healthConnectEnabled, todayYmd]);
+
+  useEffect(() => {
+    refreshHealth();
+  }, [refreshHealth]);
+
+  // Listener saat user kembali ke app (foreground/resume) atau tab aktif kembali:
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshHealth();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    let appStateSub = null;
+    if (Capacitor.isNativePlatform()) {
+      CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) refreshHealth();
+      }).then((sub) => { appStateSub = sub; });
+    }
+
+    const poll = setInterval(refreshHealth, 10 * 60 * 1000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (appStateSub) appStateSub.remove();
+      clearInterval(poll);
+    };
+  }, [refreshHealth]);
   // Backfill kalori-terbakar historis — Lomeal sebelumnya gak punya slot per-hari buat ini
   // (cuma live utk hari ini via hcBurnedKcal di atas). `dayData` per-hari itu objek bebas
   // (lihat saveDay/saveDayFs), jadi field baru `burnedKcal` di situ gak butuh migrasi skema.
@@ -830,8 +872,80 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       showAlert('Gagal menyambungkan Health Connect: ' + e.message);
     }
   };
-  // Dashboard: pakai data Logym kalau ada; kalau tidak, jatuh ke Health Connect sebagai cadangan.
-  const dashboardLyfitToday = lyfitToday || (hcBurnedKcal ? { burnedKcal: hcBurnedKcal, workoutCount: 0 } : null);
+  // Sinkronisasi cerdas aktivitas & kalori hari ini:
+  // Menggabungkan 3 sumber secara instan dan tanpa jeda:
+  // 1. logymFastSync (jalur kilat real-time via root doc `logym_users/{uid}`, < 1 detik)
+  // 2. lyfitToday (arsip riwayat tahunan `history_years/{year}`)
+  // 3. hcActivity (Google Health Connect lokal dari HP: langkah & kalori aktif langsung)
+  const dashboardLyfitToday = useMemo(() => {
+    const hist = lyfitToday;
+    const fast = (logymFastSync?.ymd === todayYmd) ? logymFastSync : null;
+
+    // Langkah kaki: ambil angka tertinggi yang terdeteksi
+    const histSteps = Number(hist?.steps) || 0;
+    const fastSteps = Number(fast?.steps) || 0;
+    const hcSteps = Number(hcActivity?.steps) || 0;
+    const maxSteps = Math.max(histSteps, fastSteps, hcSteps);
+    const maxStepsKcal = Math.round(maxSteps * 0.04);
+
+    // Olahraga (EAT dari Logym):
+    const fastExercises = Number(fast?.exercisesCount) || Number(fast?.workoutsCount) || 0;
+    const histWorkouts = Number(hist?.workoutCount) || 0;
+    const finalWorkoutCount = Math.max(fastExercises, histWorkouts);
+    const finalSessionCount = Math.max(
+      Number(fast?.sessionsCount) || 0,
+      Number(hist?.sessionCount) || 0,
+      finalWorkoutCount > 0 ? 1 : 0
+    );
+
+    // BMR
+    const bmrFloor = profile?.targets?.bmr || 0;
+    const bmrBase = bmrFloor || (profile?.physical ? calcBMR(profile.physical) : (profile ? calcBMR(profile) : 0)) || 1600;
+    const bmr = hist?.bmr || fast?.bmr || bmrBase;
+
+    // TEF hari ini dari catatan makanan Lomeal
+    const todayData = daysMap[todayYmd];
+    const eatenTotals = computeDayTotals(todayData, true);
+    const tef = Math.round(calcTEF({
+      protein: eatenTotals.protein,
+      carbs: eatenTotals.carbs,
+      fat: eatenTotals.fat,
+      kcal: eatenTotals.kcal,
+      bmr,
+    }).total);
+
+    // Hitungan kalori terbakar lokal dari Health Connect (jika Logym belum dibuka)
+    const neatKcal = maxStepsKcal;
+    const hcActiveBurn = Number(hcActivity?.burnedKcal) || 0;
+    const extraActive = Math.max(0, hcActiveBurn - neatKcal);
+    const localHcTdee = (maxSteps > 0 || hcActiveBurn > 0)
+      ? Math.round(bmr + tef + neatKcal + extraActive)
+      : 0;
+
+    // Kalori dari Logym (fast sync atau history)
+    const logymBurned = Math.max(Number(fast?.kcal) || 0, Number(hist?.burnedKcal) || 0);
+
+    // Kalori total final
+    const finalBurnedKcal = Math.max(logymBurned, localHcTdee);
+
+    // Jika tidak ada data aktivitas sama sekali dan bukan user Logym
+    if (!hist && !fast && !hcActivity && !logymUser) return null;
+
+    return {
+      burnedKcal: finalBurnedKcal > 0 ? finalBurnedKcal : (hist?.burnedKcal || null),
+      floorKcal: hist?.floorKcal || Math.round(bmr + neatKcal),
+      steps: maxSteps,
+      stepsKcal: maxStepsKcal,
+      bmr,
+      weight: hist?.weight || profile?.physical?.weight || null,
+      height: hist?.height || profile?.physical?.height || null,
+      workoutCount: finalWorkoutCount,
+      sessionCount: finalSessionCount,
+      workoutNames: hist?.workoutNames || [],
+      nutritionOverride: hist?.nutritionOverride || null,
+      workouts: hist?.workouts || [],
+    };
+  }, [lyfitToday, logymFastSync, hcActivity, todayYmd, profile, daysMap, logymUser]);
 
   // --- Pengingat Catat Makan (LocalNotifications, cuma aktif di APK Android/iOS) ---
   useEffect(() => {

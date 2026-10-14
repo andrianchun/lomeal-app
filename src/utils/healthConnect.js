@@ -119,6 +119,38 @@ export const hcReadBurnedCalories = async (ymd) => {
   return byDay[ymd] ?? null;
 };
 
+// Baca ringkasan aktivitas hari ini (langkah + kalori terbakar) langsung dari Health Connect
+export const hcReadTodayActivity = async (ymd) => {
+  if (!isNative()) return null;
+  const startISO = new Date(`${ymd}T00:00:00`).toISOString();
+  const endISO = new Date(`${ymd}T23:59:59`).toISOString();
+  const H = Health;
+
+  let steps = 0;
+  try {
+    const res = await H.queryAggregated({
+      dataType: 'steps',
+      startDate: startISO,
+      endDate: endISO,
+      bucket: 'day',
+      aggregation: 'sum',
+    });
+    for (const s of res?.samples || []) {
+      if (s.value > 0) steps += Math.round(s.value);
+    }
+  } catch (e) {
+    console.warn('hcReadTodayActivity steps gagal:', e);
+  }
+
+  const byDay = await readCaloriesByDay(startISO, endISO);
+  const burnedKcal = byDay[ymd] ?? null;
+
+  return {
+    steps,
+    burnedKcal,
+  };
+};
+
 // ---------- SINKRONISASI NUTRISI KE HEALTH CONNECT (STANDAR ENTERPRISE) ----------
 // Menggunakan custom plugin native LomealHealth jika tersedia di APK (mendukung NutritionRecord
 // lengkap: mealType, nama makanan, protein, karbohidrat, lemak, serat, natrium, dan jam aktual).

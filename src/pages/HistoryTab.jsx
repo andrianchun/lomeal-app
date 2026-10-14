@@ -570,7 +570,7 @@ const HistoryTab = ({
       return { ...baseTargets, kcal: baseKcal };
     }
 
-    const lyfitDay = extractLyfitDay(lyfitYearData, ymd) || (isToday ? lyfitToday : null);
+    const lyfitDay = isToday ? (lyfitToday || extractLyfitDay(lyfitYearData, ymd)) : extractLyfitDay(lyfitYearData, ymd);
     const summary = computeDaySummary({
       day: dayData || {},
       targets: baseTargets,

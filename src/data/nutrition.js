@@ -480,7 +480,7 @@ export const computeDaySummary = ({
   const manualBurn = Number(profile?.settings?.manualBurnKcal) || 0;
   let burnedTotal = 0;
   if (logymUser) {
-    burnedTotal = Math.round(Number(lyfitDay?.burnedKcal) || (bmr + tef + neatKcal));
+    burnedTotal = Math.round(Math.max(Number(lyfitDay?.burnedKcal) || 0, bmr + tef + neatKcal));
   } else {
     burnedTotal = Math.round(Math.max(bmr + tef + neatKcal, manualBurn));
   }

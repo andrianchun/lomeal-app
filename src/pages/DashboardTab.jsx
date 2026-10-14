@@ -395,7 +395,8 @@ const DashboardTab = ({
              <div className="pt-2 pb-4 no-swipe">
                  <NutritionChart
                      t={t} theme={theme} daysMap={daysMap} targets={targets}
-                     lyfitYearData={lyfitToday === null && lyfitToday === undefined ? null : lyfitYearData} 
+                     lyfitYearData={lyfitToday === null && lyfitToday === undefined ? null : lyfitYearData}
+                     lyfitToday={lyfitToday}
                  />
              </div>
          </div>

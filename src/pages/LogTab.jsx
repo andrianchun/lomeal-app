@@ -557,7 +557,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // Base targets: Untuk hari ini (live) & tanggal depan, selalu pakai profile.targets terbaru.
   // Untuk tanggal lampau, pakai day.targetSnapshot (arsip target hari itu).
   const targets = (isToday || isFuture ? profile?.targets : (day.targetSnapshot || profile?.targets)) || {};
-  const selectedLyfitDay = extractLyfitDay(lyfitYearData, selectedYmd) || (isToday ? lyfitToday : null);
+  const selectedLyfitDay = isToday ? (lyfitToday || extractLyfitDay(lyfitYearData, selectedYmd)) : extractLyfitDay(lyfitYearData, selectedYmd);
 
   const summary = useMemo(() => computeDaySummary({
     day,
