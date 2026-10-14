@@ -2406,16 +2406,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                              </div>
                            ) : (
                              <div className="absolute top-3 right-3 flex items-center gap-2">
+                               <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP" title="Simpan ke HP"><Download size={16} /></button>
                                {isEditingItems && (
-                                 <>
-                                   <button onClick={() => downloadPhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" aria-label="Simpan ke HP" title="Simpan ke HP"><Download size={16} /></button>
-                                   <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" title="Potong / Edit foto" aria-label="Potong foto"><Edit2 size={16} /></button>
-                                 </>
-                               )}
-                               {(isEditingItems || slide.items.length === 0) && (
-                                 <button onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)} disabled={aiBusy} className={`p-2 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white backdrop-blur-md active:scale-95 shadow-md shadow-emerald-500/30 ${aiBusy ? 'opacity-50' : ''}`} title="Hitung Ulang Gizi dengan AI" aria-label="Hitung Ulang Gizi dengan AI">
-                                   {aiBusy ? <Loader2 size={16} className="animate-spin" /> : <Calculator size={16} />}
-                                 </button>
+                                 <button onClick={() => setEditingPhotoObj({ sessionId: detailSession, photo: slide.photo })} className="p-2 rounded-full bg-black/40 text-white backdrop-blur-md active:scale-95" title="Potong / Edit foto" aria-label="Potong foto"><Edit2 size={16} /></button>
                                )}
                                {(isEditingItems || slide.items.length === 0) && (
                                  <button onClick={() => removePhoto(detailSession, slide.photo)} className="p-2 rounded-full bg-red-500/80 hover:bg-red-500 text-white backdrop-blur-md active:scale-95" aria-label="Hapus foto" title="Hapus foto"><X size={16} /></button>
@@ -2743,22 +2736,16 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                          </div>
                          {slide.items.length === 0 && (
                            slide.type === 'photo' ? (
-                             <div className={`mt-2 p-5 text-center rounded-3xl border border-dashed ${t.border} flex flex-col items-center gap-3.5 ${t.bgCard}`}>
-                               <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                                 <Sparkles size={24} />
-                               </div>
-                               <div>
-                                 <p className={`body-md font-bold ${t.textMain}`}>Foto Belum Dianalisis</p>
-                                 <p className={`caption ${t.textMuted} mt-1 max-w-[260px]`}>Makanan sudah habis? Tenang, foto aman tersimpan. Ketuk tombol di bawah untuk hitung gizi otomatis.</p>
-                               </div>
+                             <div className={`mt-2 p-4 text-center rounded-2xl border border-dashed ${t.border} flex flex-col items-center gap-2.5 ${t.bgCard}`}>
+                               <p className={`body-md font-medium ${t.textMuted}`}>Foto belum berhasil dianalisis</p>
                                <button
                                  type="button"
                                  onClick={() => handleReanalyzeSessionPhoto(detailSession, slide.photo)}
                                  disabled={aiBusy}
-                                 className={`w-full py-3 px-4 rounded-2xl ${t.bgAccent} text-white font-bold body-md flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 active:scale-95 transition-all ${aiBusy ? 'opacity-50' : ''}`}
+                                 className={`w-full py-2.5 px-4 rounded-xl ${t.bgAccent} text-white font-bold body-md flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 active:scale-95 transition-all ${aiBusy ? 'opacity-50' : ''}`}
                                >
-                                 {aiBusy ? <Loader2 size={18} className="animate-spin" /> : <Calculator size={18} />}
-                                 <span>{aiBusy ? 'Sedang Menghitung...' : 'Analisis Ulang dengan AI'}</span>
+                                 {aiBusy ? <Loader2 size={16} className="animate-spin" /> : <RotateCw size={16} />}
+                                 <span>{aiBusy ? 'Menganalisis...' : 'Analisis Ulang'}</span>
                                </button>
                              </div>
                            ) : (
