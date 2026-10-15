@@ -48,7 +48,7 @@ export default function CameraViewfinderModal({
 
   useBackClose(open, handleClose);
 
-  // Inisialisasi kamera real-time WebRTC
+  // Inisialisasi kamera real-time WebRTC — selalu prioritaskan kamera belakang
   const startCamera = useCallback(async (mode = 'environment') => {
     stopTracks();
     setIsStarting(true);
@@ -61,16 +61,60 @@ export default function CameraViewfinderModal({
         throw new Error('Kamera langsung tidak didukung di perangkat ini.');
       }
 
-      const constraints = {
-        video: {
-          facingMode: { ideal: mode },
-          width: { ideal: 1920, max: 2560 },
-          height: { ideal: 1080, max: 1440 },
-        },
-        audio: false,
+      // Deteksi device kamera belakang secara eksplisit
+      let targetDeviceId = null;
+      try {
+        if (navigator.mediaDevices.enumerateDevices) {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevs = devices.filter((d) => d.kind === 'videoinput');
+          if (mode === 'environment' && videoDevs.length > 0) {
+            // Cari device dengan label kamera belakang
+            const rearDev = videoDevs.find((d) =>
+              /back|rear|environment|belakang|main|camera\s*0/i.test(d.label)
+            );
+            if (rearDev?.deviceId) {
+              targetDeviceId = rearDev.deviceId;
+            }
+          }
+        }
+      } catch (_) {}
+
+      // Susun constraints resolusi
+      const baseVideoConstraints = {
+        width: { ideal: 1920, max: 2560 },
+        height: { ideal: 1080, max: 1440 },
       };
 
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      let mediaStream = null;
+
+      // Percobaan 1: Menggunakan deviceId kamera belakang spesifik jika terdeteksi
+      if (targetDeviceId) {
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { ...baseVideoConstraints, deviceId: { exact: targetDeviceId } },
+            audio: false,
+          });
+        } catch (_) {}
+      }
+
+      // Percobaan 2: Menggunakan facingMode exact environment untuk cegah salah pilih selfie
+      if (!mediaStream && mode === 'environment') {
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { ...baseVideoConstraints, facingMode: { exact: 'environment' } },
+            audio: false,
+          });
+        } catch (_) {}
+      }
+
+      // Percobaan 3: Fallback ke ideal facingMode jika peramban tidak mendukung exact
+      if (!mediaStream) {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { ...baseVideoConstraints, facingMode: { ideal: mode } },
+          audio: false,
+        });
+      }
+
       activeStreamRef.current = mediaStream;
       setStream(mediaStream);
 
@@ -93,10 +137,11 @@ export default function CameraViewfinderModal({
     }
   }, [stopTracks]);
 
-  // Efek buka/tutup modal
+  // Efek buka/tutup modal: Selalu kunci ke kamera belakang setiap kali modal dibuka!
   useEffect(() => {
     if (open) {
-      startCamera(facingMode);
+      setFacingMode('environment');
+      startCamera('environment');
     } else {
       stopTracks();
       setIsFrozen(false);
@@ -106,7 +151,7 @@ export default function CameraViewfinderModal({
     return () => {
       stopTracks();
     };
-  }, [open, startCamera, stopTracks, facingMode]);
+  }, [open, startCamera, stopTracks]);
 
   // Toggle Senter
   const toggleTorch = async () => {

@@ -12,9 +12,10 @@ export const isNativeApp = () => Capacitor.isNativePlatform();
 // pipeline foto yang sudah ada (compressImage → upload → Storage) gak perlu diubah.
 export const captureToFile = async () => {
   if (!isNativeApp()) return null;
-  const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
+  const { Camera, CameraResultType, CameraSource, CameraDirection } = await import('@capacitor/camera');
   const photo = await Camera.getPhoto({
     source: CameraSource.Camera,
+    direction: CameraDirection.Rear, // Selalu prioritaskan kamera belakang (hindari kamera selfie)
     resultType: CameraResultType.Uri, // Uri, bukan Base64 — hemat memori buat foto belasan MP
     saveToGallery: localStorage.getItem('lomeal_autosave_camera') !== 'false',
     correctOrientation: true,
