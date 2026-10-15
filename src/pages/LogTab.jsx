@@ -6,6 +6,7 @@ import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity }
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
+import CameraViewfinderModal from '../components/CameraViewfinderModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS, MONTH_NAMES_ID, getMonthKey } from '../data/constants';
 import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
@@ -224,6 +225,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const [listening, setListening] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
   const [cameraLoadingText, setCameraLoadingText] = useState('Membuka Kamera...');
+  const [viewfinderOpen, setViewfinderOpen] = useState(false);
+  const [viewfinderCallback, setViewfinderCallback] = useState(null);
   const [rackExpanded, setRackExpanded] = useState(false);
   const [saveToDb, setSaveToDb] = useState(false); // Default jangan simpan ke custom DB agar tidak menumpuk
   const [fullscreenPhotos, setFullscreenPhotos] = useState(null);
@@ -423,9 +426,17 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  // Di APK: jepret lewat kamera native, hasilnya OTOMATIS masuk galeri HP (saveToGallery).
-  // Di browser: jatuh balik ke <input capture> — web gak boleh nulis ke galeri.
+  // Kamera instan in-app (0ms shutter freeze) dengan fallback ke kamera sistem
   const openCamera = async (onFile, inputRef) => {
+    if (navigator?.mediaDevices?.getUserMedia) {
+      setViewfinderCallback(() => onFile);
+      setViewfinderOpen(true);
+      return;
+    }
+    openSystemCamera(onFile, inputRef);
+  };
+
+  const openSystemCamera = async (onFile, inputRef) => {
     if (isNativeApp()) {
       setCameraLoadingText('Membuka Kamera...');
       setCameraLoading(true);
@@ -439,7 +450,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         setCameraLoading(false);
       }
     }
-    inputRef.current?.click();
+    inputRef?.current?.click();
   };
 
   // Di APK: pilih dari galeri native (@capacitor/camera).
@@ -3176,6 +3187,23 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           </div>
         </div>
       )}
+
+      {/* ===== IN-APP CAMERA VIEWFINDER (INSTANT 0ms FREEZE) ===== */}
+      <CameraViewfinderModal
+        open={viewfinderOpen}
+        onClose={() => setViewfinderOpen(false)}
+        onCapture={(file) => {
+          if (viewfinderCallback) viewfinderCallback(file);
+          setViewfinderOpen(false);
+        }}
+        onOpenGallery={() => {
+          openGallery(viewfinderCallback || runPhotoScan, galleryRef);
+        }}
+        onFallbackSystemCamera={() => {
+          openSystemCamera(viewfinderCallback || runPhotoScan, cameraRef);
+        }}
+      />
+
       {/* ===== GLOBAL CAMERA / GALLERY LOADING OVERLAY ===== */}
       {cameraLoading && (
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300">
