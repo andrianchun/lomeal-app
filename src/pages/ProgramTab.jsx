@@ -1047,25 +1047,33 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                   <p className={`caption text-center ${t.textMuted} py-6`}>Saat ini tidak ada meal prep di Lomeal.</p>
                 ) : (
                   mealPreps.map(b => (
-                    <div key={b.id} className={`py-4 border-b last:border-b-0 border-black/5 dark:border-white/5 anim-rise`}>
-                      <div className="flex items-start gap-3">
+                    <div key={b.id} className={`py-3.5 border-b last:border-b-0 border-black/5 dark:border-white/5 anim-rise`}>
+                      <div className="flex items-center gap-3">
                         {b.recipeImage && (
-                          <img src={b.recipeImage} alt="thumb" className="w-12 h-12 rounded-xl object-cover shrink-0 bg-black/5 dark:bg-white/5" />
+                          <img src={b.recipeImage} alt="thumb" className="w-10 h-10 rounded-xl object-cover shrink-0 bg-black/5 dark:bg-white/5" />
                         )}
                         <div className="flex-1 min-w-0">
-                          <p className={`font-bold ${t.textMain} line-clamp-3`}>{b.name}</p>
-                          <p className={`caption font-medium mt-0.5 ${t.textMuted}`}>
-                            Sisa <span className={b.remainingPortions > 0 ? 'text-emerald-500 font-bold' : 'text-red-400 font-bold'}>{b.remainingPortions}</span>/{b.initialPortions} porsi
-                            {b.perPortion?.kcal ? ` · ${Math.round(b.perPortion.kcal)}Kcal · ${macroText(b.perPortion)}` : ''}
-                          </p>
-                          {b.domusItemId && (
-                            <span className={`inline-flex items-center gap-1 mt-2 px-2.5 py-1 rounded-full caption border ${STATUS.info.soft} ${STATUS.info.text} ${STATUS.info.border}`}>
-                              <Warehouse size={12} /> Domus{b.domusLocationName ? ` · ${b.domusLocationName}` : ''}
+                          <div className="flex items-center justify-between gap-3">
+                            <p className={`font-bold ${t.textMain} truncate`}>{b.name}</p>
+                            <span className={`shrink-0 caption font-bold ${b.remainingPortions > 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                              {b.remainingPortions}/{b.initialPortions} porsi
                             </span>
-                          )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {b.perPortion?.kcal ? (
+                              <span className={`caption ${t.textMuted} truncate`}>
+                                {Math.round(b.perPortion.kcal)} Kcal · {macroText(b.perPortion)}
+                              </span>
+                            ) : null}
+                            {b.domusItemId && (
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${STATUS.info.soft} ${STATUS.info.text} ${STATUS.info.border}`}>
+                                <Warehouse size={10} /> Domus{b.domusLocationName ? ` · ${b.domusLocationName}` : ''}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-3 overflow-x-auto hide-scrollbar">
+                      <div className="flex items-center gap-2 mt-2.5 overflow-x-auto hide-scrollbar">
                         {!b.recipeId && (
                           <button onClick={() => setProcessingInbox({ id: b.id, text: b.name, source: 'lomeal', nutrition: b.perPortion })} className={`px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-500 caption font-bold flex items-center gap-1 shrink-0`}>
                             <Calculator size={12} /> Hitung
@@ -1123,20 +1131,26 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                       <p className={`caption font-bold text-amber-500 mb-3`}>{locName.toUpperCase()}</p>
                       <div className="space-y-4">
                         {items.map(i => (
-                          <div key={i.id} className="anim-rise py-3">
-                            <div className="flex items-start gap-3">
+                          <div key={i.id} className="anim-rise py-3 border-b last:border-b-0 border-black/5 dark:border-white/5">
+                            <div className="flex items-center gap-3">
                               {(i.imageUrl || i.image) && (
-                                <img src={i.imageUrl || i.image} alt="thumb" className="w-12 h-12 rounded-xl object-cover shrink-0 bg-black/5 dark:bg-white/5" />
+                                <img src={i.imageUrl || i.image} alt="thumb" className="w-10 h-10 rounded-xl object-cover shrink-0 bg-black/5 dark:bg-white/5" />
                               )}
                               <div className="flex-1 min-w-0">
-                                <p className={`font-bold ${t.textMain} line-clamp-3`}>{i.name}</p>
-                                <p className={`caption mt-0.5 ${t.textMuted}`}>
-                                  Sisa: {formatStock(itemStock(i)) || '?'}
-                                  {i.nutrition?.kcal ? ` · ${Math.round(i.nutrition.kcal)}Kcal · ${macroText(i.nutrition)}` : ''}
-                                </p>
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className={`font-bold ${t.textMain} truncate`}>{i.name}</p>
+                                  <span className="shrink-0 caption font-bold text-amber-500">
+                                    {formatStock(itemStock(i)) || '?'}
+                                  </span>
+                                </div>
+                                {i.nutrition?.kcal ? (
+                                  <p className={`caption mt-0.5 ${t.textMuted} truncate`}>
+                                    {Math.round(i.nutrition.kcal)} Kcal · {macroText(i.nutrition)}
+                                  </p>
+                                ) : null}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 mt-3 overflow-x-auto hide-scrollbar">
+                            <div className="flex items-center gap-2 mt-2.5 overflow-x-auto hide-scrollbar">
                               <button onClick={() => setProcessingInbox({ id: i.id, text: i.name, source: 'domus', originalData: i })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 shrink-0`}>
                                 <Calculator size={12} /> Hitung
                               </button>
