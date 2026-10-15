@@ -86,7 +86,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     }).then((handle) => { listenerHandle = handle; });
     return () => listenerHandle?.remove();
   }, [location.pathname, navigate]);
-  const { dialog, showAlert, showConfirm } = useDialog(theme === 'dark');
+  const { dialog, showAlert, showConfirm, showPrompt } = useDialog(theme === 'dark');
   const { toastPortal, showToast } = useToast(theme === 'dark');
 
   const [socialOpen, setSocialOpen] = useState(false);
@@ -1104,7 +1104,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     waterGoal: profile?.targets?.waterGoal,
     lyfitToday: dashboardLyfitToday,
     lyfitYearData,
-    showAlert, showConfirm, showToast,
+    showAlert, showConfirm, showPrompt, showToast,
     chatText, setChatText, aiBusy, setAiBusy, aiAbortController, setAiAbortController, aiResult, setAiResult, aiTargetSession, setAiTargetSession,
   };
 

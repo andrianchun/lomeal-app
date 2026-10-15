@@ -27,7 +27,7 @@ import useBackClose from '../hooks/useBackClose';
 /**
  * TAB 4: RENCANA & PROGRAM
  */
-const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, inboxItems = [], customFoods, daysMap, saveDay, shareRecipe, showAlert, showToast, showConfirm, profile, saveProfilePatch, aiKey }) => {
+const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, recipes, saveRecipesFn, mealPreps, saveMealPrepsFn, inboxItems = [], customFoods, daysMap, saveDay, shareRecipe, showAlert, showToast, showConfirm, showPrompt, profile, saveProfilePatch, aiKey }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(location.state?.swipeDir === 'right' ? 'meal_prep' : 'resep'); // 'resep', 'meal_prep'
@@ -1146,10 +1146,17 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                               <button disabled={!i.nutrition?.kcal} onClick={() => setAssigning({ id: i.id, name: i.name, nutrition: i.nutrition, remainingPortions: 1, initialPortions: 1, _source: 'domus' })} className={`px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-500 caption font-bold flex items-center gap-1 shrink-0 disabled:opacity-30`}>
                                 <CalendarPlus size={12} /> Jadwal
                               </button>
-                              <button onClick={() => {
+                              <button onClick={async () => {
                                 const cur = itemStock(i);
-                                const input = window.prompt(`Sisa stok tinggal berapa? (0 untuk buang semua)\nSaat ini: ${formatStock(cur) || '-'}`, cur ? String(cur.value) : '');
-                                if (input === null) return;
+                                const input = await showPrompt('Sisa stok tinggal berapa? (0 untuk buang semua)', {
+                                  title: 'Update Stok Matang',
+                                  subtitle: `Saat ini: ${formatStock(cur) || '-'}`,
+                                  defaultValue: cur ? String(cur.value) : '',
+                                  inputType: 'number',
+                                  confirmText: 'Simpan',
+                                  cancelText: 'Batal',
+                                });
+                                if (input === null || input === undefined) return;
                                 const val = Number(input);
                                 if (!Number.isFinite(val)) return showToast('Isi dengan angka ya.');
                                 if (val <= 0) {
@@ -1157,7 +1164,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                                 } else {
                                   updateDomusItemQuantity(i.id, val, cur?.unit || i.qtyUnit || '').then(() => showToast('Sisa stok diupdate!'));
                                 }
-                              }} title="Buang" className={`p-1.5 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center shrink-0 ml-auto hover:bg-red-500/20 active:scale-95 transition-all`}>
+                              }} title="Update Sisa Stok" className={`p-1.5 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center shrink-0 ml-auto hover:bg-red-500/20 active:scale-95 transition-all`}>
                                 <X size={15} />
                               </button>
                             </div>
