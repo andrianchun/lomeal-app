@@ -146,13 +146,31 @@ svg:focus, .recharts-wrapper:focus, .recharts-surface:focus { outline: none !imp
 * { outline: none !important; -webkit-tap-highlight-color: transparent !important; }
 .recharts-wrapper, .recharts-surface, .recharts-layer { outline: none !important; }
 
+/* Hilangkan semua kontrol, play button overlay, dan poster bawaan Android WebView / WebKit */
 video::-webkit-media-controls,
 video::-webkit-media-controls-enclosure,
 video::-webkit-media-controls-panel,
+video::-webkit-media-controls-play-button,
 video::-webkit-media-controls-start-playback-button,
-video::-webkit-media-controls-overlay-play-button {
+video::-webkit-media-controls-overlay-play-button,
+video::-webkit-media-controls-overlay-enclosure,
+video::-webkit-media-controls-current-time-display,
+video::-webkit-media-controls-time-remaining-display,
+video::-webkit-media-controls-timeline,
+video::-webkit-media-controls-volume-control-container,
+video::-webkit-media-controls-mute-button,
+video::-webkit-media-controls-fullscreen-button {
   display: none !important;
-  -webkit-appearance: none;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+video {
+  -webkit-touch-callout: none !important;
 }
 
 /* GLOBAL MODAL SCROLL LOCK */

@@ -361,8 +361,21 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const photosOf = (sessionId) => [...storedPhotos(sessionId), ...(pendingPhotos[sessionId] || [])];
 
   const writePhotos = async (sessionId, list) => {
+    // Deduplikasi otomatis berdasar ID dan URL agar tidak pernah ada foto kembar di sesi
+    const seenIds = new Set();
+    const seenUrls = new Set();
+    const uniqueList = (list || []).filter((p) => {
+      if (!p) return false;
+      if (p.id && seenIds.has(p.id)) return false;
+      const urlKey = p.originalUrl || p.url;
+      if (urlKey && seenUrls.has(urlKey)) return false;
+      if (p.id) seenIds.add(p.id);
+      if (urlKey) seenUrls.add(urlKey);
+      return true;
+    });
+
     const next = { ...photosRef.current };
-    if (list.length) next[sessionId] = list; else delete next[sessionId];
+    if (uniqueList.length) next[sessionId] = uniqueList; else delete next[sessionId];
     applyPhotos(next); // optimistic, sama polanya kayak saveDay di App.jsx
     await saveDayPhotos(user.uid, selectedYmd, next);
   };
@@ -386,10 +399,22 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // Berkas yang sudah tidak dirujuk lagi dibuang biar tidak menumpuk jadi tagihan Storage.
   const dropFiles = (...urls) => [...new Set(urls.filter(Boolean))].forEach(deleteImageFromFirebase);
 
+  const pendingPhotoUploadsRef = useRef(new Set());
+
   // Foto langsung kelihatan detik itu juga lewat object URL lokal — kompresi (~1 detik untuk
   // foto belasan MP) dan upload jalan di belakang. Preview disimpan terpisah dari daftar
   // tersimpan supaya gak ketiban snapshot Firestore yang datang di tengah proses.
   const addPhoto = async (sessionId, fileOrDataUrl, forcedId = null) => {
+    if (!sessionId || !fileOrDataUrl) return;
+
+    // Cegah upload dobel jika ada tap cepat berulang kali untuk berkas yang sama
+    const uploadKey = `${sessionId}_${typeof fileOrDataUrl === 'string' ? fileOrDataUrl.slice(0, 80) : `${fileOrDataUrl.name || ''}_${fileOrDataUrl.size || 0}`}`;
+    if (pendingPhotoUploadsRef.current.has(uploadKey)) {
+      console.warn('Duplicate photo upload prevented:', uploadKey);
+      return;
+    }
+    pendingPhotoUploadsRef.current.add(uploadKey);
+
     const isString = typeof fileOrDataUrl === 'string';
     const tempId = forcedId || `p_${Date.now()}`;
     let sourceToUpload = fileOrDataUrl;
@@ -415,12 +440,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     try {
       const { url, thumbUrl } = await uploadPhotoPair(sessionId, sourceToUpload);
       await writePhotos(sessionId, [
-        ...storedPhotos(sessionId),
+        ...storedPhotos(sessionId).filter((p) => p.id !== tempId),
         { id: tempId, url, originalUrl: url, thumbUrl, originalThumbUrl: thumbUrl, time: new Date().toTimeString().slice(0, 5) },
       ]);
     } catch (e) {
       showAlert(`Gagal menyimpan foto: ${e.message}`);
     } finally {
+      pendingPhotoUploadsRef.current.delete(uploadKey);
       setPendingPhotos((prev) => ({ ...prev, [sessionId]: (prev[sessionId] || []).filter((p) => p.id !== tempId) }));
       if (!isString && localUrl && localUrl.startsWith('blob:')) URL.revokeObjectURL(localUrl);
     }
@@ -1229,8 +1255,16 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
+  const isConfirmingAiRef = useRef(false);
+  const [isConfirmingAi, setIsConfirmingAi] = useState(false);
+
   const confirmAiResult = async () => {
-    const { foods, photoDataUrl, photoFile } = aiResult;
+    if (isConfirmingAiRef.current || !aiResult) return;
+    isConfirmingAiRef.current = true;
+    setIsConfirmingAi(true);
+
+    try {
+      const { foods, photoDataUrl, photoFile } = aiResult;
     const meals = { ...(day.meals || {}) };
     const isFirstEntry = (meals[aiTargetSession] || []).length === 0;
     // 1. Lacak sinyal koreksi manual (jika kalori akhir diedit jauh dari prediksi awal Lomy)
@@ -1313,6 +1347,10 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     setAiResult(null);
     setDetailSession(aiTargetSession);
     showToast(`${foods.length} catatan makanan berhasil disimpan!`);
+    } finally {
+      isConfirmingAiRef.current = false;
+      setIsConfirmingAi(false);
+    }
   };
 
   const baseVoiceTextRef = useRef('');
@@ -2240,11 +2278,12 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               </button>
               <button
                 type="button"
-                disabled={!aiResult.foods.length}
+                disabled={!aiResult.foods.length || isConfirmingAi}
                 onClick={confirmAiResult}
-                className="w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold body-md shadow-md shadow-emerald-500/20 disabled:opacity-40 active:scale-95 transition-all text-center"
+                className="w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold body-md shadow-md shadow-emerald-500/20 disabled:opacity-40 active:scale-95 transition-all text-center flex items-center justify-center gap-2 cursor-pointer"
               >
-                Simpan
+                {isConfirmingAi ? <Loader2 size={18} className="animate-spin" /> : null}
+                <span>{isConfirmingAi ? 'Menyimpan...' : 'Simpan'}</span>
               </button>
             </div>
           </div>
@@ -2643,9 +2682,14 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                                       {/* Baris 3: Kalori (kiri) & Makro P K L (kanan) */}
                                       <div className="flex items-center justify-between gap-2 caption">
                                         <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                          <span className={`text-xs font-bold ${t.textMain} tabular-nums`}>
-                                            {Math.round(e.nutrition?.kcal || 0)} kkal
-                                          </span>
+                                          <div className="flex items-baseline gap-1 tabular-nums">
+                                            <span className={`text-sm font-extrabold ${t.textMain}`}>
+                                              {Math.round(e.nutrition?.kcal || 0)}
+                                            </span>
+                                            <span className={`text-xs font-semibold ${t.textMuted}`}>
+                                              kkal
+                                            </span>
+                                          </div>
                                           {!isGram && <span className={`text-xs ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
                                           {(e.source === 'recipe' || e.isMealPrep) && (
                                             <span className="inline-flex items-center gap-1 ml-0.5 text-emerald-500" title="Meal Prep"><ChefHat size={13} strokeWidth={2.5} /></span>
@@ -2693,9 +2737,14 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                                       {/* Baris 2: Kalori (kiri) & Makro P K L (kanan) */}
                                       <div className="flex items-center justify-between gap-2 caption">
                                         <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                          <span className={`text-xs font-bold ${t.textMain} tabular-nums`}>
-                                            {Math.round(e.nutrition?.kcal || 0)} kkal
-                                          </span>
+                                          <div className="flex items-baseline gap-1 tabular-nums">
+                                            <span className={`text-sm font-extrabold ${t.textMain}`}>
+                                              {Math.round(e.nutrition?.kcal || 0)}
+                                            </span>
+                                            <span className={`text-xs font-semibold ${t.textMuted}`}>
+                                              kkal
+                                            </span>
+                                          </div>
                                           {!isGram && <span className={`text-xs ${t.textMuted}`}>≈ {Math.round(e.grams)} g</span>}
                                           {(e.source === 'recipe' || e.isMealPrep) && (
                                             <span className="inline-flex items-center gap-1 ml-0.5 text-emerald-500" title="Meal Prep"><ChefHat size={13} strokeWidth={2.5} /></span>
@@ -3171,16 +3220,41 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                     </div>
                   )}
 
-                  {/* Tombol Unduh menempel langsung di sudut foto */}
-                  <button
-                    type="button"
-                    onClick={() => downloadPhoto(detailSession, photo)}
-                    className="absolute top-3 right-3 p-2.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white active:scale-95 transition-all shadow-lg"
-                    title="Unduh foto"
-                    aria-label="Unduh foto"
-                  >
-                    <Download size={18} />
-                  </button>
+                  {/* Tombol Hapus & Unduh menempel langsung di sudut foto */}
+                  <div className="absolute top-3 right-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const targetPhoto = photo;
+                        const remaining = fullscreenPhotos.filter(p => p.id !== targetPhoto.id);
+                        await removePhoto(detailSession, targetPhoto);
+                        if (remaining.length > 0) {
+                          setFullscreenPhotos(remaining);
+                        } else {
+                          setFullscreenPhotos(null);
+                        }
+                      }}
+                      className="p-2.5 rounded-full bg-red-600/80 hover:bg-red-600 backdrop-blur-md text-white active:scale-95 transition-all shadow-lg cursor-pointer"
+                      title="Hapus foto ini"
+                      aria-label="Hapus foto"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadPhoto(detailSession, photo);
+                      }}
+                      className="p-2.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white active:scale-95 transition-all shadow-lg cursor-pointer"
+                      title="Unduh foto"
+                      aria-label="Unduh foto"
+                    >
+                      <Download size={18} />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

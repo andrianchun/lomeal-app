@@ -788,8 +788,8 @@ export const toDataUrl = async (src) => {
 //  - PHOTO_KEEPSAKE: yang diarsipkan di Storage sebagai kenang-kenangan.
 //  - PHOTO_THUMB   : yang dipajang di kartu sesi & strip. Tanpa ini tiap kartu mengunduh
 //                    berkas arsip penuh — 5 foto sehari ≈ 2MB kuota data tiap hari dibuka.
-export const PHOTO_KEEPSAKE = { maxSide: 2048, maxChars: 2000000, quality: 0.88 };
-export const PHOTO_AI = { maxSide: 1024, maxChars: 450000, quality: 0.8 };
+export const PHOTO_KEEPSAKE = { maxSide: 2560, maxChars: 3500000, quality: 0.90 };
+export const PHOTO_AI = { maxSide: 2560, maxChars: 4000000, quality: 0.92 };
 export const PHOTO_THUMB = { maxSide: 400, maxChars: 120000, quality: 0.7 };
 
 export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {

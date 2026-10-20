@@ -76,13 +76,15 @@ export const sendLocalNotification = async ({ id, title, body, extra = {} }) => 
         new Notification(title || 'Lomeal', {
           body: body || '',
           icon: '/pwa-192x192.png',
+          badge: '/ic_stat_lomeal.png',
         });
       } else if (Notification.permission === 'default') {
         Notification.requestPermission().then((perm) => {
           if (perm === 'granted') {
             new Notification(title || 'Lomeal', {
               body: body || '',
-              icon: '/bg-dashboard.webp',
+              icon: '/pwa-192x192.png',
+              badge: '/ic_stat_lomeal.png',
             });
           }
         });
