@@ -20,7 +20,6 @@ export default function CameraViewfinderModal({
   const [facingMode, setFacingMode] = useState('environment');
   const [errorMessage, setErrorMessage] = useState(null);
   const [isConfirming, setIsConfirming] = useState(false);
-  const [streamRes, setStreamRes] = useState('');
 
   // Fitur Tap-to-Focus & Zoom
   const [focusTarget, setFocusTarget] = useState(null);
@@ -86,99 +85,53 @@ export default function CameraViewfinderModal({
         throw new Error('Kamera langsung tidak didukung di perangkat ini.');
       }
 
-      // Deteksi device kamera belakang secara eksplisit
-      let targetDeviceId = null;
-      try {
-        if (navigator.mediaDevices.enumerateDevices) {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const videoDevs = devices.filter((d) => d.kind === 'videoinput');
-          if (mode === 'environment' && videoDevs.length > 0) {
-            const rearDev = videoDevs.find((d) =>
-              /back|rear|environment|belakang|main|camera\s*0/i.test(d.label)
-            );
-            if (rearDev?.deviceId) {
-              targetDeviceId = rearDev.deviceId;
-            }
-          }
-        }
-      } catch (_) {}
-
-      // Deteksi orientasi layar (Portrait vs Landscape) agar constraint tidak ditolak browser HP
+      // Deteksi orientasi layar (Portrait vs Landscape)
       const isPortrait = window.innerHeight >= window.innerWidth;
 
-      // Target resolusi sensor HP:
-      // Portrait: Lebar 1080/2160, Tinggi 1920/3840 (Aspek rasio 9:16)
-      // Landscape: Lebar 1920/3840, Tinggi 1080/2160 (Aspek rasio 16:9)
-      const dim4K = isPortrait ? { width: 2160, height: 3840 } : { width: 3840, height: 2160 };
-      const dimFHD = isPortrait ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
-      const dimHD = isPortrait ? { width: 720, height: 1280 } : { width: 1280, height: 720 };
+      // Gunakan resolusi Full HD 1080p standar lensa utama 1x (sudut pandang normal, TIDAK ngezoom, sensor terang)
+      const fhdW = isPortrait ? 1080 : 1920;
+      const fhdH = isPortrait ? 1920 : 1080;
 
       const constraintSets = [
-        // Prioritas 1: 4K Ultra HD (Sensor kamera modern)
+        // Prioritas 1: Full HD 1080p (Standar emas smartphone — sudut pandang normal 1x wide, tajam & jernih)
         {
-          width: { ideal: dim4K.width },
-          height: { ideal: dim4K.height },
-          aspectRatio: isPortrait ? { ideal: 9 / 16 } : { ideal: 16 / 9 },
+          facingMode: { ideal: mode },
+          width: { ideal: fhdW },
+          height: { ideal: fhdH },
         },
-        // Prioritas 2: Full HD 1080p (Standar emas kamera smartphone - tajam, jernih & stabil)
+        // Prioritas 2: Landscape Full HD
         {
-          width: { ideal: dimFHD.width },
-          height: { ideal: dimFHD.height },
-          aspectRatio: isPortrait ? { ideal: 9 / 16 } : { ideal: 16 / 9 },
-        },
-        // Prioritas 3: Landscape Full HD (beberapa vendor kamera hanya mengekspos dimensi landscape)
-        {
+          facingMode: { ideal: mode },
           width: { ideal: 1920 },
           height: { ideal: 1080 },
         },
-        // Prioritas 4: HD 720p
+        // Prioritas 3: HD 720p
         {
-          width: { ideal: dimHD.width },
-          height: { ideal: dimHD.height },
+          facingMode: { ideal: mode },
+          width: { ideal: isPortrait ? 720 : 1280 },
+          height: { ideal: isPortrait ? 1280 : 720 },
         },
-        // Prioritas 5: Default fallback
-        {},
+        // Prioritas 4: Default fallback
+        {
+          facingMode: mode,
+        },
       ];
 
       let mediaStream = null;
 
       for (const c of constraintSets) {
-        // Percobaan A: Menggunakan deviceId kamera belakang spesifik jika terdeteksi
-        if (targetDeviceId) {
-          try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({
-              video: { ...c, deviceId: { exact: targetDeviceId } },
-              audio: false,
-            });
-            if (mediaStream) break;
-          } catch (_) {}
-        }
-
-        // Percobaan B: Menggunakan exact facingMode
-        if (mode === 'environment') {
-          try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({
-              video: { ...c, facingMode: { exact: 'environment' } },
-              audio: false,
-            });
-            if (mediaStream) break;
-          } catch (_) {}
-        }
-
-        // Percobaan C: Menggunakan ideal facingMode
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: { ...c, facingMode: { ideal: mode } },
+            video: c,
             audio: false,
           });
           if (mediaStream) break;
         } catch (_) {}
       }
 
-      // Fallback mutlak jika loop di atas belum menghasilkan stream
       if (!mediaStream) {
         mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: mode },
+          video: true,
           audio: false,
         });
       }
@@ -195,20 +148,7 @@ export default function CameraViewfinderModal({
       // Cek capabilities sensor (torch, zoom, autofocus, resolusi nyata)
       const track = mediaStream.getVideoTracks()[0];
       if (track) {
-        const settings = track.getSettings ? track.getSettings() : {};
         const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-        
-        // Tentukan label kualitas resolusi aktif (4K / FHD / HD)
-        const maxDim = Math.max(settings.width || 0, settings.height || 0);
-        if (maxDim >= 3000) {
-          setStreamRes('4K');
-        } else if (maxDim >= 1800) {
-          setStreamRes('FHD');
-        } else if (maxDim >= 1200) {
-          setStreamRes('HD');
-        } else {
-          setStreamRes('');
-        }
 
         setHasTorch(!!capabilities.torch);
 
@@ -585,11 +525,6 @@ export default function CameraViewfinderModal({
         <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 pointer-events-auto">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-xs font-bold tracking-tight text-white">Lomy Lens</span>
-          {streamRes && (
-            <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-              {streamRes}
-            </span>
-          )}
         </div>
 
         <div className="flex items-center gap-2 pointer-events-auto">
