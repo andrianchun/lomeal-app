@@ -465,22 +465,52 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const openSystemCamera = async (onFile, inputRef) => {
     if (isNativeApp()) {
       let file = null;
+      let cleanupResume = null;
       try {
+        if (onFile === runPhotoScan) {
+          const photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+          const targetSession = detailSession || getNearestSessionId();
+          setAiTargetSession(targetSession);
+          scanSessionContextRef.current = { photoId, targetSession, previewUrl: null };
+
+          // ZERO LATENCY PREVIEW: Begitu user kembali dari kamera bawaan ke Lomeal,
+          // langsung buka sheet seketika (0 milidetik!) tanpa menunggu pembacaan file di background
+          const onResumeFromCamera = () => {
+            if (document.visibilityState === 'visible') {
+              setAiResult(prev => prev || ({
+                foods: [],
+                photoDataUrl: null,
+                photoFile: null,
+                photoId,
+                time: new Date().toTimeString().slice(0, 5),
+                isScanning: true,
+              }));
+            }
+          };
+          window.addEventListener('focus', onResumeFromCamera, { once: true });
+          document.addEventListener('visibilitychange', onResumeFromCamera, { once: true });
+          cleanupResume = () => {
+            window.removeEventListener('focus', onResumeFromCamera);
+            document.removeEventListener('visibilitychange', onResumeFromCamera);
+          };
+        }
+
         file = await captureToFile((immediateWebPath) => {
-          // Buka preview modal di Lomeal seketika (0 DETIK!) dengan foto asli yang baru dijepret
+          // Buka preview modal di Lomeal seketika dengan foto asli yang baru dijepret
           if (onFile === runPhotoScan) {
             startPhotoScanPreview(immediateWebPath);
           }
         });
       } catch (e) {
-        if (/cancel/i.test(e.message || '')) {
-          setAiResult(null);
-          scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
-        } else {
-          setAiResult(null);
+        if (cleanupResume) cleanupResume();
+        setAiResult(null);
+        scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
+        if (!/cancel/i.test(e.message || '')) {
           showAlert(`Gagal membuka kamera: ${e.message}`);
         }
         return;
+      } finally {
+        if (cleanupResume) cleanupResume();
       }
       if (file) onFile(file);
       return;

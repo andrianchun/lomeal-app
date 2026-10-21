@@ -794,15 +794,15 @@ export const PHOTO_THUMB = { maxSide: 400, maxChars: 120000, quality: 0.7 };
 
 export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {
   const img = new Image();
-  const isDataUrl = typeof file === 'string' && file.startsWith('data:');
+  const isUrlString = typeof file === 'string';
   let url = '';
   try {
-    url = isDataUrl ? file : URL.createObjectURL(file);
+    url = isUrlString ? file : URL.createObjectURL(file);
   } catch (err) {
     return reject(err);
   }
   img.onload = () => {
-    if (!isDataUrl && url) {
+    if (!isUrlString && url) {
       try { URL.revokeObjectURL(url); } catch {}
     }
     const canvas = document.createElement('canvas');
@@ -825,7 +825,7 @@ export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality 
     resolve({ base64: dataUrl.split(',')[1], dataUrl, mimeType: 'image/webp' });
   };
   img.onerror = (e) => {
-    if (!isDataUrl && url) {
+    if (!isUrlString && url) {
       try { URL.revokeObjectURL(url); } catch {}
     }
     reject(e);
