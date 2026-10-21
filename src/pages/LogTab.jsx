@@ -6,6 +6,7 @@ import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity }
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
+import CameraViewfinderModal from '../components/CameraViewfinderModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS, MONTH_NAMES_ID, getMonthKey } from '../data/constants';
 import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
@@ -231,6 +232,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const fullscreenViewerRef = useRef(null);
   const scanSessionContextRef = useRef({ photoId: null, targetSession: null, previewUrl: null });
   const cameraPendingRef = useRef(false);
+  const [viewfinderOpen, setViewfinderOpen] = useState(false);
+  const [viewfinderCallback, setViewfinderCallback] = useState(null);
   
   useEffect(() => {
     if (fullscreenPhotos && fullscreenViewerRef.current) {
@@ -457,8 +460,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  // Kamera bawaan HP (sensor penuh, kualitas asli HP tanpa perantara in-app viewfinder)
+  // Kamera in-app viewfinder (preview instan 0ms tanpa lag, resolusi sensor maksimal)
   const openCamera = async (onFile, inputRef) => {
+    if (navigator?.mediaDevices?.getUserMedia) {
+      setViewfinderCallback(() => onFile);
+      setViewfinderOpen(true);
+      return;
+    }
     openSystemCamera(onFile, inputRef);
   };
 
@@ -3403,6 +3411,23 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           </div>
         </div>
       )}
+
+      {/* In-app Camera Viewfinder Modal (0ms shutter & freeze, no lag, maximum sensor resolution) */}
+      <CameraViewfinderModal
+        open={viewfinderOpen}
+        onClose={() => setViewfinderOpen(false)}
+        onCapture={(file) => {
+          const cb = viewfinderCallback || runPhotoScan;
+          cb(file);
+          setViewfinderOpen(false);
+        }}
+        onOpenGallery={() => {
+          openGallery(viewfinderCallback || runPhotoScan, galleryRef);
+        }}
+        onFallbackSystemCamera={() => {
+          openSystemCamera(viewfinderCallback || runPhotoScan, cameraRef);
+        }}
+      />
 
       {/* ===== GLOBAL CAMERA / GALLERY LOADING OVERLAY ===== */}
       {cameraLoading && (
