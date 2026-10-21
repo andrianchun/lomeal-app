@@ -465,22 +465,15 @@ export default function CameraViewfinderModal({
           </div>
         )}
 
-        {/* Reticle / Targeting Frame (Area bidik bersih tanpa teks yang menutupi makanan) */}
+        {/* Reticle / Targeting Frame (Kotak bidik bersih tanpa teks yang mengganggu) */}
         {!isFrozen && !errorMessage && isVideoReady && (
-          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center z-10 p-6">
-            <div className="relative w-68 h-68 sm:w-80 sm:h-80 border-2 border-dashed border-emerald-400/35 rounded-3xl">
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10 p-8">
+            <div className="relative w-64 h-64 sm:w-80 sm:h-80 border-2 border-dashed border-emerald-400/40 rounded-3xl">
               {/* Corner brackets */}
               <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-emerald-400 rounded-tl-xl" />
               <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-emerald-400 rounded-tr-xl" />
               <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-emerald-400 rounded-bl-xl" />
               <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-emerald-400 rounded-br-xl" />
-            </div>
-
-            {/* Hint ramping di luar area makanan — kecil & tidak mengganggu */}
-            <div className="mt-4 px-3 py-1 rounded-full bg-black/45 backdrop-blur-md border border-white/10 text-center shadow">
-              <span className="text-zinc-300 text-[11px] font-medium tracking-tight">
-                Ketuk layar untuk fokus
-              </span>
             </div>
           </div>
         )}
@@ -607,11 +600,10 @@ export default function CameraViewfinderModal({
                 handleClose();
                 onOpenGallery?.();
               }}
-              className="w-13 h-13 rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-white/15 flex flex-col items-center justify-center text-zinc-300 hover:text-white active:scale-90 transition-transform cursor-pointer"
+              className="w-12 h-12 rounded-full bg-zinc-900/80 backdrop-blur-md border border-white/15 flex items-center justify-center text-white active:scale-90 transition-transform cursor-pointer"
               title="Buka Galeri"
             >
-              <Image size={18} />
-              <span className="text-[9px] font-bold text-zinc-400 mt-0.5">Galeri</span>
+              <Image size={20} />
             </button>
 
             {/* Big Shutter Button */}
@@ -633,14 +625,13 @@ export default function CameraViewfinderModal({
                   handleClose();
                   onFallbackSystemCamera();
                 }}
-                className="w-13 h-13 rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-white/15 flex flex-col items-center justify-center text-zinc-300 hover:text-white active:scale-90 transition-transform cursor-pointer"
+                className="w-12 h-12 rounded-full bg-zinc-900/80 backdrop-blur-md border border-white/15 flex items-center justify-center text-white active:scale-90 transition-transform cursor-pointer"
                 title="Gunakan Kamera Bawaan HP"
               >
-                <Camera size={18} />
-                <span className="text-[9px] font-bold text-zinc-400 mt-0.5">Kamera HP</span>
+                <Camera size={20} />
               </button>
             ) : (
-              <div className="w-13 h-13" />
+              <div className="w-12 h-12" />
             )}
           </div>
         ) : (
