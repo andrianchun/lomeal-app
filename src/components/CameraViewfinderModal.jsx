@@ -30,6 +30,7 @@ export default function CameraViewfinderModal({
   const canvasRef = useRef(null);
   const activeStreamRef = useRef(null);
   const capturedBlobRef = useRef(null);
+  const takingPhotoPromiseRef = useRef(null);
   const focusTimeoutRef = useRef(null);
 
   // Bersihkan stream media saat ditutup
@@ -57,6 +58,7 @@ export default function CameraViewfinderModal({
     setIsVideoReady(false);
     setIsFrozen(false);
     setIsConfirming(false);
+    takingPhotoPromiseRef.current = null;
     if (capturedDataUrl && capturedDataUrl.startsWith('blob:')) {
       try {
         URL.revokeObjectURL(capturedDataUrl);
@@ -288,7 +290,7 @@ export default function CameraViewfinderModal({
     }
   };
 
-  // AKSI JEPRET INSTAN: Ambil frame video detik ini juga (0ms shutter lag, anti-blur)
+  // AKSI JEPRET: Preview Instan 0ms (langsung beku detik itu juga) + Hardware High-Res Still Photo (Kualitas HP tajam tanpa grainy)
   const handleShutterCapture = () => {
     if (isFrozen || isStarting || !isVideoReady) return;
     const video = videoRef.current;
@@ -303,8 +305,9 @@ export default function CameraViewfinderModal({
     } catch (_) {}
 
     capturedBlobRef.current = null;
+    takingPhotoPromiseRef.current = null;
 
-    // 2. Ambil frame video beresolusi penuh detik ini juga (0ms latency, zero motion blur)
+    // 2. PREVIEW INSTAN 0ms dari frame video detik ini juga
     const w = video.videoWidth || 1920;
     const h = video.videoHeight || 1080;
     canvas.width = w;
@@ -321,31 +324,51 @@ export default function CameraViewfinderModal({
       ctx.drawImage(video, 0, 0, w, h);
     }
 
+    // Bekukan layar & video detik ini juga (kamera langsung berhenti saat cekrek, tidak ada lagi kamera jalan!)
     try {
       video.pause();
     } catch (_) {}
 
-    // Segera tampilkan preview beku detik ini juga!
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    setCapturedDataUrl(dataUrl);
+    const instantDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    setCapturedDataUrl(instantDataUrl);
     setIsFrozen(true);
 
-    // Siapkan blob file di background untuk konfirmasi
-    canvas.toBlob(
-      (blob) => {
-        if (blob) {
-          capturedBlobRef.current = blob;
-        }
-      },
-      'image/jpeg',
-      0.95
-    );
+    // Siapkan blob awal dari canvas jika hardware photo lambat/tidak tersedia
+    canvas.toBlob((b) => {
+      if (!capturedBlobRef.current && b) {
+        capturedBlobRef.current = b;
+      }
+    }, 'image/jpeg', 0.95);
+
+    // 3. SECARA PARALEL: Ambil still photo resolusi sensor hardware ("Kualitas HP" tajam & bebas grainy)
+    if (window.ImageCapture && activeStreamRef.current) {
+      const track = activeStreamRef.current.getVideoTracks()[0];
+      if (track && track.readyState === 'live') {
+        const photoPromise = (async () => {
+          try {
+            const imageCapture = new window.ImageCapture(track);
+            const highResBlob = await imageCapture.takePhoto();
+            if (highResBlob) {
+              capturedBlobRef.current = highResBlob;
+              const highResUrl = URL.createObjectURL(highResBlob);
+              setCapturedDataUrl(highResUrl);
+              return highResBlob;
+            }
+          } catch (e) {
+            console.warn('ImageCapture background photo fallback to canvas:', e);
+          }
+          return null;
+        })();
+        takingPhotoPromiseRef.current = photoPromise;
+      }
+    }
   };
 
   // Ulangi jepretan
   const handleRetake = () => {
     setIsFrozen(false);
     setIsConfirming(false);
+    takingPhotoPromiseRef.current = null;
     if (capturedDataUrl && capturedDataUrl.startsWith('blob:')) {
       try {
         URL.revokeObjectURL(capturedDataUrl);
@@ -359,40 +382,45 @@ export default function CameraViewfinderModal({
   };
 
   // Konfirmasi & gunakan foto untuk analisis (dengan guard double-tap)
-  const handleConfirmPhoto = () => {
+  const handleConfirmPhoto = async () => {
     if (isConfirming) return;
     setIsConfirming(true);
 
-    if (capturedBlobRef.current) {
-      const file = new File(
-        [capturedBlobRef.current],
-        `lomeal-${Date.now()}.jpg`,
-        { type: capturedBlobRef.current.type || 'image/jpeg' }
-      );
+    let blobToUse = capturedBlobRef.current;
+
+    // Jika still photo hardware resolusi tinggi masih berjalan di background, tunggu sebentar (maks 1 detik)
+    if (!blobToUse && takingPhotoPromiseRef.current) {
+      try {
+        blobToUse = await Promise.race([
+          takingPhotoPromiseRef.current,
+          new Promise((resolve) => setTimeout(() => resolve(null), 1000)),
+        ]);
+      } catch (_) {}
+    }
+
+    if (!blobToUse) {
+      blobToUse = capturedBlobRef.current;
+    }
+
+    if (!blobToUse) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        blobToUse = await new Promise((resolve) =>
+          canvas.toBlob(resolve, 'image/jpeg', 0.95)
+        );
+      }
+    }
+
+    if (blobToUse) {
+      const file = new File([blobToUse], `lomeal-${Date.now()}.jpg`, {
+        type: blobToUse.type || 'image/jpeg',
+      });
       onCapture?.(file);
       handleClose();
       return;
     }
 
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      setIsConfirming(false);
-      return;
-    }
-
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          setIsConfirming(false);
-          return;
-        }
-        const file = new File([blob], `lomeal-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        onCapture?.(file);
-        handleClose();
-      },
-      'image/jpeg',
-      0.95
-    );
+    setIsConfirming(false);
   };
 
   if (!open) return null;
