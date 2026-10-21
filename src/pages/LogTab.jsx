@@ -2136,7 +2136,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl overflow-hidden`}>
             {/* PINNED HEADER */}
             <div className={`p-4 pb-3 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5`}>
-              <h2 className={`h2 ${t.textMain}`}>Catat Makanan</h2>
+              <h2 className={`h2 ${t.textMain}`}>{aiResult.isScanning ? 'Menganalisis Makanan' : 'Catat Makanan'}</h2>
               <div className="flex items-center gap-2">
                 <input type="time"
                   value={aiResult.time || ''}
@@ -2149,43 +2149,54 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
             {/* SCROLLABLE BODY */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3.5 hide-scrollbar min-h-0">
-              <div className="relative w-40 h-40 rounded-2xl overflow-hidden mx-auto border-2 border-emerald-500/60 shadow-xl shrink-0 bg-black/10 dark:bg-white/10 flex items-center justify-center">
-                {aiResult.photoDataUrl ? (
-                  <img
-                    src={aiResult.photoDataUrl}
-                    alt="foto makanan"
-                    className="w-full h-full object-cover"
-                    decoding="async"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-2 text-emerald-400">
-                    <Loader2 size={24} className="animate-spin" />
-                    <span className="text-[11px] font-semibold text-emerald-500">Memuat foto...</span>
+              {aiResult.isScanning ? (
+                /* === TAMPILAN SCANNING BERSIH: FOTO FULL + PROGRESS BAR (Tanpa Redundansi & Tanpa Ikon AI) === */
+                <div className="space-y-4 py-1">
+                  {/* Foto Full Hero Preview */}
+                  <div className="relative w-full aspect-[4/3] max-h-72 rounded-2xl overflow-hidden border border-emerald-500/30 shadow-xl bg-black/10 dark:bg-white/10 flex items-center justify-center">
+                    {aiResult.photoDataUrl ? (
+                      <img
+                        src={aiResult.photoDataUrl}
+                        alt="Foto makanan"
+                        className="w-full h-full object-cover"
+                        decoding="async"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 text-emerald-400">
+                        <Loader2 size={28} className="animate-spin text-emerald-500" />
+                        <span className="text-xs font-semibold text-emerald-500">Memuat foto...</span>
+                      </div>
+                    )}
                   </div>
-                )}
-                {aiResult.isScanning && (
-                  <div className="absolute bottom-2.5 right-2.5 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-lg border border-white/10">
-                    <Loader2 size={12} className="text-emerald-400 animate-spin" />
-                    <span className="text-[11px] font-semibold text-white tracking-wide">Menganalisis...</span>
-                  </div>
-                )}
-              </div>
 
-              {/* Status Scanning AI 0 Detik */}
-              {aiResult.isScanning && (
-                <div className={`p-4 rounded-2xl border ${t.border} ${t.bgSunken} flex flex-col items-center justify-center text-center gap-2 my-2`}>
-                  <div className="flex items-center gap-2 text-emerald-500 font-bold text-sm">
-                    <Sparkles size={16} className="animate-pulse" />
-                    <span>Lomy sedang menganalisis gizi...</span>
-                  </div>
-                  <p className={`text-xs ${t.textMuted} max-w-xs leading-relaxed`}>
-                    Mengenali bahan makanan, memperkirakan porsi, dan menghitung kalori serta nutrisi.
-                  </p>
-                  <div className="w-32 h-1 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden mt-1">
-                    <div className="h-full bg-emerald-500 rounded-full animate-pulse w-full" />
+                  {/* Progress Bar & Status (Tanpa ikon AI & Tanpa Redundansi) */}
+                  <div className={`p-4 rounded-2xl border ${t.border} ${t.bgSunken} space-y-2.5`}>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className={`font-bold ${t.textMain}`}>Menganalisis gizi...</span>
+                      <span className="font-semibold text-emerald-500 animate-pulse">Mohon tunggu</span>
+                    </div>
+
+                    <div className="w-full h-2 rounded-full bg-emerald-500/15 overflow-hidden relative">
+                      <div className="h-full w-full bg-gradient-to-r from-emerald-500/30 via-emerald-400 to-emerald-500/30 animate-pulse rounded-full" />
+                    </div>
+
+                    <p className={`text-[11px] ${t.textMuted} text-center leading-relaxed pt-0.5`}>
+                      Mengenali bahan makanan, memperkirakan porsi, serta menghitung kalori & nutrisi.
+                    </p>
                   </div>
                 </div>
-              )}
+              ) : (
+                <>
+                  {aiResult.photoDataUrl && (
+                    <div className="relative w-36 h-36 rounded-2xl overflow-hidden mx-auto border-2 border-emerald-500/60 shadow-xl shrink-0 bg-black/10 dark:bg-white/10 flex items-center justify-center">
+                      <img
+                        src={aiResult.photoDataUrl}
+                        alt="foto makanan"
+                        className="w-full h-full object-cover"
+                        decoding="async"
+                      />
+                    </div>
+                  )}
 
             {/* TOTAL KALORI & PKL (Desain identik dengan rincian sesi) */}
             {(() => {
@@ -2384,15 +2395,18 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                 ))}
               </div>
             </div>
+            </>
+            )}
           </div>
 
           {/* PINNED FOOTER: TOMBOL BATAL & SIMPAN */}
           <div className={`p-3.5 border-t ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} bg-black/5 dark:bg-white/5 shrink-0`}>
-            <div className="grid grid-cols-2 gap-2">
+            {aiResult.isScanning ? (
+              /* Saat scanning: Hanya tombol Batal yang bersih */
               <button
                 type="button"
                 onClick={() => {
-                  if (aiResult.isScanning && aiAbortController) {
+                  if (aiAbortController) {
                     aiAbortController.abort();
                   }
                   setAiResult(null);
@@ -2402,16 +2416,30 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               >
                 Batal
               </button>
-              <button
-                type="button"
-                disabled={!aiResult.foods.length || isConfirmingAi || aiResult.isScanning}
-                onClick={confirmAiResult}
-                className="w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold body-md shadow-md shadow-emerald-500/20 disabled:opacity-40 active:scale-95 transition-all text-center flex items-center justify-center gap-2 cursor-pointer"
-              >
-                {isConfirmingAi ? <Loader2 size={18} className="animate-spin" /> : null}
-                <span>{isConfirmingAi ? 'Menyimpan...' : aiResult.isScanning ? 'Menganalisis...' : 'Simpan'}</span>
-              </button>
-            </div>
+            ) : (
+              /* Saat hasil siap: Grid Batal & Simpan */
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAiResult(null);
+                    scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
+                  }}
+                  className={`w-full py-3 rounded-2xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} font-bold body-md active:scale-95 transition-all text-center cursor-pointer`}
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={!aiResult.foods.length || isConfirmingAi}
+                  onClick={confirmAiResult}
+                  className="w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold body-md shadow-md shadow-emerald-500/20 disabled:opacity-40 active:scale-95 transition-all text-center flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isConfirmingAi ? <Loader2 size={18} className="animate-spin" /> : null}
+                  <span>{isConfirmingAi ? 'Menyimpan...' : 'Simpan'}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
