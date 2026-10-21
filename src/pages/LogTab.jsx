@@ -6,7 +6,6 @@ import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity }
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
-import CameraViewfinderModal from '../components/CameraViewfinderModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS, MONTH_NAMES_ID, getMonthKey } from '../data/constants';
 import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
@@ -225,8 +224,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const [listening, setListening] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
   const [cameraLoadingText, setCameraLoadingText] = useState('Membuka Kamera...');
-  const [viewfinderOpen, setViewfinderOpen] = useState(false);
-  const [viewfinderCallback, setViewfinderCallback] = useState(null);
   const [rackExpanded, setRackExpanded] = useState(false);
   const [saveToDb, setSaveToDb] = useState(false); // Default jangan simpan ke custom DB agar tidak menumpuk
   const [fullscreenPhotos, setFullscreenPhotos] = useState(null);
@@ -452,18 +449,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  // Kamera instan in-app (0ms shutter freeze) dengan opsi preferensi kamera sistem
+  // Kamera bawaan HP (sensor penuh, kualitas asli HP tanpa perantara in-app viewfinder)
   const openCamera = async (onFile, inputRef) => {
-    const pref = localStorage.getItem('lomeal_camera_engine') || 'viewfinder';
-    if (pref === 'native') {
-      openSystemCamera(onFile, inputRef);
-      return;
-    }
-    if (navigator?.mediaDevices?.getUserMedia) {
-      setViewfinderCallback(() => onFile);
-      setViewfinderOpen(true);
-      return;
-    }
     openSystemCamera(onFile, inputRef);
   };
 
@@ -471,15 +458,17 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     if (isNativeApp()) {
       setCameraLoadingText('Membuka Kamera...');
       setCameraLoading(true);
+      let file = null;
       try {
-        const file = await captureToFile();
-        if (file) return onFile(file);
+        file = await captureToFile();
       } catch (e) {
         if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka kamera: ${e.message}`);
         return;
       } finally {
         setCameraLoading(false);
       }
+      if (file) onFile(file);
+      return;
     }
     inputRef?.current?.click();
   };
@@ -492,17 +481,19 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     if (isNativeApp()) {
       setCameraLoadingText('Membuka Galeri...');
       setCameraLoading(true);
+      let file = null;
       try {
-        const file = await pickFromGallery();
-        if (file) return onFile(file);
+        file = await pickFromGallery();
       } catch (e) {
         if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka galeri: ${e.message}`);
         return;
       } finally {
         setCameraLoading(false);
       }
+      if (file) onFile(file);
+      return;
     }
-    inputRef.current?.click();
+    inputRef?.current?.click();
   };
 
   // Unduh foto langsung tanpa kompresi ulang, mempertahankan kualitas maksimal aslinya.
@@ -1191,16 +1182,32 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     requestNotificationPermission().catch(() => {});
 
     const targetSession = detailSession || getNearestSessionId();
-    if (!aiResult) setAiTargetSession(targetSession);
+    setAiTargetSession(targetSession);
 
     const controller = new AbortController();
     setAiAbortController(controller);
     setAiBusy(true);
     await acquireAiWakeLock();
-    await new Promise(r => setTimeout(r, 50)); // Jeda 50ms agar UI tulisan "Memproses..." dirender instan!
-    
-    let photoDataUrl = null;
+
+    // PREVIEW 0 DETIK: Buat Object URL lokal instan (0ms) & buka modal konfirmasi detik ini juga!
+    let localPreviewUrl = null;
+    try {
+      localPreviewUrl = URL.createObjectURL(file);
+    } catch (_) {}
+
     const photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+
+    // Buka sheet aiResult langsung dalam 0 detik!
+    setAiResult({
+      foods: [],
+      photoDataUrl: localPreviewUrl,
+      photoFile: file,
+      photoId,
+      time: new Date().toTimeString().slice(0, 5),
+      isScanning: true,
+    });
+
+    let photoDataUrl = localPreviewUrl;
 
     try {
       const { base64, dataUrl, mimeType } = await compressImageForAI(file);
@@ -1215,7 +1222,15 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       }
       
       if (items.length) {
-         appendAiResult(items, { photoDataUrl: dataUrl, photoFile: file, isOcr: res.type === 'label', photoId });
+         setAiResult({
+           foods: withBase(items),
+           photoDataUrl: dataUrl,
+           photoFile: file,
+           isOcr: res.type === 'label',
+           photoId,
+           time: new Date().toTimeString().slice(0, 5),
+           isScanning: false,
+         });
 
          sendLocalNotification({
            title: 'Analisis Gizi Berhasil',
@@ -1230,19 +1245,25 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
          } catch (saveErr) {
            console.warn('Gagal simpan foto:', saveErr);
          }
+         setAiResult(null);
          await showAlert('Lomy tidak mengenali makanan di foto. Foto tetap disimpan di sesi makanan agar kamu bisa mengisi manual atau coba hitung ulang nanti.');
       }
     } catch (e) {
-      if (e.name === 'AbortError') return refundAiUsage(user.uid);
+      if (e.name === 'AbortError') {
+        setAiResult(null);
+        return refundAiUsage(user.uid);
+      }
       console.error('[runPhotoScan error]', e);
 
-      // JIKA GAGAL BACKEND / NETWORK: Fotonya disimpan ke galeri sesi, tetap nampilin foto tapi kosongan, ada tombol analisis ulang!
+      // JIKA GAGAL: Fotonya disimpan ke sesi, tutup sheet scanning
       try {
         await addPhoto(targetSession, photoDataUrl || file, photoId);
         setDetailSession(targetSession);
       } catch (saveErr) {
         console.warn('Gagal menyimpan foto ke sesi saat scan gagal:', saveErr);
       }
+
+      setAiResult(null);
 
       const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
       sendLocalNotification({
@@ -1252,10 +1273,10 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       });
 
       const friendlyErr = humanizeAiError(e, 'photo');
-      await showAlert(`${friendlyErr} Foto telah aman disimpan di sesi makanan agar tidak hilang. Kamu bisa menekan tombol Analisis Ulang kapan saja.`);
-    } finally { 
+      showAlert(friendlyErr);
+    } finally {
       releaseAiWakeLock();
-      setAiBusy(false); 
+      setAiBusy(false);
       setAiAbortController(null);
     }
   };
@@ -2067,8 +2088,29 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             {/* SCROLLABLE BODY */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3.5 hide-scrollbar min-h-0">
               {aiResult.photoDataUrl && (
-                <div className="w-24 h-24 rounded-full overflow-hidden mx-auto border-2 border-green-500/40 shrink-0">
-                  <img src={aiResult.photoDataUrl} alt="foto" className="w-full h-full object-cover" />
+                <div className="relative w-36 h-36 rounded-2xl overflow-hidden mx-auto border-2 border-emerald-500/40 shadow-xl shrink-0">
+                  <img src={aiResult.photoDataUrl} alt="foto makanan" className="w-full h-full object-cover" />
+                  {aiResult.isScanning && (
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center">
+                      <Loader2 size={32} className="text-emerald-400 animate-spin" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Status Scanning AI 0 Detik */}
+              {aiResult.isScanning && (
+                <div className={`p-4 rounded-2xl border ${t.border} ${t.bgSunken} flex flex-col items-center justify-center text-center gap-2 my-2`}>
+                  <div className="flex items-center gap-2 text-emerald-500 font-bold text-sm">
+                    <Sparkles size={16} className="animate-pulse" />
+                    <span>Lomy sedang menganalisis gizi...</span>
+                  </div>
+                  <p className={`text-xs ${t.textMuted} max-w-xs leading-relaxed`}>
+                    Mengenali bahan makanan, memperkirakan porsi, dan menghitung kalori serta nutrisi.
+                  </p>
+                  <div className="w-32 h-1 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden mt-1">
+                    <div className="h-full bg-emerald-500 rounded-full animate-pulse w-full" />
+                  </div>
                 </div>
               )}
 
@@ -2276,19 +2318,24 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setAiResult(null)}
-                className={`w-full py-3 rounded-2xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} font-bold body-md active:scale-95 transition-all text-center`}
+                onClick={() => {
+                  if (aiResult.isScanning && aiAbortController) {
+                    aiAbortController.abort();
+                  }
+                  setAiResult(null);
+                }}
+                className={`w-full py-3 rounded-2xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} font-bold body-md active:scale-95 transition-all text-center cursor-pointer`}
               >
                 Batal
               </button>
               <button
                 type="button"
-                disabled={!aiResult.foods.length || isConfirmingAi}
+                disabled={!aiResult.foods.length || isConfirmingAi || aiResult.isScanning}
                 onClick={confirmAiResult}
                 className="w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold body-md shadow-md shadow-emerald-500/20 disabled:opacity-40 active:scale-95 transition-all text-center flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isConfirmingAi ? <Loader2 size={18} className="animate-spin" /> : null}
-                <span>{isConfirmingAi ? 'Menyimpan...' : 'Simpan'}</span>
+                <span>{isConfirmingAi ? 'Menyimpan...' : aiResult.isScanning ? 'Menganalisis...' : 'Simpan'}</span>
               </button>
             </div>
           </div>
@@ -3266,22 +3313,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           </div>
         </div>
       )}
-
-      {/* ===== IN-APP CAMERA VIEWFINDER (INSTANT 0ms FREEZE) ===== */}
-      <CameraViewfinderModal
-        open={viewfinderOpen}
-        onClose={() => setViewfinderOpen(false)}
-        onCapture={(file) => {
-          if (viewfinderCallback) viewfinderCallback(file);
-          setViewfinderOpen(false);
-        }}
-        onOpenGallery={() => {
-          openGallery(viewfinderCallback || runPhotoScan, galleryRef);
-        }}
-        onFallbackSystemCamera={() => {
-          openSystemCamera(viewfinderCallback || runPhotoScan, cameraRef);
-        }}
-      />
 
       {/* ===== GLOBAL CAMERA / GALLERY LOADING OVERLAY ===== */}
       {cameraLoading && (

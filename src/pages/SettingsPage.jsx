@@ -99,7 +99,6 @@ const SettingsPage = ({
   const [legalType, setLegalType] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [autoSaveCamera, setAutoSaveCamera] = useState(() => localStorage.getItem('lomeal_autosave_camera') !== 'false');
-  const [cameraEngine, setCameraEngine] = useState(() => localStorage.getItem('lomeal_camera_engine') || 'viewfinder');
 
   const handleSyncAll = async () => {
     if (!syncAllNutritionToLogym || isSyncing) return;
@@ -201,11 +200,6 @@ const SettingsPage = ({
               <Row icon={CalendarDays} label={lang.weekStart} t={t}>
                 <Toggle2 t={t} leftLabel={lang.monday} rightLabel={lang.sunday} leftActive={settings.weekStartDay !== 0}
                   onLeft={() => updateSetting('weekStartDay', 1)} onRight={() => updateSetting('weekStartDay', 0)} />
-              </Row>
-              <Row icon={Camera} label="Aplikasi Kamera" t={t}>
-                <Toggle2 t={t} leftLabel="Lomy Lens" rightLabel="Kamera HP" leftActive={cameraEngine === 'viewfinder'} widthClass="w-36"
-                  onLeft={() => { setCameraEngine('viewfinder'); localStorage.setItem('lomeal_camera_engine', 'viewfinder'); }}
-                  onRight={() => { setCameraEngine('native'); localStorage.setItem('lomeal_camera_engine', 'native'); }} />
               </Row>
               <Row icon={Camera} label="Simpan Foto Otomatis" t={t}>
                 <Toggle2 t={t} leftLabel="Ya" rightLabel="Tidak" leftActive={autoSaveCamera}
