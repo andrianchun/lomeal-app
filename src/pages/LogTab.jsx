@@ -229,6 +229,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const [fullscreenPhotos, setFullscreenPhotos] = useState(null);
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const fullscreenViewerRef = useRef(null);
+  const scanSessionContextRef = useRef({ photoId: null, targetSession: null, previewUrl: null });
   
   useEffect(() => {
     if (fullscreenPhotos && fullscreenViewerRef.current) {
@@ -241,7 +242,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // bukan lompat ke tab lain. `detailSession` bisa nyalain `deleteConfirm` di atasnya
   // (dan copySourceSession/pickerOpen menggantikannya) — urutan push otomatis LIFO yang
   // bener karena yang belakangan dibuka memang belakangan di-push.
-  useBackClose(!!aiResult, () => setAiResult(null));
+  useBackClose(!!aiResult, () => {
+    if (aiResult?.isScanning && aiAbortController) {
+      aiAbortController.abort();
+    }
+    setAiResult(null);
+    scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
+  });
   useBackClose(!!detailSession, () => closeDetailSession());
   useBackClose(!!copySourceSession, () => { setCopySourceSession(null); setCopyTargetSessions([]); });
   useBackClose(showDayStatsModal, () => setShowDayStatsModal(false));
@@ -456,16 +463,27 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   const openSystemCamera = async (onFile, inputRef) => {
     if (isNativeApp()) {
+      const clearLoadingOnBlur = () => setCameraLoading(false);
+      window.addEventListener('blur', clearLoadingOnBlur, { once: true });
       setCameraLoadingText('Membuka Kamera...');
       setCameraLoading(true);
+      const timer = setTimeout(() => setCameraLoading(false), 2000);
+
       let file = null;
       try {
-        file = await captureToFile();
+        file = await captureToFile((immediateWebPath) => {
+          setCameraLoading(false);
+          if (onFile === runPhotoScan) {
+            startPhotoScanPreview(immediateWebPath);
+          }
+        });
       } catch (e) {
         if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka kamera: ${e.message}`);
         return;
       } finally {
+        clearTimeout(timer);
         setCameraLoading(false);
+        window.removeEventListener('blur', clearLoadingOnBlur);
       }
       if (file) onFile(file);
       return;
@@ -479,16 +497,27 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // Di browser: jatuh balik ke <input type="file">.
   const openGallery = async (onFile, inputRef) => {
     if (isNativeApp()) {
+      const clearLoadingOnBlur = () => setCameraLoading(false);
+      window.addEventListener('blur', clearLoadingOnBlur, { once: true });
       setCameraLoadingText('Membuka Galeri...');
       setCameraLoading(true);
+      const timer = setTimeout(() => setCameraLoading(false), 2000);
+
       let file = null;
       try {
-        file = await pickFromGallery();
+        file = await pickFromGallery((immediateWebPath) => {
+          setCameraLoading(false);
+          if (onFile === runPhotoScan) {
+            startPhotoScanPreview(immediateWebPath);
+          }
+        });
       } catch (e) {
         if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka galeri: ${e.message}`);
         return;
       } finally {
+        clearTimeout(timer);
         setCameraLoading(false);
+        window.removeEventListener('blur', clearLoadingOnBlur);
       }
       if (file) onFile(file);
       return;
@@ -1176,109 +1205,147 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  const runPhotoScan = async (file) => {
-    if (!file || aiBusy) return;
-    if (!(await guardAi())) return;
-    requestNotificationPermission().catch(() => {});
-
+  // 1. PREVIEW 0 DETIK: Begitu kamera jepret / galeri dipilih, panggil ini SEKETIKA!
+  const startPhotoScanPreview = (previewUrl) => {
+    if (!previewUrl || aiBusy) return;
+    const photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     const targetSession = detailSession || getNearestSessionId();
     setAiTargetSession(targetSession);
 
-    const controller = new AbortController();
-    setAiAbortController(controller);
-    setAiBusy(true);
-    await acquireAiWakeLock();
+    scanSessionContextRef.current = { photoId, targetSession, previewUrl };
 
-    // PREVIEW 0 DETIK: Buat Object URL lokal instan (0ms) & buka modal konfirmasi detik ini juga!
-    let localPreviewUrl = null;
-    try {
-      localPreviewUrl = URL.createObjectURL(file);
-    } catch (_) {}
-
-    const photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-
-    // Buka sheet aiResult langsung dalam 0 detik!
+    // TAMPILKAN MODAL CATAT MAKANAN + FOTO DALAM 0 MILIDETIK!
     setAiResult({
       foods: [],
-      photoDataUrl: localPreviewUrl,
-      photoFile: file,
+      photoDataUrl: previewUrl,
+      photoFile: null,
       photoId,
       time: new Date().toTimeString().slice(0, 5),
       isScanning: true,
     });
+  };
 
-    let photoDataUrl = localPreviewUrl;
+  const runPhotoScan = (file) => {
+    if (!file || aiBusy) return;
 
-    try {
-      const { base64, dataUrl, mimeType } = await compressImageForAI(file);
-      photoDataUrl = dataUrl;
-      const res = await analyzeSmartPhoto(aiKey, base64, mimeType, controller.signal);
-      
-      let items = [];
-      if (res.type === 'label') {
-         items = [labelToItem(res)];
-      } else {
-         items = res.foods || [];
-      }
-      
-      if (items.length) {
-         setAiResult({
-           foods: withBase(items),
-           photoDataUrl: dataUrl,
-           photoFile: file,
-           isOcr: res.type === 'label',
-           photoId,
-           time: new Date().toTimeString().slice(0, 5),
-           isScanning: false,
-         });
-
-         sendLocalNotification({
-           title: 'Analisis Gizi Berhasil',
-           body: 'Ketuk untuk melihat detailnya',
-           extra: { type: 'ai_scan_done', targetSession, ymd: selectedYmd, targetTab: '/log' }
-         });
-      } else {
-         // Jika AI tidak mengenali makanan, tetap simpan foto ke sesi agar foto makanan user tidak hilang
-         try {
-           await addPhoto(targetSession, file, photoId);
-           setDetailSession(targetSession);
-         } catch (saveErr) {
-           console.warn('Gagal simpan foto:', saveErr);
-         }
-         setAiResult(null);
-         await showAlert('Lomy tidak mengenali makanan di foto. Foto tetap disimpan di sesi makanan agar kamu bisa mengisi manual atau coba hitung ulang nanti.');
-      }
-    } catch (e) {
-      if (e.name === 'AbortError') {
-        setAiResult(null);
-        return refundAiUsage(user.uid);
-      }
-      console.error('[runPhotoScan error]', e);
-
-      // JIKA GAGAL: Fotonya disimpan ke sesi, tutup sheet scanning
+    let localPreviewUrl = scanSessionContextRef.current?.previewUrl;
+    if (!localPreviewUrl) {
       try {
-        await addPhoto(targetSession, photoDataUrl || file, photoId);
-        setDetailSession(targetSession);
-      } catch (saveErr) {
-        console.warn('Gagal menyimpan foto ke sesi saat scan gagal:', saveErr);
-      }
-
-      setAiResult(null);
-
-      const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
-      sendLocalNotification({
-        title: 'Pemindaian Foto Tertunda',
-        body: `Foto telah disimpan ke ${sessionName}. Ketuk untuk membuka dan analisis ulang saat siap.`,
-        extra: { type: 'ai_scan_failed', targetSession, ymd: selectedYmd, targetTab: '/log' }
-      });
-
-      const friendlyErr = humanizeAiError(e, 'photo');
-      showAlert(friendlyErr);
-    } finally {
-      releaseAiWakeLock();
-      setAiBusy(false);
-      setAiAbortController(null);
+        localPreviewUrl = file.webPath || (file instanceof Blob ? URL.createObjectURL(file) : null);
+      } catch (_) {}
     }
+
+    let photoId = scanSessionContextRef.current?.photoId;
+    let targetSession = scanSessionContextRef.current?.targetSession;
+
+    if (!photoId) {
+      photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      targetSession = detailSession || getNearestSessionId();
+      setAiTargetSession(targetSession);
+      scanSessionContextRef.current = { photoId, targetSession, previewUrl: localPreviewUrl };
+
+      // Buka sheet jika belum dibuka oleh startPhotoScanPreview (misal di web)
+      setAiResult({
+        foods: [],
+        photoDataUrl: localPreviewUrl,
+        photoFile: file,
+        photoId,
+        time: new Date().toTimeString().slice(0, 5),
+        isScanning: true,
+      });
+    } else {
+      // Lengkapi photoFile di state yang sudah aktif
+      setAiResult(prev => prev ? ({ ...prev, photoFile: file, photoDataUrl: localPreviewUrl || prev.photoDataUrl }) : null);
+    }
+
+    // Jalankan pengecekan kuota & analisis AI di background (ASINKRON PENUH)
+    (async () => {
+      if (!(await guardAi())) {
+        setAiResult(null);
+        scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
+        return;
+      }
+      requestNotificationPermission().catch(() => {});
+
+      const controller = new AbortController();
+      setAiAbortController(controller);
+      setAiBusy(true);
+      await acquireAiWakeLock();
+
+      let photoDataUrl = localPreviewUrl;
+
+      try {
+        const { base64, dataUrl, mimeType } = await compressImageForAI(file);
+        photoDataUrl = dataUrl;
+        const res = await analyzeSmartPhoto(aiKey, base64, mimeType, controller.signal);
+        
+        let items = [];
+        if (res.type === 'label') {
+           items = [labelToItem(res)];
+        } else {
+           items = res.foods || [];
+        }
+        
+        if (items.length) {
+           setAiResult({
+             foods: withBase(items),
+             photoDataUrl: dataUrl,
+             photoFile: file,
+             isOcr: res.type === 'label',
+             photoId,
+             time: new Date().toTimeString().slice(0, 5),
+             isScanning: false,
+           });
+
+           sendLocalNotification({
+             title: 'Analisis Gizi Berhasil',
+             body: 'Ketuk untuk melihat detailnya',
+             extra: { type: 'ai_scan_done', targetSession, ymd: selectedYmd, targetTab: '/log' }
+           });
+        } else {
+           // Jika AI tidak mengenali makanan, tetap simpan foto ke sesi agar foto makanan user tidak hilang
+           try {
+             await addPhoto(targetSession, file, photoId);
+             setDetailSession(targetSession);
+           } catch (saveErr) {
+             console.warn('Gagal simpan foto:', saveErr);
+           }
+           setAiResult(null);
+           await showAlert('Lomy tidak mengenali makanan di foto. Foto tetap disimpan di sesi makanan agar kamu bisa mengisi manual atau coba hitung ulang nanti.');
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          setAiResult(null);
+          return refundAiUsage(user.uid);
+        }
+        console.error('[runPhotoScan error]', e);
+
+        // JIKA GAGAL: Fotonya disimpan ke sesi, tutup sheet scanning
+        try {
+          await addPhoto(targetSession, photoDataUrl || file, photoId);
+          setDetailSession(targetSession);
+        } catch (saveErr) {
+          console.warn('Gagal menyimpan foto ke sesi saat scan gagal:', saveErr);
+        }
+
+        setAiResult(null);
+
+        const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
+        sendLocalNotification({
+          title: 'Pemindaian Foto Tertunda',
+          body: `Foto telah disimpan ke ${sessionName}. Ketuk untuk membuka dan analisis ulang saat siap.`,
+          extra: { type: 'ai_scan_failed', targetSession, ymd: selectedYmd, targetTab: '/log' }
+        });
+
+        const friendlyErr = humanizeAiError(e, 'photo');
+        showAlert(friendlyErr);
+      } finally {
+        releaseAiWakeLock();
+        setAiBusy(false);
+        setAiAbortController(null);
+        scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
+      }
+    })();
   };
 
   const isConfirmingAiRef = useRef(false);
@@ -2069,7 +2136,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           Full-screen backdrop menutup layar rapi tanpa celah gantung di bawah. */}
       {aiResult && (
         <div id="ai-result-sheet" className="fixed inset-0 z-50 flex items-center justify-center p-4 no-swipe bg-black/60 backdrop-blur-sm"
-          onClick={() => setAiResult(null)}>
+          onClick={() => {
+            if (aiResult.isScanning && aiAbortController) {
+              aiAbortController.abort();
+            }
+            setAiResult(null);
+            scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
+          }}>
           <div onClick={(e) => e.stopPropagation()}
             className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl overflow-hidden anim-rise`}>
             {/* PINNED HEADER */}
@@ -2088,11 +2161,12 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             {/* SCROLLABLE BODY */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3.5 hide-scrollbar min-h-0">
               {aiResult.photoDataUrl && (
-                <div className="relative w-36 h-36 rounded-2xl overflow-hidden mx-auto border-2 border-emerald-500/40 shadow-xl shrink-0">
+                <div className="relative w-40 h-40 rounded-2xl overflow-hidden mx-auto border-2 border-emerald-500/60 shadow-xl shrink-0">
                   <img src={aiResult.photoDataUrl} alt="foto makanan" className="w-full h-full object-cover" />
                   {aiResult.isScanning && (
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center">
-                      <Loader2 size={32} className="text-emerald-400 animate-spin" />
+                    <div className="absolute bottom-2.5 right-2.5 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-lg border border-white/10">
+                      <Loader2 size={12} className="text-emerald-400 animate-spin" />
+                      <span className="text-[11px] font-semibold text-white tracking-wide">Menganalisis...</span>
                     </div>
                   )}
                 </div>
@@ -2323,6 +2397,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                     aiAbortController.abort();
                   }
                   setAiResult(null);
+                  scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
                 }}
                 className={`w-full py-3 rounded-2xl ${t.bgSunken} ${t.textMuted} hover:${t.textMain} font-bold body-md active:scale-95 transition-all text-center cursor-pointer`}
               >
