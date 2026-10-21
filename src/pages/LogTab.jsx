@@ -463,16 +463,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
 
   const openSystemCamera = async (onFile, inputRef) => {
     if (isNativeApp()) {
-      const clearLoadingOnBlur = () => setCameraLoading(false);
-      window.addEventListener('blur', clearLoadingOnBlur, { once: true });
-      setCameraLoadingText('Membuka Kamera...');
-      setCameraLoading(true);
-      const timer = setTimeout(() => setCameraLoading(false), 2000);
-
       let file = null;
       try {
         file = await captureToFile((immediateWebPath) => {
-          setCameraLoading(false);
           if (onFile === runPhotoScan) {
             startPhotoScanPreview(immediateWebPath);
           }
@@ -480,10 +473,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       } catch (e) {
         if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka kamera: ${e.message}`);
         return;
-      } finally {
-        clearTimeout(timer);
-        setCameraLoading(false);
-        window.removeEventListener('blur', clearLoadingOnBlur);
       }
       if (file) onFile(file);
       return;
@@ -497,16 +486,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   // Di browser: jatuh balik ke <input type="file">.
   const openGallery = async (onFile, inputRef) => {
     if (isNativeApp()) {
-      const clearLoadingOnBlur = () => setCameraLoading(false);
-      window.addEventListener('blur', clearLoadingOnBlur, { once: true });
-      setCameraLoadingText('Membuka Galeri...');
-      setCameraLoading(true);
-      const timer = setTimeout(() => setCameraLoading(false), 2000);
-
       let file = null;
       try {
         file = await pickFromGallery((immediateWebPath) => {
-          setCameraLoading(false);
           if (onFile === runPhotoScan) {
             startPhotoScanPreview(immediateWebPath);
           }
@@ -514,10 +496,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       } catch (e) {
         if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka galeri: ${e.message}`);
         return;
-      } finally {
-        clearTimeout(timer);
-        setCameraLoading(false);
-        window.removeEventListener('blur', clearLoadingOnBlur);
       }
       if (file) onFile(file);
       return;
@@ -1213,6 +1191,12 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     setAiTargetSession(targetSession);
 
     scanSessionContextRef.current = { photoId, targetSession, previewUrl };
+
+    // Preload image segera di memori browser agar gambar langsung muncul tanpa jeda decode
+    try {
+      const imgPre = new window.Image();
+      imgPre.src = previewUrl;
+    } catch (_) {}
 
     // TAMPILKAN MODAL CATAT MAKANAN + FOTO DALAM 0 MILIDETIK!
     setAiResult({
@@ -2144,7 +2128,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
           }}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl overflow-hidden anim-rise`}>
+            className={`w-full max-w-sm max-h-[85vh] flex flex-col rounded-3xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-3xl shadow-2xl overflow-hidden`}>
             {/* PINNED HEADER */}
             <div className={`p-4 pb-3 border-b ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} flex items-center justify-between shrink-0 bg-black/5`}>
               <h2 className={`h2 ${t.textMain}`}>Catat Makanan</h2>
@@ -2161,8 +2145,14 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             {/* SCROLLABLE BODY */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3.5 hide-scrollbar min-h-0">
               {aiResult.photoDataUrl && (
-                <div className="relative w-40 h-40 rounded-2xl overflow-hidden mx-auto border-2 border-emerald-500/60 shadow-xl shrink-0">
-                  <img src={aiResult.photoDataUrl} alt="foto makanan" className="w-full h-full object-cover" />
+                <div className="relative w-40 h-40 rounded-2xl overflow-hidden mx-auto border-2 border-emerald-500/60 shadow-xl shrink-0 bg-black/10 dark:bg-white/10">
+                  <img
+                    src={aiResult.photoDataUrl}
+                    alt="foto makanan"
+                    className="w-full h-full object-cover"
+                    decoding="sync"
+                    loading="eager"
+                  />
                   {aiResult.isScanning && (
                     <div className="absolute bottom-2.5 right-2.5 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-lg border border-white/10">
                       <Loader2 size={12} className="text-emerald-400 animate-spin" />
