@@ -6,7 +6,6 @@ import { subscribeDomusItems, subscribeDomusLocations, deductDomusItemQuantity }
 import NutritionChart from '../components/NutritionChart';
 import FoodPickerModal from '../components/FoodPickerModal';
 import ImageCropperModal from '../components/ImageCropperModal';
-import CameraViewfinderModal from '../components/CameraViewfinderModal';
 import { MEAL_SESSIONS, WATER_STEP_ML, getLocalYMD, DAY_NAMES_ID, AI_DAILY_LIMIT, DEFAULT_SESSION_TIMES, DEFAULT_ACTIVE_SESSIONS, MONTH_NAMES_ID, getMonthKey } from '../data/constants';
 import { computeDayTotals, addNutrition, EMPTY_NUTRITION, NUTRIENTS, MINIMUM_TARGETS, calcTEF, calcBMR, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
@@ -232,8 +231,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const fullscreenViewerRef = useRef(null);
   const scanSessionContextRef = useRef({ photoId: null, targetSession: null, previewUrl: null });
   const cameraPendingRef = useRef(false);
-  const [viewfinderOpen, setViewfinderOpen] = useState(false);
-  const [viewfinderCallback, setViewfinderCallback] = useState(null);
   
   useEffect(() => {
     if (fullscreenPhotos && fullscreenViewerRef.current) {
@@ -460,41 +457,22 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  // Kamera in-app viewfinder (preview instan 0ms tanpa lag, resolusi sensor maksimal)
+  // Kamera bawaan HP (sensor penuh 12MP/50MP asli HP, jernih tanpa grain, tidak ngezoom)
   const openCamera = async (onFile, inputRef) => {
-    if (navigator?.mediaDevices?.getUserMedia) {
-      setViewfinderCallback(() => onFile);
-      setViewfinderOpen(true);
-      return;
-    }
     openSystemCamera(onFile, inputRef);
   };
 
   const openSystemCamera = async (onFile, inputRef) => {
     if (isNativeApp()) {
-      cameraPendingRef.current = true;
-
-      // Begitu app kembali fokus dari kamera, segera buka modal di layar (0 DETIK!)
-      const handleAppFocus = () => {
-        window.removeEventListener('focus', handleAppFocus);
-        if (cameraPendingRef.current && onFile === runPhotoScan && !aiResult) {
-          startPhotoScanPreview(null);
-        }
-      };
-      window.addEventListener('focus', handleAppFocus, { once: true });
-
       let file = null;
       try {
         file = await captureToFile((immediateWebPath) => {
-          cameraPendingRef.current = false;
-          window.removeEventListener('focus', handleAppFocus);
+          // Buka preview modal di Lomeal seketika (0 DETIK!) dengan foto asli yang baru dijepret
           if (onFile === runPhotoScan) {
             startPhotoScanPreview(immediateWebPath);
           }
         });
       } catch (e) {
-        cameraPendingRef.current = false;
-        window.removeEventListener('focus', handleAppFocus);
         if (/cancel/i.test(e.message || '')) {
           setAiResult(null);
           scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
@@ -504,8 +482,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         }
         return;
       }
-      cameraPendingRef.current = false;
-      window.removeEventListener('focus', handleAppFocus);
       if (file) onFile(file);
       return;
     }
@@ -3411,23 +3387,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           </div>
         </div>
       )}
-
-      {/* In-app Camera Viewfinder Modal (0ms shutter & freeze, no lag, maximum sensor resolution) */}
-      <CameraViewfinderModal
-        open={viewfinderOpen}
-        onClose={() => setViewfinderOpen(false)}
-        onCapture={(file) => {
-          const cb = viewfinderCallback || runPhotoScan;
-          cb(file);
-          setViewfinderOpen(false);
-        }}
-        onOpenGallery={() => {
-          openGallery(viewfinderCallback || runPhotoScan, galleryRef);
-        }}
-        onFallbackSystemCamera={() => {
-          openSystemCamera(viewfinderCallback || runPhotoScan, cameraRef);
-        }}
-      />
 
       {/* ===== GLOBAL CAMERA / GALLERY LOADING OVERLAY ===== */}
       {cameraLoading && (

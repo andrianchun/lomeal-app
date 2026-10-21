@@ -19,7 +19,7 @@ export const captureToFile = async (onPhotoReady) => {
     resultType: CameraResultType.Uri, // Uri, bukan Base64 — hemat memori buat foto belasan MP
     saveToGallery: localStorage.getItem('lomeal_autosave_camera') !== 'false',
     correctOrientation: true,
-    quality: 85,
+    quality: 90,
   });
   if (!photo?.webPath) return null;
 
@@ -44,7 +44,7 @@ export const pickFromGallery = async (onPhotoReady) => {
     source: CameraSource.Photos,
     resultType: CameraResultType.Uri,
     correctOrientation: true,
-    quality: 85,
+    quality: 90,
   });
   if (!photo?.webPath) return null;
 
