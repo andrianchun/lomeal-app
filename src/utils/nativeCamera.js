@@ -18,8 +18,8 @@ export const captureToFile = async (onPhotoReady) => {
     direction: CameraDirection.Rear, // Selalu prioritaskan kamera belakang (hindari kamera selfie)
     resultType: CameraResultType.Uri, // Uri, bukan Base64 — hemat memori buat foto belasan MP
     saveToGallery: localStorage.getItem('lomeal_autosave_camera') !== 'false',
-    correctOrientation: false, // Hindari re-encode bitmap manual di Java; WebView sudah auto-orientasi EXIF secara native
-    quality: 85, // Sangat tajam & kompresi native jauh lebih instan (0ms delay)
+    correctOrientation: true,
+    quality: 85,
   });
   if (!photo?.webPath) return null;
 
@@ -43,7 +43,7 @@ export const pickFromGallery = async (onPhotoReady) => {
   const photo = await Camera.getPhoto({
     source: CameraSource.Photos,
     resultType: CameraResultType.Uri,
-    correctOrientation: false,
+    correctOrientation: true,
     quality: 85,
   });
   if (!photo?.webPath) return null;
