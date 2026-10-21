@@ -288,47 +288,23 @@ export default function CameraViewfinderModal({
     }
   };
 
-  // AKSI JEPRET: Ambil Still Photo resolusi penuh sensor (ImageCapture API) atau frame video tertinggi
-  const handleShutterCapture = async () => {
+  // AKSI JEPRET INSTAN: Ambil frame video detik ini juga (0ms shutter lag, anti-blur)
+  const handleShutterCapture = () => {
+    if (isFrozen || isStarting || !isVideoReady) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas || !isVideoReady) return;
+    if (!video || !canvas) return;
 
-    // 1. Efek visual & haptic shutter
+    // 1. Efek visual & haptic shutter instan
     setFlashActive(true);
     setTimeout(() => setFlashActive(false), 80);
     try {
-      if (navigator.vibrate) navigator.vibrate(40);
+      if (navigator.vibrate) navigator.vibrate(35);
     } catch (_) {}
 
     capturedBlobRef.current = null;
 
-    // 2. Coba Still Photo resolusi penuh hardware via ImageCapture API
-    let photoBlob = null;
-    if (window.ImageCapture && activeStreamRef.current) {
-      const track = activeStreamRef.current.getVideoTracks()[0];
-      if (track && track.readyState === 'live') {
-        try {
-          const imageCapture = new window.ImageCapture(track);
-          photoBlob = await imageCapture.takePhoto();
-        } catch (e) {
-          console.warn('ImageCapture.takePhoto fallback to video frame:', e);
-        }
-      }
-    }
-
-    if (photoBlob) {
-      capturedBlobRef.current = photoBlob;
-      const dataUrl = URL.createObjectURL(photoBlob);
-      setCapturedDataUrl(dataUrl);
-      setIsFrozen(true);
-      try {
-        video.pause();
-      } catch (_) {}
-      return;
-    }
-
-    // 3. Fallback: Frame video beresolusi penuh asli tanpa kompresi berlebih
+    // 2. Ambil frame video beresolusi penuh detik ini juga (0ms latency, zero motion blur)
     const w = video.videoWidth || 1920;
     const h = video.videoHeight || 1080;
     canvas.width = w;
@@ -349,9 +325,21 @@ export default function CameraViewfinderModal({
       video.pause();
     } catch (_) {}
 
+    // Segera tampilkan preview beku detik ini juga!
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
     setCapturedDataUrl(dataUrl);
     setIsFrozen(true);
+
+    // Siapkan blob file di background untuk konfirmasi
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          capturedBlobRef.current = blob;
+        }
+      },
+      'image/jpeg',
+      0.95
+    );
   };
 
   // Ulangi jepretan
@@ -477,20 +465,22 @@ export default function CameraViewfinderModal({
           </div>
         )}
 
-        {/* Reticle / Targeting Frame (Hanya tampil saat live & kamera sudah siap) */}
+        {/* Reticle / Targeting Frame (Area bidik bersih tanpa teks yang menutupi makanan) */}
         {!isFrozen && !errorMessage && isVideoReady && (
-          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center z-10 p-8">
-            <div className="relative w-64 h-64 sm:w-80 sm:h-80 border-2 border-dashed border-emerald-400/40 rounded-3xl flex items-center justify-center">
+          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center z-10 p-6">
+            <div className="relative w-68 h-68 sm:w-80 sm:h-80 border-2 border-dashed border-emerald-400/35 rounded-3xl">
               {/* Corner brackets */}
               <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-emerald-400 rounded-tl-xl" />
               <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-emerald-400 rounded-tr-xl" />
               <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-emerald-400 rounded-bl-xl" />
               <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-emerald-400 rounded-br-xl" />
+            </div>
 
-              <div className="flex flex-col items-center gap-1.5 px-4 py-2 rounded-2xl bg-black/50 backdrop-blur-md border border-white/10 text-center shadow-lg">
-                <span className="text-white font-bold text-xs">Arahkan & Ketuk Layar untuk Fokus</span>
-                <span className="text-zinc-300 text-[10px]">Jarak ideal ~15–20 cm dari kemasan</span>
-              </div>
+            {/* Hint ramping di luar area makanan — kecil & tidak mengganggu */}
+            <div className="mt-4 px-3 py-1 rounded-full bg-black/45 backdrop-blur-md border border-white/10 text-center shadow">
+              <span className="text-zinc-300 text-[11px] font-medium tracking-tight">
+                Ketuk layar untuk fokus
+              </span>
             </div>
           </div>
         )}
@@ -617,10 +607,11 @@ export default function CameraViewfinderModal({
                 handleClose();
                 onOpenGallery?.();
               }}
-              className="w-12 h-12 rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-white/15 flex flex-col items-center justify-center text-white active:scale-90 transition-transform cursor-pointer"
+              className="w-13 h-13 rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-white/15 flex flex-col items-center justify-center text-zinc-300 hover:text-white active:scale-90 transition-transform cursor-pointer"
               title="Buka Galeri"
             >
-              <Image size={20} />
+              <Image size={18} />
+              <span className="text-[9px] font-bold text-zinc-400 mt-0.5">Galeri</span>
             </button>
 
             {/* Big Shutter Button */}
@@ -628,7 +619,7 @@ export default function CameraViewfinderModal({
               onClick={handleShutterCapture}
               disabled={isStarting || !isVideoReady || !!errorMessage}
               className="w-20 h-20 rounded-full border-4 border-white/90 p-1 flex items-center justify-center active:scale-90 transition-transform shadow-2xl cursor-pointer disabled:opacity-40"
-              title="Ambil Foto Resolusi Penuh"
+              title="Ambil Foto Instan"
             >
               <div className="w-full h-full rounded-full bg-white shadow-inner flex items-center justify-center">
                 <div className="w-3.5 h-3.5 rounded-full bg-emerald-500" />
@@ -642,13 +633,14 @@ export default function CameraViewfinderModal({
                   handleClose();
                   onFallbackSystemCamera();
                 }}
-                className="w-12 h-12 rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-white/15 flex flex-col items-center justify-center text-zinc-300 hover:text-white active:scale-90 transition-transform cursor-pointer"
+                className="w-13 h-13 rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-white/15 flex flex-col items-center justify-center text-zinc-300 hover:text-white active:scale-90 transition-transform cursor-pointer"
                 title="Gunakan Kamera Bawaan HP"
               >
-                <Camera size={19} />
+                <Camera size={18} />
+                <span className="text-[9px] font-bold text-zinc-400 mt-0.5">Kamera HP</span>
               </button>
             ) : (
-              <div className="w-12 h-12" />
+              <div className="w-13 h-13" />
             )}
           </div>
         ) : (

@@ -452,8 +452,13 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  // Kamera instan in-app (0ms shutter freeze) dengan fallback ke kamera sistem
+  // Kamera instan in-app (0ms shutter freeze) dengan opsi preferensi kamera sistem
   const openCamera = async (onFile, inputRef) => {
+    const pref = localStorage.getItem('lomeal_camera_engine') || 'viewfinder';
+    if (pref === 'native') {
+      openSystemCamera(onFile, inputRef);
+      return;
+    }
     if (navigator?.mediaDevices?.getUserMedia) {
       setViewfinderCallback(() => onFile);
       setViewfinderOpen(true);

@@ -45,8 +45,8 @@ const AI_PERSONAS = [
   { key: 'empatik', emoji: '🤗', label: 'Empatik' },
 ];
 
-const Toggle2 = ({ leftLabel, rightLabel, leftActive, onLeft, onRight, t, leftIcon: LeftIcon, rightIcon: RightIcon }) => (
-  <div className={`relative flex w-32 p-1 rounded-full ${t.btnBg} shrink-0`}>
+const Toggle2 = ({ leftLabel, rightLabel, leftActive, onLeft, onRight, t, leftIcon: LeftIcon, rightIcon: RightIcon, widthClass = "w-32" }) => (
+  <div className={`relative flex ${widthClass} p-1 rounded-full ${t.btnBg} shrink-0`}>
     <div
       className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-full transition-transform duration-300 ease-out ${t.bgAccent} shadow-sm`}
       style={{ transform: leftActive ? 'translateX(0)' : 'translateX(100%)', left: '4px' }}
@@ -99,6 +99,7 @@ const SettingsPage = ({
   const [legalType, setLegalType] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [autoSaveCamera, setAutoSaveCamera] = useState(() => localStorage.getItem('lomeal_autosave_camera') !== 'false');
+  const [cameraEngine, setCameraEngine] = useState(() => localStorage.getItem('lomeal_camera_engine') || 'viewfinder');
 
   const handleSyncAll = async () => {
     if (!syncAllNutritionToLogym || isSyncing) return;
@@ -200,6 +201,11 @@ const SettingsPage = ({
               <Row icon={CalendarDays} label={lang.weekStart} t={t}>
                 <Toggle2 t={t} leftLabel={lang.monday} rightLabel={lang.sunday} leftActive={settings.weekStartDay !== 0}
                   onLeft={() => updateSetting('weekStartDay', 1)} onRight={() => updateSetting('weekStartDay', 0)} />
+              </Row>
+              <Row icon={Camera} label="Aplikasi Kamera" t={t}>
+                <Toggle2 t={t} leftLabel="Lomy Lens" rightLabel="Kamera HP" leftActive={cameraEngine === 'viewfinder'} widthClass="w-36"
+                  onLeft={() => { setCameraEngine('viewfinder'); localStorage.setItem('lomeal_camera_engine', 'viewfinder'); }}
+                  onRight={() => { setCameraEngine('native'); localStorage.setItem('lomeal_camera_engine', 'native'); }} />
               </Row>
               <Row icon={Camera} label="Simpan Foto Otomatis" t={t}>
                 <Toggle2 t={t} leftLabel="Ya" rightLabel="Tidak" leftActive={autoSaveCamera}

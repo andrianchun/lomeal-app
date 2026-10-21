@@ -19,9 +19,7 @@ export const captureToFile = async () => {
     resultType: CameraResultType.Uri, // Uri, bukan Base64 — hemat memori buat foto belasan MP
     saveToGallery: localStorage.getItem('lomeal_autosave_camera') !== 'false',
     correctOrientation: true,
-    quality: 85,
-    width: 1920,
-    height: 1920,
+    quality: 95,
   });
   const blob = await (await fetch(photo.webPath)).blob();
   return new File([blob], `lomeal-${Date.now()}.${photo.format || 'jpg'}`, { type: blob.type || 'image/jpeg' });
