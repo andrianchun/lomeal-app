@@ -210,3 +210,11 @@ body.keyboard-open #smart-input-bar > div {
   padding: 6px 8px !important;
   border-radius: 24px !important;
 }
+
+/* In-App CameraX transparency support */
+body.camera-preview-active,
+body.camera-preview-active #root,
+body.camera-preview-active .camera-preview-transparent {
+  background-color: transparent !important;
+  background-image: none !important;
+}

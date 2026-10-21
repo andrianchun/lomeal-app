@@ -43,12 +43,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Kamera native (src/utils/nativeCamera.js) — jepret + saveToGallery otomatis.
-         Tanpa ini @capacitor/camera gagal diam-diam di APK (OTA gak bisa nge-patch izin native). -->
+    <!-- Kamera native & in-app CameraX (src/utils/nativeCamera.js) -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+
+    <!-- Memasang APK pembaruan dari dalam aplikasi tanpa sisa file di folder Downloads (seperti doctoid) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Surat Izin Akses Data Kesehatan Health Connect -->
     <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />

@@ -2,23 +2,32 @@ import React from 'react';
 import { DownloadCloud, X } from 'lucide-react';
 import useBackClose from '../hooks/useBackClose';
 
-// Bar progres unduhan. Bundle OTA puluhan MB, jadi tanpa indikator user ngira
-// tombolnya macet dan menekan berulang kali.
-function DownloadProgress({ progress, t }) {
+// Bar progres unduhan. Mendukung OTA zip maupun streaming in-app APK installer (seperti doctoid).
+function DownloadProgress({ progress, t, isApk }) {
+  const isInstalling = progress >= 100;
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-2">
-        <span className={`text-xs font-bold ${t.textMuted}`}>Mengunduh pembaruan…</span>
+        <span className={`text-xs font-bold ${t.textMuted}`}>
+          {isInstalling
+            ? (isApk ? 'Mempersiapkan pemasangan APK…' : 'Memasang berkas & memuat ulang…')
+            : (isApk ? 'Mengunduh paket pembaruan APK…' : 'Mengunduh pembaruan…')}
+        </span>
         <span className={`text-xs font-bold ${t.textMain} tabular-nums`}>{progress}%</span>
       </div>
-      <div className="w-full h-2 rounded-full bg-black/20 overflow-hidden">
+      <div className="w-full h-2 rounded-full bg-black/20 overflow-hidden relative">
         <div
           className={`${t.bgAccent} h-full rounded-full transition-all duration-200 ease-out`}
           style={{ width: `${Math.max(progress, 3)}%` }}
         />
+        {isInstalling && (
+          <div className="absolute inset-0 bg-white/30 animate-pulse rounded-full" />
+        )}
       </div>
       <p className={`text-[10px] ${t.textMuted} mt-2 leading-tight`}>
-        Jangan tutup aplikasi. Lomeal akan otomatis dimuat ulang setelah selesai.
+        {isInstalling && isApk
+          ? 'Tunggu dialog pemasangan Android muncul di layar.'
+          : 'Jangan tutup aplikasi saat proses berlangsung.'}
       </p>
     </div>
   );
@@ -26,7 +35,7 @@ function DownloadProgress({ progress, t }) {
 
 export default function UpdaterAlert({
   open, force, onUpdate, onClose, releaseNotes, theme,
-  currentVersion, newVersion, progress,
+  currentVersion, newVersion, progress, isApk,
 }) {
   const downloading = progress !== null && progress !== undefined;
   // Sama kayak tombol X-nya: kartu update wajib (force) gak bisa ditutup sama sekali,
@@ -48,9 +57,13 @@ export default function UpdaterAlert({
         <div className={`w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl ${t.bgCardSolid} border ${t.border} ${t.textMain} flex flex-col items-center text-center animate-in zoom-in-95 duration-500`}>
           <div className="pt-8 pb-4">
             <img src="/maskable-icon-512x512.webp" alt="Lomeal Logo" className="w-24 h-24 mx-auto rounded-2xl shadow-lg mb-4 bg-white/5 border border-white/10 p-2" />
-            <h2 className={`text-2xl font-bold tracking-tight mb-2 bg-clip-text text-transparent bg-gradient-to-br ${t.gradientText}`}>Update Penting!</h2>
+            <h2 className={`text-2xl font-bold tracking-tight mb-2 bg-clip-text text-transparent bg-gradient-to-br ${t.gradientText}`}>
+              {isApk ? 'Pembaruan Aplikasi APK' : 'Update Penting!'}
+            </h2>
             <p className={`text-sm font-medium ${t.textMuted} px-6`}>
-              Versi terbaru Lomeal telah tersedia. Kamu harus mengunduh pembaruan ini untuk melanjutkan.
+              {isApk
+                ? 'Versi APK terbaru Lomeal telah tersedia. Unduh pembaruan ini langsung di dalam aplikasi.'
+                : 'Versi terbaru Lomeal telah tersedia. Kamu harus mengunduh pembaruan ini untuk melanjutkan.'}
             </p>
             {versionLine && (
               <p className={`text-xs font-bold ${t.textAccent} mt-2 tabular-nums`}>{versionLine}</p>
@@ -66,14 +79,14 @@ export default function UpdaterAlert({
 
           <div className="w-full p-6 mt-2 text-center">
             {downloading ? (
-              <DownloadProgress progress={progress} t={t} />
+              <DownloadProgress progress={progress} t={t} isApk={isApk} />
             ) : (
               <button
                 onClick={onUpdate}
                 className={`w-full py-4 ${t.bgAccent} rounded-2xl font-bold text-lg ${t.shadowAccent} flex items-center justify-center gap-2 active:scale-95 transition-transform`}
               >
                 <DownloadCloud size={24} />
-                Update Sekarang
+                {isApk ? 'Pasang Pembaruan APK' : 'Update Sekarang'}
               </button>
             )}
           </div>
@@ -100,7 +113,9 @@ export default function UpdaterAlert({
             <img src="/maskable-icon-512x512.webp" alt="Lomeal" className="w-10 h-10 rounded-lg" />
           </div>
           <div>
-            <h3 className="font-bold text-lg leading-tight">Update Tersedia</h3>
+            <h3 className="font-bold text-lg leading-tight">
+              {isApk ? 'Update APK Tersedia' : 'Update Tersedia'}
+            </h3>
             <p className={`text-xs ${t.textMuted} mt-0.5 tabular-nums`}>
               {versionLine || 'Ada versi Lomeal yang lebih baru.'}
             </p>
@@ -112,14 +127,14 @@ export default function UpdaterAlert({
         )}
 
         {downloading ? (
-          <DownloadProgress progress={progress} t={t} />
+          <DownloadProgress progress={progress} t={t} isApk={isApk} />
         ) : (
           <button
             onClick={onUpdate}
             className={`w-full py-2.5 ${t.bgAccent} rounded-xl font-bold text-sm shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-2`}
           >
             <DownloadCloud size={18} />
-            Update Sekarang
+            {isApk ? 'Pasang Pembaruan APK' : 'Update Sekarang'}
           </button>
         )}
       </div>

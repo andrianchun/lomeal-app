@@ -92,7 +92,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const [socialOpen, setSocialOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [otaState, setOtaState] = useState({ open: false, force: false, url: '', version: '', notes: '' });
+  const [otaState, setOtaState] = useState({ open: false, force: false, url: '', version: '', notes: '', is_apk: false });
   // __APP_VERSION__ di-inject dari package.json oleh vite (lihat vite.config.js).
   const [currentVer, setCurrentVer] = useState(__APP_VERSION__);
 
@@ -133,19 +133,26 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
           const data = await res.json();
 
           // Sengaja !== bukan >: mem-publish versi lama = rollback, dan itu harus ikut terkirim.
+          // Jika rilis khusus APK tapi dibuka di Web/PWA, abaikan
+          if (data.is_apk && !isNative) {
+            setOtaState(prev => ({ ...prev, open: false }));
+            return;
+          }
+
           if (data.ota_version && data.ota_version !== installedVer) {
             const dismissed = localStorage.getItem('lomeal_dismissed_ota');
             if (dismissed === data.ota_version && !data.is_forced) {
               setOtaState(prev => ({ ...prev, open: false }));
               return;
             }
-            console.log(`[OTA] Update available: ${installedVer} to ${data.ota_version}`);
+            console.log(`[OTA] Update available: ${installedVer} to ${data.ota_version} (is_apk=${!!data.is_apk})`);
             setOtaState({
               open: true,
               version: data.ota_version,
               url: data.ota_url,
               notes: data.release_notes || 'Pembaruan baru tersedia.',
               force: !!data.is_forced,
+              is_apk: !!data.is_apk,
             });
           } else {
             setOtaState(prev => ({ ...prev, open: false }));
@@ -180,35 +187,79 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     CapacitorUpdater.addListener('download', (info) => {
       setDownloadProgress(Math.round(info.percent));
     }).then(l => dlListener = l);
+
+    let apkListener;
+    if (Capacitor.getPlatform() === 'android') {
+      import('@capacitor/core').then(({ registerPlugin }) => {
+        const ApkInstaller = registerPlugin('ApkInstaller');
+        ApkInstaller.addListener('apkInstall', (info) => {
+          if (info?.state === 'downloading') {
+            setDownloadProgress(Math.round(info.percent || 0));
+          } else if (info?.state === 'installing' || info?.state === 'prompt') {
+            setDownloadProgress(100);
+          } else if (info?.state === 'failed') {
+            setDownloadProgress(null);
+            showAlert(info?.message || 'Pemasangan APK dibatalkan atau gagal.', { title: 'Update Gagal' });
+          }
+        }).then(l => { apkListener = l; }).catch(() => {});
+      });
+    }
+
     return () => {
       if (dlListener) dlListener.remove();
+      if (apkListener) apkListener.remove();
     };
   }, []);
 
   const handleUpdate = async () => {
     localStorage.removeItem('lomeal_dismissed_ota');
 
-    // Web: index.html di-serve NetworkFirst (lihat vite.config.js), jadi reload biasa
-    // sudah pasti dapat HTML + chunk baru. Tidak ada yang perlu diunduh manual.
+    const isApkRelease = otaState.is_apk || !otaState.url.toLowerCase().endsWith('.zip');
+
+    // Jalur In-App APK Installer (seperti doctoid): Pasang langsung dari dalam aplikasi
+    if (isApkRelease) {
+      if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+        setDownloadProgress(0);
+        try {
+          const { registerPlugin } = await import('@capacitor/core');
+          const ApkInstaller = registerPlugin('ApkInstaller');
+          const res = await ApkInstaller.install({ url: otaState.url });
+          if (res?.needsPermission) {
+            setDownloadProgress(null);
+            showAlert('Android butuh izin untuk memasang pembaruan langsung. Silakan aktifkan "Izinkan dari sumber ini" pada layar setelan yang terbuka, lalu tekan Update lagi.', { title: 'Izin Diperlukan' });
+            await ApkInstaller.openInstallSettings();
+            return;
+          }
+          return;
+        } catch (err) {
+          console.warn('ApkInstaller belum terpasang di APK lama, membuka lewat browser...', err);
+          setDownloadProgress(null);
+          window.open(otaState.url, '_system');
+          return;
+        }
+      }
+
+      window.open(otaState.url, '_blank');
+      return;
+    }
+
+    // Web: index.html di-serve NetworkFirst, reload biasa
     if (!Capacitor.isNativePlatform()) {
       setDownloadProgress(0);
       const reg = await navigator.serviceWorker?.getRegistration();
-      // Suruh SW lama minggir dulu kalau sudah ada penggantinya yang nunggu,
-      // supaya reload tidak disajikan aset lama olehnya.
       if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
       window.location.reload();
       return;
     }
 
+    // OTA Bundle Zip via Capgo
     try {
-      // Kartu/modal sengaja TIDAK ditutup: progress bar-nya tampil di situ, karena
-      // bundle-nya puluhan MB dan tanpa indikator user ngira tombolnya macet.
       setDownloadProgress(0);
       const bundle = await CapacitorUpdater.download({
         url: otaState.url,
         version: otaState.version,
       });
-      await CapacitorUpdater.set(bundle); // destroy JS context — baris setelah ini tidak jalan
+      await CapacitorUpdater.set(bundle);
     } catch (err) {
       console.error('OTA Update failed:', err);
       setDownloadProgress(null);
@@ -1201,6 +1252,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
         currentVersion={currentVer}
         newVersion={otaState.version}
         progress={downloadProgress}
+        isApk={otaState.is_apk}
         onUpdate={handleUpdate}
         onClose={() => {
           localStorage.setItem('lomeal_dismissed_ota', otaState.version);

@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(LomealHealthPlugin.class);
+    registerPlugin(ApkInstallerPlugin.class);
     super.onCreate(savedInstanceState);
 
     // WebView TIDAK meneruskan setelan "Ukuran font" Android ke halaman kecuali textZoom
