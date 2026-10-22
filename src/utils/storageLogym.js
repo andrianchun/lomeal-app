@@ -6,7 +6,10 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 export const uploadImageToFirebase = async (file, path) => {
   try {
     const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, file);
+    const metadata = {
+      contentType: file.type || (path.endsWith('.webp') ? 'image/webp' : 'image/jpeg'),
+    };
+    await uploadBytes(storageRef, file, metadata);
     return await getDownloadURL(storageRef);
   } catch (error) {
     console.error("Firebase Storage upload error:", error);

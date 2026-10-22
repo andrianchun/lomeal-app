@@ -20,7 +20,6 @@ import { zeroDomusItemStock, updateDomusItemQuantity, requestShoppingListDomus, 
 import { deductStock, formatStock, itemStock } from '../utils/stockConverter';
 import { nutrientSources } from '../utils/nutrientSources';
 import AttachmentMenu from '../components/AttachmentMenu';
-import CameraViewfinderModal from '../components/CameraViewfinderModal';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
 import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS, getItemUnitWeight, parseQuickInput, calculateGramsFromURT } from '../utils/urtMapping';
@@ -301,8 +300,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   }, []);
 
   const cameraRef = useRef(null);
-  const [showCameraModal, setShowCameraModal] = useState(false);
-  const cameraModalCallbackRef = useRef(null);
   const galleryRef = useRef(null);
   const detailPhotoRef = useRef(null);
   const detailCameraRef = useRef(null);
@@ -460,14 +457,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  // In-App Native CameraX (zero latency, freeze screenshot effect, sensor jernih asli HP)
+  // Kamera bawaan HP (sensor penuh 12MP/50MP asli HP, jernih tanpa grain, tidak ngezoom)
   const openCamera = async (onFile, inputRef) => {
-    if (isNativeApp()) {
-      cameraModalCallbackRef.current = onFile;
-      setShowCameraModal(true);
-      return;
-    }
-    inputRef?.current?.click();
+    openSystemCamera(onFile, inputRef);
   };
 
   const openSystemCamera = async (onFile, inputRef) => {
@@ -1329,32 +1321,32 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                extra: { type: 'ai_scan_done', targetSession, ymd: selectedYmd, targetTab: '/log' }
              });
           } else {
-             // Jika AI tidak mengenali makanan, tetap simpan foto ke sesi agar foto makanan user tidak hilang
-             try {
-               await addPhoto(targetSession, file, photoId);
-               setDetailSession(targetSession);
-             } catch (saveErr) {
-               console.warn('Gagal simpan foto:', saveErr);
-             }
+             // Jika AI tidak mengenali makanan, segera tutup modal dan simpan foto ke sesi di background
              setAiResult(null);
+             scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
+             addPhoto(targetSession, file, photoId).then(() => {
+               setDetailSession(targetSession);
+             }).catch((saveErr) => {
+               console.warn('Gagal simpan foto:', saveErr);
+             });
              await showAlert('Lomy tidak mengenali makanan di foto. Foto tetap disimpan di sesi makanan agar kamu bisa mengisi manual atau coba hitung ulang nanti.');
           }
         } catch (e) {
+          // Segera tutup modal scanning agar layar tidak stuck/menggantung
+          setAiResult(null);
+          scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
+
           if (e.name === 'AbortError') {
-            setAiResult(null);
             return refundAiUsage(user.uid);
           }
           console.error('[runPhotoScan error]', e);
 
-          // JIKA GAGAL: Fotonya disimpan ke sesi, tutup sheet scanning
-          try {
-            await addPhoto(targetSession, photoDataUrl || file, photoId);
+          // JIKA GAGAL: Fotonya disimpan ke sesi di background tanpa memblokir penutupan modal
+          addPhoto(targetSession, photoDataUrl || file, photoId).then(() => {
             setDetailSession(targetSession);
-          } catch (saveErr) {
+          }).catch((saveErr) => {
             console.warn('Gagal menyimpan foto ke sesi saat scan gagal:', saveErr);
-          }
-
-          setAiResult(null);
+          });
 
           const sessionName = activeSessions.find(s => s.id === targetSession)?.label || 'sesi';
           sendLocalNotification({
@@ -2158,40 +2150,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           )}
         </div>
       </div>
-
-      {/* ===== IN-APP NATIVE CAMERAX VIEWFINDER ===== */}
-      <CameraViewfinderModal
-        isOpen={showCameraModal}
-        t={t}
-        onClose={() => {
-          setShowCameraModal(false);
-          cameraModalCallbackRef.current = null;
-        }}
-        onOpenGallery={() => {
-          const cb = cameraModalCallbackRef.current || runPhotoScan;
-          setShowCameraModal(false);
-          openGallery(cb, cameraRef);
-        }}
-        onPhotoCaptured={async (dataUrl) => {
-          setShowCameraModal(false);
-          const cb = cameraModalCallbackRef.current || runPhotoScan;
-          cameraModalCallbackRef.current = null;
-
-          // ZERO LATENCY PREVIEW: Buka sheet preview Lomeal SEKETIKA (0 milidetik!)
-          if (cb === runPhotoScan) {
-            startPhotoScanPreview(dataUrl);
-          }
-
-          try {
-            const blob = await dataUrlToBlob(dataUrl);
-            const file = new File([blob], `lomeal-${Date.now()}.jpg`, { type: 'image/jpeg' });
-            file.webPath = dataUrl;
-            cb(file);
-          } catch (e) {
-            console.error('Error preparing captured photo file:', e);
-          }
-        }}
-      />
 
       {/* ===== MODAL KONFIRMASI CATAT MAKANAN (Lomy / Batch) =====
           Full-screen backdrop menutup layar rapi tanpa celah gantung di bawah. */}

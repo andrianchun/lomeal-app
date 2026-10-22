@@ -291,7 +291,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
 
     abortIfCancelled(signal);
 
-    const aiChat = httpsCallable(functions, 'lomealAiChat', { timeout: 120000 });
+    const aiChat = httpsCallable(functions, 'lomealAiChat', { timeout: 35000 });
     try {
       let res;
       try {

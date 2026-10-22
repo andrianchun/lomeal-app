@@ -64,7 +64,7 @@ run('npm run build:ota', { OTA_FORCE: forced ? '1' : '0', OTA_NOTES: notes || ''
 // lebih lama karena semua file diunggah ulang — murah dibanding rilis yang tidak sampai.
 const deployHosting = () => {
   fs.rmSync('.firebase', { recursive: true, force: true });
-  run('firebase deploy --only hosting');
+  run('firebase deploy --only hosting,storage');
 };
 
 /**
