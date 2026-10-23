@@ -303,6 +303,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const cameraRef = useRef(null);
   const [showCameraModal, setShowCameraModal] = useState(false);
   const cameraModalCallbackRef = useRef(null);
+  const cameraModalInputRef = useRef(null);
   const galleryRef = useRef(null);
   const detailPhotoRef = useRef(null);
   const detailCameraRef = useRef(null);
@@ -460,25 +461,12 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  // In-App Native CameraX (zero latency, freeze screenshot effect, sensor jernih asli HP)
-  // Dengan graceful fallback otomatis ke kamera sistem jika APK yang terpasang belum memiliki CameraPreview plugin
-  const openCamera = async (onFile, inputRef) => {
-    if (isNativeApp()) {
-      try {
-        const { CameraPreview } = await import('@capacitor-community/camera-preview');
-        const check = await CameraPreview.isCameraStarted().catch(() => null);
-        if (check !== undefined) {
-          cameraModalCallbackRef.current = onFile;
-          setShowCameraModal(true);
-          return;
-        }
-      } catch (e) {
-        console.warn('CameraPreview native belum ada di biner APK ini, memakai kamera sistem:', e);
-      }
-      openSystemCamera(onFile, inputRef);
-      return;
-    }
-    inputRef?.current?.click();
+  // In-App Gemini-Style Camera (zero latency, HTML5 hardware-accelerated MediaStream, zoom .6x/1x/3x, flash)
+  // Dengan graceful fallback otomatis ke kamera sistem jika perangkat tidak mendukung
+  const openCamera = (onFile, inputRef) => {
+    cameraModalCallbackRef.current = onFile;
+    cameraModalInputRef.current = inputRef;
+    setShowCameraModal(true);
   };
 
   const openSystemCamera = async (onFile, inputRef) => {
@@ -2170,23 +2158,31 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
         </div>
       </div>
 
-      {/* ===== IN-APP NATIVE CAMERAX VIEWFINDER ===== */}
+      {/* ===== IN-APP GEMINI-STYLE CAMERA VIEWFINDER ===== */}
       <CameraViewfinderModal
         isOpen={showCameraModal}
         t={t}
         onClose={() => {
           setShowCameraModal(false);
           cameraModalCallbackRef.current = null;
+          cameraModalInputRef.current = null;
         }}
         onOpenGallery={() => {
           const cb = cameraModalCallbackRef.current || runPhotoScan;
           setShowCameraModal(false);
           openGallery(cb, cameraRef);
         }}
+        onFallbackSystemCamera={() => {
+          setShowCameraModal(false);
+          const cb = cameraModalCallbackRef.current || runPhotoScan;
+          const ref = cameraModalInputRef.current || cameraRef;
+          openSystemCamera(cb, ref);
+        }}
         onPhotoCaptured={async (dataUrl) => {
           setShowCameraModal(false);
           const cb = cameraModalCallbackRef.current || runPhotoScan;
           cameraModalCallbackRef.current = null;
+          cameraModalInputRef.current = null;
 
           // ZERO LATENCY PREVIEW: Buka sheet preview Lomeal SEKETIKA (0 milidetik!)
           if (cb === runPhotoScan) {
