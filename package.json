@@ -1,7 +1,7 @@
 {
   "name": "lomeal",
   "private": true,
-  "version": "0.3.59",
+  "version": "0.3.60",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "build:ota": "vite build && node scripts/build-ota.js",
     "generate:icons": "node scripts/generate-notification-icons.mjs",
     "release": "node scripts/release.js",
-    "sync:android": "npm run build:ota && npx cap sync android && node -e \"require('fs').rmSync('android/app/src/main/assets/public/ota',{recursive:true,force:true})\"",
+    "sync:android": "npm run build:ota && npx cap sync android && node -e \"require('fs').rmSync('android/app/src/main/assets/public/ota',{recursive:true,force:true}); require('fs').rmSync('android/app/src/main/assets/public/apk',{recursive:true,force:true})\"",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

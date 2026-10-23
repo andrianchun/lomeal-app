@@ -24,7 +24,10 @@ import {
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcReadTodayActivity, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
 import { computeDayTotals, calcTargets, calcBMR, calcTEF } from './data/nutrition';
 import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from './utils/aiFood';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
+// Plugin lokal native Android: streaming byte APK langsung ke PackageInstaller.Session
+const ApkInstaller = registerPlugin('ApkInstaller');
 import { App as CapacitorApp } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { COOK_NOTIF_ONGOING } from './hooks/useCookTimers';
@@ -190,19 +193,16 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
 
     let apkListener;
     if (Capacitor.getPlatform() === 'android') {
-      import('@capacitor/core').then(({ registerPlugin }) => {
-        const ApkInstaller = registerPlugin('ApkInstaller');
-        ApkInstaller.addListener('apkInstall', (info) => {
-          if (info?.state === 'downloading') {
-            setDownloadProgress(Math.round(info.percent || 0));
-          } else if (info?.state === 'installing' || info?.state === 'prompt') {
-            setDownloadProgress(100);
-          } else if (info?.state === 'failed') {
-            setDownloadProgress(null);
-            showAlert(info?.message || 'Pemasangan APK dibatalkan atau gagal.', { title: 'Update Gagal' });
-          }
-        }).then(l => { apkListener = l; }).catch(() => {});
-      });
+      ApkInstaller.addListener('apkInstall', (info) => {
+        if (info?.state === 'downloading') {
+          setDownloadProgress(Math.round(info.percent || 0));
+        } else if (info?.state === 'installing' || info?.state === 'prompt') {
+          setDownloadProgress(100);
+        } else if (info?.state === 'failed') {
+          setDownloadProgress(null);
+          showAlert(info?.message || 'Pemasangan APK dibatalkan atau gagal.', { title: 'Update Gagal' });
+        }
+      }).then(l => { apkListener = l; }).catch(() => {});
     }
 
     return () => {
@@ -221,8 +221,6 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
         setDownloadProgress(0);
         try {
-          const { registerPlugin } = await import('@capacitor/core');
-          const ApkInstaller = registerPlugin('ApkInstaller');
           const res = await ApkInstaller.install({ url: otaState.url });
           if (res?.needsPermission) {
             setDownloadProgress(null);

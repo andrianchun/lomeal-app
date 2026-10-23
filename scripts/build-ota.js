@@ -94,7 +94,7 @@ archive.pipe(output);
 //   sendiri dan menutupi bundle yang baru dipasang Capgo.
 archive.glob('**/*', {
   cwd: distPath,
-  ignore: ['ota/**', 'apk/**', 'sw.js', 'workbox-*.js', 'registerSW.js', 'manifest.webmanifest']
+  ignore: ['ota/**', 'apk/**', '*.apk', 'sw.js', 'workbox-*.js', 'registerSW.js', 'manifest.webmanifest']
 });
 
 archive.finalize();
