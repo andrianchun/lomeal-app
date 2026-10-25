@@ -4,8 +4,9 @@ import useBackClose from '../hooks/useBackClose';
 
 /**
  * In-App Camera Viewfinder yang meniru tampilan dan pengalaman kamera Google Gemini.
- * Berjalan langsung di dalam DOM (HTML5 MediaStream) dengan zero latency, dukungan zoom,
- * senter/flash, tap-to-focus dengan visual focus box, dan jepret instan dengan efek freeze frame.
+ * Berjalan langsung di dalam DOM (HTML5 MediaStream) dengan resolusi Ultra-HD sensor penuh,
+ * continuous autofocus & auto-exposure, dukungan zoom dinamis, senter/flash, tap-to-focus,
+ * dan jepret instan.
  */
 export default function CameraViewfinderModal({
   isOpen,
@@ -95,6 +96,20 @@ export default function CameraViewfinderModal({
             hasUltraWide: minZ < 1,
           });
         }
+
+        // Terapkan continuous autofocus & auto-exposure bawaan sensor agar foto dekat tidak buram
+        const advanced = [];
+        if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+          advanced.push({ focusMode: 'continuous' });
+        }
+        if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
+          advanced.push({ exposureMode: 'continuous' });
+        }
+        if (advanced.length > 0) {
+          try {
+            await track.applyConstraints({ advanced });
+          } catch (_) {}
+        }
       } catch (_) {
         setHasTorch(false);
       }
@@ -116,11 +131,13 @@ export default function CameraViewfinderModal({
     }
 
     try {
+      // Minta resolusi tertinggi yang didukung sensor fisik HP (4K / Quad HD / 1080p foto)
       const constraints = {
         video: {
           facingMode: { ideal: facing },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 3840, min: 1280 },
+          height: { ideal: 2160, min: 720 },
+          aspectRatio: { ideal: 4 / 3 },
         },
         audio: false,
       };
@@ -147,11 +164,25 @@ export default function CameraViewfinderModal({
         checkCameraCapabilities();
       }, 350);
     } catch (err) {
-      console.warn('Gagal memulai kamera:', err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setErrorMsg('Izin akses kamera belum diberikan. Izinkan kamera di setelan aplikasi untuk melanjutkan.');
-      } else {
-        setErrorMsg('Tidak dapat mengakses kamera. Coba buka kamera sistem bawaan.');
+      console.warn('Gagal memulai kamera dengan resolusi tinggi, coba fallback:', err);
+      // Fallback jika HP menolak batasan tinggi
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: facing } },
+          audio: false,
+        });
+        streamRef.current = fallbackStream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = fallbackStream;
+          await videoRef.current.play();
+        }
+        setTimeout(() => checkCameraCapabilities(), 350);
+      } catch (fallbackErr) {
+        if (fallbackErr.name === 'NotAllowedError' || fallbackErr.name === 'PermissionDeniedError') {
+          setErrorMsg('Izin akses kamera belum diberikan. Izinkan kamera di setelan aplikasi untuk melanjutkan.');
+        } else {
+          setErrorMsg('Tidak dapat mengakses kamera. Coba buka kamera sistem bawaan.');
+        }
       }
     }
   }, [cameraPosition, stopCamera, checkCameraCapabilities]);
@@ -227,19 +258,24 @@ export default function CameraViewfinderModal({
     const [track] = streamRef.current.getVideoTracks();
     if (track) {
       const cap = (typeof track.getCapabilities === 'function') ? track.getCapabilities() : {};
+      const normX = Math.min(1, Math.max(0, clickX / rect.width));
+      const normY = Math.min(1, Math.max(0, clickY / rect.height));
 
-      // 1. Koordinat POI (Points of Interest) jika didukung driver
+      // 1. Koordinat POI (Points of Interest) & Exposure POI
+      const advancedPoint = {};
       if (cap && cap.pointsOfInterest) {
+        advancedPoint.pointsOfInterest = [{ x: normX, y: normY }];
+      }
+      if (cap && cap.exposurePointsOfInterest) {
+        advancedPoint.exposurePointsOfInterest = [{ x: normX, y: normY }];
+      }
+      if (Object.keys(advancedPoint).length > 0) {
         try {
-          const normX = Math.min(1, Math.max(0, clickX / rect.width));
-          const normY = Math.min(1, Math.max(0, clickY / rect.height));
-          await track.applyConstraints({
-            advanced: [{ pointsOfInterest: [{ x: normX, y: normY }] }],
-          });
+          await track.applyConstraints({ advanced: [advancedPoint] });
         } catch (_) {}
       }
 
-      // 2. Siklus fokus single-shot -> continuous agar kamera HP melakukan re-focus
+      // 2. Siklus fokus single-shot -> continuous agar lensa fisik HP langsung mencari fokus di titik tersebut
       if (cap && cap.focusMode) {
         try {
           if (cap.focusMode.includes('single-shot')) {
@@ -255,7 +291,7 @@ export default function CameraViewfinderModal({
                 });
               }
             } catch (_) {}
-          }, 900);
+          }, 800);
         } catch (_) {}
       }
     }
@@ -298,27 +334,70 @@ export default function CameraViewfinderModal({
     }, 90);
 
     try {
-      const video = videoRef.current;
-      const vWidth = video.videoWidth || 1920;
-      const vHeight = video.videoHeight || 1080;
+      let dataUrl = null;
 
-      const canvas = document.createElement('canvas');
-      canvas.width = vWidth;
-      canvas.height = vHeight;
-      const ctx = canvas.getContext('2d');
-
-      // Terapkan framing crop sesuai zoom yang dipilih pengguna
-      if (activeZoom > 1) {
-        const sw = vWidth / activeZoom;
-        const sh = vHeight / activeZoom;
-        const sx = (vWidth - sw) / 2;
-        const sy = (vHeight - sh) / 2;
-        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, vWidth, vHeight);
-      } else {
-        ctx.drawImage(video, 0, 0, vWidth, vHeight);
+      // 1. Prioritaskan ImageCapture API untuk resolusi penuh sensor foto (bukan sekadar screenshot video)
+      const [track] = streamRef.current?.getVideoTracks() || [];
+      if (typeof window !== 'undefined' && 'ImageCapture' in window && track && track.readyState === 'live') {
+        try {
+          const imageCapture = new ImageCapture(track);
+          const photoBlob = await imageCapture.takePhoto();
+          if (photoBlob) {
+            if (activeZoom > 1) {
+              const bitmap = await createImageBitmap(photoBlob);
+              const bWidth = bitmap.width;
+              const bHeight = bitmap.height;
+              const canvas = document.createElement('canvas');
+              canvas.width = bWidth;
+              canvas.height = bHeight;
+              const ctx = canvas.getContext('2d', { alpha: false });
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
+              const sw = bWidth / activeZoom;
+              const sh = bHeight / activeZoom;
+              const sx = (bWidth - sw) / 2;
+              const sy = (bHeight - sh) / 2;
+              ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, bWidth, bHeight);
+              dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+            } else {
+              dataUrl = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(photoBlob);
+              });
+            }
+          }
+        } catch (icErr) {
+          console.warn('ImageCapture takePhoto fallback ke canvas capture:', icErr);
+        }
       }
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      // 2. Fallback capture dari video element dengan resolusi frame maksimal
+      if (!dataUrl) {
+        const video = videoRef.current;
+        const vWidth = video.videoWidth || 3840;
+        const vHeight = video.videoHeight || 2160;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = vWidth;
+        canvas.height = vHeight;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
+        // Terapkan framing crop sesuai zoom yang dipilih pengguna
+        if (activeZoom > 1) {
+          const sw = vWidth / activeZoom;
+          const sh = vHeight / activeZoom;
+          const sx = (vWidth - sw) / 2;
+          const sy = (vHeight - sh) / 2;
+          ctx.drawImage(video, sx, sy, sw, sh, 0, 0, vWidth, vHeight);
+        } else {
+          ctx.drawImage(video, 0, 0, vWidth, vHeight);
+        }
+
+        dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      }
 
       // Freeze frame instan detik itu juga (0 latency)
       setFreezeImage(dataUrl);
@@ -437,7 +516,7 @@ export default function CameraViewfinderModal({
                   <div className="absolute inset-0 rounded-full border-2 border-white/20 border-t-emerald-400 animate-spin" />
                   <Camera size={26} className="text-white/50 animate-pulse" />
                 </div>
-                <p className="text-xs text-white/50 mt-3 font-medium tracking-wide">Menghubungkan kamera...</p>
+                <p className="text-xs text-white/50 mt-3 font-medium tracking-wide">Menghubungkan kamera HD...</p>
               </div>
             )}
 
@@ -507,7 +586,7 @@ export default function CameraViewfinderModal({
 
         {/* TEKS PETUNJUK: Persis Gemini */}
         <p className="text-[13px] text-white/80 font-normal tracking-wide text-center pt-1 pb-6 select-none">
-          Ketuk layar untuk fokus · Arahkan ke makanan
+          Ketuk layar untuk fokus · Beri jarak ~15 cm agar tajam
         </p>
 
         {/* 3 TOMBOL KONTROL UTAMA: Galeri | Shutter | Putar Kamera */}
