@@ -9,7 +9,13 @@ export const searchOpenFoodFacts = async (query) => {
     const q = encodeURIComponent(query.trim());
     if (q.length < 3) return null; // terlalu pendek
 
-    const res = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${q}&search_simple=1&action=process&json=1&page_size=3`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    const res = await fetch(`https://world.openfoodfacts.net/api/v2/search?search_terms=${q}&fields=code,product_name,product_name_id,nutriments&page_size=5`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
     if (!res.ok) return null;
     const data = await res.json();
     
@@ -25,7 +31,7 @@ export const searchOpenFoodFacts = async (query) => {
 
       return {
         foods: [{
-          name: product.product_name || query,
+          name: product.product_name_id || product.product_name || query,
           grams: 100, // OFF selalu menggunakan per 100g
           unit: 'g',
           isDrink: false,

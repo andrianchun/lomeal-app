@@ -2017,7 +2017,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       <div id="smart-input-bar" className="fixed left-0 right-0 z-30 px-3 pb-2 pointer-events-none transition-all duration-300 ease-out" style={{ bottom: 'calc(82px + env(safe-area-inset-bottom, 20px))' }}>
         <div className={`no-swipe pointer-events-auto relative max-w-2xl mx-auto flex items-end gap-1.5 px-2.5 py-2 rounded-[28px] border ${t.border} ${t.navBg} shadow-2xl transition-all duration-300 ease-out`}>
           {/* DATABASE AUTOCOMPLETE POPUP (Cepat & Offline) */}
-          {foodSuggestions.length > 0 && (
+          {(foodSuggestions.length > 0 || (isInputFocused && chatText.trim().length >= 2 && !dismissSuggestions)) && (
             <div
               className={`absolute bottom-full mb-2 left-0 right-0 z-40 max-h-64 flex flex-col rounded-2xl border ${theme === 'dark' ? 'bg-[#0a1510]/95 border-white/10' : 'bg-white/95 border-black/10'} backdrop-blur-2xl shadow-2xl overflow-hidden anim-rise`}
               onPointerDown={(e) => e.stopPropagation()}
@@ -2049,6 +2049,32 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                     </div>
                   </div>
                 ))}
+                {chatText.trim().length >= 2 && (
+                  <div
+                    onClick={() => {
+                      setDismissSuggestions(true);
+                      runMagicPrompt();
+                    }}
+                    className={`flex items-center justify-between px-3.5 py-2.5 ${foodSuggestions.length === 0 ? 'hover:bg-emerald-500/10 active:bg-emerald-500/20' : 'bg-emerald-500/10 hover:bg-emerald-500/20 active:bg-emerald-500/30 border-t border-emerald-500/20'} transition-colors cursor-pointer group`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-6 h-6 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                        <Search size={13} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className={`text-xs font-bold ${t.textMain} truncate group-hover:text-emerald-400 transition-colors`}>
+                          Cari "{chatText.trim()}" dengan Lomy
+                        </p>
+                        <p className={`text-[10px] ${t.textMuted} truncate`}>
+                          {foodSuggestions.length === 0 ? 'Tidak ada di database lokal · Cari online / AI' : 'Cari di database internet / AI Lomy'}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] uppercase font-extrabold tracking-wider px-2 py-0.5 rounded bg-emerald-500 text-white shrink-0">
+                      Cari
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}
