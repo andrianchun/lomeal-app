@@ -72,9 +72,44 @@ export const hcCheckStatus = async () => {
   }
 };
 
+// Kelompokkan sample per tanggal YYYY-MM-DD
+export const groupByDay = (samples) => {
+  const out = {};
+  (samples || []).forEach((s) => {
+    const mulai = new Date(s?.startDate).getTime();
+    if (!Number.isFinite(mulai) || !(s.value > 0)) return;
+    const selesaiRaw = new Date(s?.endDate ?? s?.startDate).getTime();
+    const ymd = s.startDate.slice(0, 10);
+    (out[ymd] = out[ymd] || []).push({
+      mulai,
+      selesai: Number.isFinite(selesaiRaw) ? Math.max(mulai, selesaiRaw) : mulai,
+      nilai: s.value,
+    });
+  });
+  return out;
+};
+
+// Jumlahkan nilai record berjangka-waktu, MELEWATI yang tumpang tindih.
+// Mencegah bug Samsung Health/Google Fit yang menulis record total harian sekaligus
+// record per-sesi latihan di dalam hari yang sama, yang jika dijumlah polos membuat
+// kalori harian melonjak ganda (misal 2.200 kkal + 1.200 kkal = 3.400+ kkal).
+export const sumNonOverlapping = (list) => {
+  const urut = [...(list || [])].sort(
+    (a, b) => a.mulai - b.mulai || (b.selesai - b.mulai) - (a.selesai - a.mulai)
+  );
+  let batas = -Infinity;
+  let total = 0;
+  urut.forEach((r) => {
+    if (r.mulai < batas) return; // bersarang/tumpang tindih — sudah terhitung
+    total += r.nilai;
+    batas = Math.max(batas, r.selesai);
+  });
+  return total;
+};
+
 // Jumlahkan kalori per hari dari rentang tanggal, dengan fallback dua tipe:
 // 'calories' (ActiveCaloriesBurned, bisa di-aggregate langsung — murah) dulu; kalau kosong,
-// baru 'totalCalories' (TotalCaloriesBurned) yang HARUS dibaca mentah lalu dijumlah manual
+// baru 'totalCalories' (TotalCaloriesBurned) yang HARUS dibaca mentah lalu dijumlah TANPA tumpang tindih
 // karena queryAggregated plugin ini gak dukung tipe itu (lihat aggregateMetrics di
 // HealthManager.kt). Sumber macam Samsung Health cuma nulis yang kedua.
 // Hasil: { 'YYYY-MM-DD': kcal }
@@ -97,11 +132,10 @@ const readCaloriesByDay = async (startISO, endISO) => {
       dataType: 'totalCalories', startDate: startISO, endDate: endISO, limit: 5000, ascending: true,
     });
     const byDay = {};
-    for (const s of res?.samples || []) {
-      const ymd = s.startDate.slice(0, 10);
-      byDay[ymd] = (byDay[ymd] || 0) + (s.value || 0);
-    }
-    Object.keys(byDay).forEach((ymd) => { byDay[ymd] = Math.round(byDay[ymd]); });
+    Object.entries(groupByDay(res?.samples || [])).forEach(([ymd, list]) => {
+      const total = sumNonOverlapping(list);
+      if (total > 0) byDay[ymd] = Math.round(total);
+    });
     return byDay;
   } catch (e) {
     console.warn('readCaloriesByDay (totalCalories) gagal:', e);
