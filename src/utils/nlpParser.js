@@ -1,4 +1,4 @@
-import { calculateGramsFromURT, normalizeUnit } from './urtMapping.js';
+import { calculateGramsFromURT, normalizeUnit, isRecognizedUnit } from './urtMapping.js';
 import { searchFoods, nutritionForAmount } from '../data/foodDatabase.js';
 import { db } from '../firebase.js';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -14,6 +14,7 @@ const PATTERN_CACHE_MAX = 200; // cukup buat menu yang sering diulang; localStor
  */
 export const cacheKey = (rawText) => (rawText || '')
   .toLowerCase()
+  .trim()
   .replace(/[.,!?;]+$/g, '')
   .replace(/\s+/g, ' ')
   .trim();
@@ -198,8 +199,16 @@ const extractFoodParts = (chunk) => {
       unitStr = match[3] || ''; 
     } else { 
       qty = match[1].toLowerCase(); 
-      unitStr = match[2] || ''; 
-      name = match[3].trim(); 
+      if (match[2] && isRecognizedUnit(match[2])) {
+        unitStr = match[2]; 
+        name = match[3].trim(); 
+      } else if (match[2]) {
+        unitStr = '';
+        name = `${match[2]} ${match[3]}`.trim();
+      } else {
+        unitStr = '';
+        name = match[3].trim();
+      }
     }
   }
 

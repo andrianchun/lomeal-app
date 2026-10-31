@@ -109,6 +109,13 @@ export const normalizeUnit = (unitStr) => {
   return normalized;
 };
 
+export const isRecognizedUnit = (unitStr) => {
+  if (!unitStr) return false;
+  const norm = (unitStr || '').toLowerCase().trim();
+  const direct = SYNONYMS[norm] || norm;
+  return (direct in URT_DICTIONARY) || (norm in SYNONYMS) || ['g', 'gram', 'ml', 'ons', 'kg', 'porsi', 'potong', 'butir', 'buah', 'centong', 'gelas', 'cangkir', 'sdm', 'sdt', 'mangkok', 'mangkuk', 'piring', 'bungkus', 'biji', 'lembar', 'tusuk', 'ekor', 'batang', 'siung', 'botol', 'kaleng', 'cup', 'iris', 'sachet', 'pack', 'keping'].includes(direct);
+};
+
 /**
  * Menghitung estimasi berat dalam gram berdasarkan kuantitas dan satuan URT.
  * Jika satuan tidak dikenali, akan mengembalikan null agar sistem bisa menggunakan default food.
@@ -227,15 +234,26 @@ export const parseQuickInput = (input) => {
     return { term: mSe[2].trim(), qty: u.qty, unit: u.unit, explicitGrams: null };
   }
 
-  // 3. Pattern '[Qty] [Unit] [Name]' -> '2 buah pisang' atau '2 porsi nasi'
+  // 3. Pattern '[Qty] [Unit] [Name]' -> '2 buah pisang', '2 porsi nasi', atau '2 telur rebus'
   const mPrefix = text.match(/^(\d+(?:[\.,]\d+)?|\d+\/\d+|setengah|seperempat)\s*([a-zA-Z]+)?\s+([\D]+)$/i);
   if (mPrefix) {
     let q = parseFloat(mPrefix[1].replace(',', '.'));
     if (mPrefix[1].toLowerCase() === 'setengah') q = 0.5;
     if (mPrefix[1].toLowerCase() === 'seperempat') q = 0.25;
-    const u = mPrefix[2] ? normalizeUnit(mPrefix[2]) : null;
-    const term = mPrefix[3].trim();
-    return { term, qty: q || 1, unit: u, explicitGrams: null };
+    
+    // Periksa apakah kata kedua benar-benar satuan yang sah
+    if (mPrefix[2] && isRecognizedUnit(mPrefix[2])) {
+      const u = normalizeUnit(mPrefix[2]);
+      const term = mPrefix[3].trim();
+      return { term, qty: q || 1, unit: u, explicitGrams: null };
+    } else if (mPrefix[2]) {
+      // Kata kedua BUKAN satuan (misal '2 telur rebus', '1 nasi goreng') -> gabungkan jadi nama makanan!
+      const term = `${mPrefix[2]} ${mPrefix[3]}`.trim();
+      return { term, qty: q || 1, unit: null, explicitGrams: null };
+    } else {
+      const term = mPrefix[3].trim();
+      return { term, qty: q || 1, unit: null, explicitGrams: null };
+    }
   }
 
   // 4. Pattern '[Name] [Qty] [Unit]' -> 'pisang 2 buah' atau 'pisang 2'
