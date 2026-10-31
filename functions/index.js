@@ -48,16 +48,17 @@ async function checkRateLimit(uid) {
 
 // ---------- Provider callers (server-side: tanpa masalah CORS) ----------
 
-async function callGoogle(key, model, systemPrompt, contents) {
+async function callGoogle(key, model, systemPrompt, contents, tools = null) {
     const preferred = GOOGLE_MODELS.includes(model) ? model : 'gemini-3.8-flash';
     const chain = [preferred, ...GOOGLE_MODELS.filter(m => m !== preferred)];
     const payload = {
         system_instruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
         contents,
-        // Semua pemakai endpoint ini ngambil ANGKA GIZI, bukan ngobrol. Tanpa ini temperature
-        // default (~1.0) bikin foto yang sama balik dengan estimasi beda-beda tiap dijalankan.
         generationConfig: { temperature: 0, topP: 0.1 }
     };
+    if (tools) {
+        payload.tools = tools;
+    }
     for (let i = 0; i < chain.length; i++) {
         const isLast = i === chain.length - 1;
         const controller = new AbortController();
@@ -70,6 +71,11 @@ async function callGoogle(key, model, systemPrompt, contents) {
                 signal: controller.signal
             });
             clearTimeout(timer);
+            if (res.status === 400 && payload.tools) {
+                delete payload.tools;
+                i--;
+                continue;
+            }
             if ([400, 403, 404, 429, 503].includes(res.status) && !isLast) continue;
             if (!res.ok) {
                 const errText = await res.text();
@@ -162,7 +168,7 @@ exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, m
                         parts: [{ text: m.content }]
                     };
                 });
-                return { text: await callGoogle(key, model, systemPrompt, contents) };
+                return { text: await callGoogle(key, model, systemPrompt, contents, tools) };
             }
             if (provider === 'openai') {
                 const oaMessages = messages.map(m => ({

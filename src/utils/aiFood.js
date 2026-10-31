@@ -204,18 +204,40 @@ async function callGeminiWithKey(apiKey, parts, signal = null, opts = {}) {
         ...(isBearer ? { 'Authorization': `Bearer ${cleanKey}` } : { 'x-goog-api-key': cleanKey }),
       };
 
-      const res = await fetchWithRetry(url, {
+      const bodyPayload = { contents: [{ parts }], generationConfig };
+      if (opts.tools) {
+        bodyPayload.tools = opts.tools;
+      }
+
+      let res = await fetchWithRetry(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ contents: [{ parts }], generationConfig }),
+        body: JSON.stringify(bodyPayload),
         signal,
       });
 
+      // Jika HTTP 400 saat menggunakan tools, fallback coba lagi tanpa tools
+      if (res.status === 400 && opts.tools) {
+        res = await fetchWithRetry(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ contents: [{ parts }], generationConfig }),
+          signal,
+        });
+      }
+
       if (res.ok) {
         const data = await res.json();
-        let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        const partsArr = data.candidates?.[0]?.content?.parts || [];
+        let text = partsArr.map(p => p.text || '').filter(Boolean).join('\n') || '{}';
         text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
-        const parsed = JSON.parse(text);
+        let jsonStr = text;
+        const firstBrace = text.indexOf('{');
+        const lastBrace = text.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          jsonStr = text.slice(firstBrace, lastBrace + 1);
+        }
+        const parsed = JSON.parse(jsonStr);
         if (parsed.error === 'OUT_OF_SCOPE') throw new Error('OUT_OF_SCOPE');
         return parsed;
       }
@@ -298,7 +320,8 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
         res = await aiChat({
           messages: [{ role: 'user', content: parts }],
           provider: 'google',
-          model: 'gemini-3.8-flash'
+          model: 'gemini-3.8-flash',
+          tools: opts.tools || null
         });
       } catch (callErr) {
         if (/network|fetch|unavailable|offline|timeout/i.test(callErr.message || '')) {
@@ -307,7 +330,8 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
           res = await aiChat({
             messages: [{ role: 'user', content: parts }],
             provider: 'google',
-            model: 'gemini-3.8-flash'
+            model: 'gemini-3.8-flash',
+            tools: opts.tools || null
           });
         } else {
           throw callErr;
@@ -331,17 +355,39 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
 export const parseFoodText = async (apiKey, text, signal = null, customFoods = []) => {
   const knownFoods = customFoods.slice(0, 40).map(f => `- ${f.name}: per 100${f.unit || 'g'} = ${JSON.stringify(f.nutrition)}`).join('\n');
   const knownFoodsBlock = knownFoods ? `\n\nDATABASE CUSTOM MILIK USER (pakai nilai ini kalau nama makanan cocok/mirip, jangan nebak ulang):\n${knownFoods}` : '';
-  const res = await callGemini(apiKey, [{ text: `${SAFETY_PREFIX}\n\nTUGAS: Uraikan deskripsi makanan berikut menjadi daftar item dengan estimasi gizi. Pahami ukuran rumah tangga Indonesia (centong≈100g nasi, sdm, potong, tusuk, gelas≈250ml).\nCatatan pencarian: Pengguna mungkin mengetikkan nama makanan singkat, potongan kata, atau ada typo (mis. "yoghurt man" -> yoghurt mangga, "kopi susu" -> kopi susu). Selalu tafsirkan sebagai nama makanan/minuman yang paling masuk akal dengan estimasi gizi wajar.\n${FOOD_SCHEMA}${knownFoodsBlock}\n\nINPUT PENGGUNA:\n"""${text}"""` }], signal);
-  
-  // Single Source of Truth Mapping
-  const mappedFoods = res.foods.map(f => {
-    const match = searchFoods(f.name, customFoods)[0];
-    if (match) {
-      return { ...f, name: match.name, foodId: match.id, nutrition: nutritionForAmount(match, f.grams || 100) };
+
+  const regionalGuidance = `\nPENTING TENTANG KULINER DAERAH NUSANTARA & PENCARIAN INTERNET:
+- PAHAMI KOSAKATA KULINER DAERAH INDONESIA (Sunda, Bali, Jawa, Padang, Manado, Makassar, Banjar, Aceh, dll.).
+- JANGAN PERNAH MENGGANTI NAMA MAKANAN DAERAH DENGAN KATA LAIN HANYA KARENA DIKIRA TYPO!
+  Contoh:
+  * \"Jukut\" adalah bahasa Sunda & Bali untuk SAYURAN / DEDAUNAN (misal: \"jukut goreng\" = sayur selada air / kangkung / kol goreng garing khas Bali/Sunda/Sambal Bakar, \"jukut urab\", \"jukut ares\"). JANGAN PERNAH mengubah \"jukut\" menjadi \"jamur\"!
+  * \"Sego\" = nasi (Jawa)
+  * \"Be\" / \"Siap\" = daging / ayam (Bali)
+  * \"Ares\" = batang pisang muda (Bali/Lombok)
+  * \"Laos\" = lengkuas (misal \"ayam laos\" = ayam goreng bumbu lengkuas)
+  * \"Brekecek\" = olahan ikan (Cilacap/Banyumas)
+  * \"Pallubasa\", \"Coto\", \"Konro\" = kuliner Makassar
+- Pertahankan nama makanan pengguna secara setia. Cari fakta di internet bila ragu (gunakan Google Search), JANGAN PERNAH mengubah kata daerah menjadi makanan lain yang bunyinya mirip!`;
+
+  const promptText = `${SAFETY_PREFIX}\n\nTUGAS: Uraikan deskripsi makanan berikut menjadi daftar item dengan estimasi gizi. Pahami ukuran rumah tangga Indonesia (centong≈100g nasi, sdm, potong, tusuk, gelas≈250ml).\nCatatan pencarian: Pengguna mungkin mengetikkan nama makanan singkat atau singkatan (mis. \"yoghurt mangga\", \"kopi susu\", \"nasgor\").\n${regionalGuidance}\n${FOOD_SCHEMA}${knownFoodsBlock}\n\nINPUT PENGGUNA:\n\"\"\"${text}\"\"\"`;
+
+  const res = await callGemini(apiKey, [{ text: promptText }], signal, {
+    tools: [{ google_search: {} }]
+  });
+
+  // Single Source of Truth Mapping: Hanya petakan jika match persis nama atau alias
+  const mappedFoods = (res.foods || []).map(f => {
+    const matches = searchFoods(f.name, customFoods);
+    const exactMatch = matches.find(m => 
+      m.name.toLowerCase() === f.name.toLowerCase() || 
+      (m.aliases || []).some(a => a.toLowerCase() === f.name.toLowerCase())
+    );
+    if (exactMatch) {
+      return { ...f, name: exactMatch.name, foodId: exactMatch.id, nutrition: nutritionForAmount(exactMatch, f.grams || 100) };
     }
     return f;
   });
-  
+
   return { ...res, foods: clampFoods(mappedFoods) };
 };
 

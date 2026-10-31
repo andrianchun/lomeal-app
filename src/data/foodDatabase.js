@@ -58,11 +58,13 @@ const OLD_FOOD_DB = [
   F('jagung-rebus',    'Jagung Manis Rebus',    'staple', '1 tongkol (125g)', 125, [  96,  3.4, 20.9,  1.5,   15,  4.5,   0,  0.2, 0.5,    2,  25], { aliases: ['jagung', 'jagung manis', 'corn'] }),
   F('oatmeal',         'Oatmeal (masak)',       'staple', '1 mangkok (240g)', 240, [  71,  2.5, 12.0,  1.5,    4,  0.3,   0,  0.3, 0.9,   10,  25], { source: 'USDA', aliases: ['havermut', 'oats', 'oat'] }),
   F('nasi-kuning',     'Nasi Kuning',           'staple', '1 porsi (150g)',   150, [ 175,  3.2, 30.5,  4.5,  200,  0.3,   0,  3.2, 0.5,   25,  10]),
+  F('nasi-daun-jeruk', 'Nasi Daun Jeruk',       'staple', '1 centong (100g)', 100, [ 175,  3.2, 35.0,  2.5,   90,  0.2,   0,  1.2, 0.4,   25,  10], { aliases: ['nasi daun jeruk', 'nasi jeruk', 'nasi wangi daun jeruk'] }),
 
   // ---------- LAUK PAUK ----------
   F('ayam-dada',       'Dada Ayam (tanpa kulit, matang)', 'protein', '1 potong (100g)', 100, [ 165, 31.0,  0.0,  3.6,   74,  0.0,  85,  1.0, 1.0,   15, 140], { source: 'USDA', aliases: ['dada ayam', 'ayam dada', 'fillet dada ayam', 'fillet ayam', 'chicken breast'] }),
   F('ayam-paha',       'Paha Ayam (dengan kulit, matang)','protein', '1 potong (100g)', 100, [ 232, 23.3,  0.0, 15.5,   87,  0.0,  98,  4.2, 1.3,   12, 140], { source: 'USDA', aliases: ['paha ayam', 'ayam paha', 'chicken thigh'] }),
   F('ayam-goreng',     'Ayam Goreng',           'protein', '1 potong (100g)',  100, [ 260, 21.9,  6.5, 16.0,  350,  0.5,  89,  4.5, 1.4,   20, 140], { image: 'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?auto=format&fit=crop&w=200&q=80', aliases: ['ayam goreng', 'ayam krispi', 'fried chicken'] }),
+  F('ayam-laos',       'Ayam Laos / Lengkuas',  'protein', '1 potong (100g)', 100, [ 245, 24.0,  4.0, 14.5,  320,  0.5,  85,  3.8, 1.5,   20, 130], { aliases: ['ayam laos', 'ayam goreng laos', 'ayam lengkuas', 'ayam goreng lengkuas', 'ayam bumbu lengkuas', 'ayam bumbu laos'] }),
   F('telur-rebus',     'Telur Ayam Rebus',      'protein', '1 butir (55g)',     55, [ 155, 12.6,  1.1, 10.6,  124,  1.1, 373,  3.3, 1.2,   50,   5], { image: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?auto=format&fit=crop&w=200&q=80', aliases: ['telur rebus', 'telor rebus', 'telur matang', 'telur', 'telor', 'boiled egg', 'egg'] }),
   F('telur-goreng',    'Telur Ceplok / Dadar',  'protein', '1 butir (60g)',     60, [ 196, 13.6,  0.9, 15.3,  207,  0.4, 401,  4.3, 1.9,   62,   5], { aliases: ['telur ceplok', 'telor ceplok', 'telur dadar', 'telor dadar', 'telur mata sapi', 'telor mata sapi', 'telur goreng', 'telor goreng', 'fried egg'] }),
   F('tempe-goreng',    'Tempe Goreng',          'protein', '1 potong (50g)',    50, [ 225, 17.0,  9.0, 15.0,   10,  0.5,   0,  2.5, 2.3,  120, 100], { aliases: ['tempe goreng', 'tempe goreng tepung', 'tempe'] }),
@@ -93,6 +95,8 @@ const OLD_FOOD_DB = [
   F('urap',            'Urap Sayur',            'veggie', '1 porsi (100g)',    100, [ 105,  3.5,  8.0,  7.0,  280,  2.0,   0,  4.8, 1.5,   80,  40], { aliases: ['urap', 'urap sayur', 'urap-urap'] }),
   F('timun',           'Timun Segar',           'veggie', '1 buah (100g)',     100, [  15,  0.7,  3.6,  0.1,    2,  1.7,   0,  0.0, 0.3,   16,   7], { aliases: ['timun', 'mentimun', 'cucumber'] }),
   F('selada',          'Selada / Lalapan',      'veggie', '1 porsi (50g)',      50, [  15,  1.4,  2.9,  0.2,   28,  0.8,   0,  0.0, 0.9,   36,  15], { aliases: ['selada', 'lettuce', 'lalap', 'lalapan'] }),
+  F('jukut-goreng',    'Jukut Goreng',          'veggie', '1 porsi (80g)',     80, [ 145,  2.5,  8.0, 11.5,  180,  0.5,   0,  1.8, 1.2,   45,  15], { aliases: ['jukut goreng', 'jukut goreng crispy', 'selada air goreng', 'sayur jukut goreng', 'jukut goreng bali', 'jukut'] }),
+  F('jukut-urab',      'Jukut Urab Bali',       'veggie', '1 porsi (100g)',   100, [  95,  3.2,  8.5,  5.5,  260,  2.0,   0,  3.8, 1.5,   75,  40], { aliases: ['jukut urab', 'jukut urap', 'urap bali'] }),
 
   // ---------- BUAH ----------
   F('pisang',          'Pisang',                'fruit', '1 buah (100g)',      100, [  89,  1.1, 22.8,  0.3,    1, 12.2,   0,  0.1, 0.3,    5,  10], { aliases: ['buah pisang', 'banana', 'gedang'] }),

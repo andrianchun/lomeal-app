@@ -1,7 +1,7 @@
 // ============================================================
 // Lomeal External API Cascade (Tier 2 & 3)
 // ============================================================
-import { EMPTY_NUTRITION } from '../data/nutrition';
+import { EMPTY_NUTRITION } from '../data/nutrition.js';
 
 // Tier 2: OpenFoodFacts (Gratis, khusus produk kemasan ber-barcode)
 export const searchOpenFoodFacts = async (query) => {
@@ -20,8 +20,19 @@ export const searchOpenFoodFacts = async (query) => {
     const data = await res.json();
     
     if (data.products && data.products.length > 0) {
-      // Ambil yang nutrisinya paling lengkap
-      const product = data.products.find(p => p.nutriments && p.nutriments['energy-kcal_100g']) || data.products[0];
+      // WAJIB VERIFIKASI RELEVANSI:
+      // OpenFoodFacts sering mengembalikan produk acak bawaan/global (seperti 'Sidi Ali', 'Perly test3')
+      // jika kata pencarian pengguna tidak ditemukan sama sekali di database mereka.
+      const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
+      const matchingProducts = data.products.filter(p => {
+        const pName = (p.product_name_id || p.product_name || '').toLowerCase();
+        return queryWords.some(qw => pName.includes(qw));
+      });
+
+      if (matchingProducts.length === 0) return null;
+
+      // Ambil yang nutrisinya paling lengkap dari produk yang benar-benar relevan
+      const product = matchingProducts.find(p => p.nutriments && p.nutriments['energy-kcal_100g']) || matchingProducts[0];
       
       if (!product || !product.nutriments) return null;
       
