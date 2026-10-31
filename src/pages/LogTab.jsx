@@ -20,7 +20,6 @@ import { zeroDomusItemStock, updateDomusItemQuantity, requestShoppingListDomus, 
 import { deductStock, formatStock, itemStock } from '../utils/stockConverter';
 import { nutrientSources } from '../utils/nutrientSources';
 import AttachmentMenu from '../components/AttachmentMenu';
-import CameraViewfinderModal from '../components/CameraViewfinderModal';
 import WaterSlider from '../components/WaterSlider';
 import SwipeInput from '../components/SwipeInput';
 import { URT_DICTIONARY, normalizeUnit, entryUnit, UNIT_OPTIONS, getItemUnitWeight, parseQuickInput, calculateGramsFromURT } from '../utils/urtMapping';
@@ -301,9 +300,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   }, []);
 
   const cameraRef = useRef(null);
-  const [showCameraModal, setShowCameraModal] = useState(false);
-  const cameraModalCallbackRef = useRef(null);
-  const cameraModalInputRef = useRef(null);
   const galleryRef = useRef(null);
   const detailPhotoRef = useRef(null);
   const detailCameraRef = useRef(null);
@@ -461,12 +457,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     }
   };
 
-  // In-App Gemini-Style Camera (zero latency, HTML5 hardware-accelerated MediaStream, zoom .6x/1x/3x, flash)
-  // Dengan graceful fallback otomatis ke kamera sistem jika perangkat tidak mendukung
-  const openCamera = (onFile, inputRef) => {
-    cameraModalCallbackRef.current = onFile;
-    cameraModalInputRef.current = inputRef;
-    setShowCameraModal(true);
+  // Kamera bawaan HP (sensor penuh 12MP/50MP asli HP, jernih tanpa grain, tidak ngezoom)
+  const openCamera = async (onFile, inputRef) => {
+    openSystemCamera(onFile, inputRef);
   };
 
   const openSystemCamera = async (onFile, inputRef) => {
@@ -2177,48 +2170,6 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
           )}
         </div>
       </div>
-
-      {/* ===== IN-APP GEMINI-STYLE CAMERA VIEWFINDER ===== */}
-      <CameraViewfinderModal
-        isOpen={showCameraModal}
-        t={t}
-        onClose={() => {
-          setShowCameraModal(false);
-          cameraModalCallbackRef.current = null;
-          cameraModalInputRef.current = null;
-        }}
-        onOpenGallery={() => {
-          const cb = cameraModalCallbackRef.current || runPhotoScan;
-          setShowCameraModal(false);
-          openGallery(cb, cameraRef);
-        }}
-        onFallbackSystemCamera={() => {
-          setShowCameraModal(false);
-          const cb = cameraModalCallbackRef.current || runPhotoScan;
-          const ref = cameraModalInputRef.current || cameraRef;
-          openSystemCamera(cb, ref);
-        }}
-        onPhotoCaptured={async (dataUrl) => {
-          setShowCameraModal(false);
-          const cb = cameraModalCallbackRef.current || runPhotoScan;
-          cameraModalCallbackRef.current = null;
-          cameraModalInputRef.current = null;
-
-          // ZERO LATENCY PREVIEW: Buka sheet preview Lomeal SEKETIKA (0 milidetik!)
-          if (cb === runPhotoScan) {
-            startPhotoScanPreview(dataUrl);
-          }
-
-          try {
-            const blob = await dataUrlToBlob(dataUrl);
-            const file = new File([blob], `lomeal-${Date.now()}.jpg`, { type: 'image/jpeg' });
-            file.webPath = dataUrl;
-            cb(file);
-          } catch (e) {
-            console.error('Error preparing captured photo file:', e);
-          }
-        }}
-      />
 
       {/* ===== MODAL KONFIRMASI CATAT MAKANAN (Lomy / Batch) =====
           Full-screen backdrop menutup layar rapi tanpa celah gantung di bawah. */}

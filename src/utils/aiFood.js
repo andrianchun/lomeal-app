@@ -17,11 +17,11 @@ import { LAB_MARKERS } from '../data/labPanels';
 import { acquireAiWakeLock, releaseAiWakeLock } from './aiWakeLock';
 
 const MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'gemini-flash-lite-latest',
-  'gemini-3.1-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-3.8-flash'
+  'gemini-3.1-flash-lite'
 ];
 
 export const humanizeAiError = (err, context = 'photo') => {
@@ -298,7 +298,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
         res = await aiChat({
           messages: [{ role: 'user', content: parts }],
           provider: 'google',
-          model: 'gemini-3.5-flash-lite'
+          model: 'gemini-3.8-flash'
         });
       } catch (callErr) {
         if (/network|fetch|unavailable|offline|timeout/i.test(callErr.message || '')) {
@@ -307,7 +307,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
           res = await aiChat({
             messages: [{ role: 'user', content: parts }],
             provider: 'google',
-            model: 'gemini-3.5-flash-lite'
+            model: 'gemini-3.8-flash'
           });
         } else {
           throw callErr;
@@ -566,7 +566,7 @@ export const streamLomyChat = async (apiKey, messages, contextBlock = '', onChun
       const res = await aiChat({
         messages: [{ role: 'system', content: systemPrompt }, ...messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || m.content }))],
         provider: 'google',
-        model: 'gemini-3.5-flash-lite'
+        model: 'gemini-3.8-flash'
       });
       const text = res.data?.text || '';
       if (text) {
@@ -703,7 +703,7 @@ Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang d
     null,
     // Menyusun resep itu tugas kreatif dengan banyak batasan: model 8b terlalu lemah, dan
     // temperature 0 bikin tiap generate menghasilkan resep yang sama persis.
-    { models: ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-3.8-flash'], generationConfig: { temperature: 0.9, topP: 0.95 } },
+    { models: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest'], generationConfig: { temperature: 0.9, topP: 0.95 } },
   );
   return { ...res, ingredients: (res.ingredients || []).map(i => ({ ...i, nutrition: clampNutrition(i.nutrition) })) };
 };
