@@ -2055,24 +2055,18 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                       setDismissSuggestions(true);
                       runMagicPrompt();
                     }}
-                    className={`flex items-center justify-between px-3.5 py-2.5 ${foodSuggestions.length === 0 ? 'hover:bg-emerald-500/10 active:bg-emerald-500/20' : 'bg-emerald-500/10 hover:bg-emerald-500/20 active:bg-emerald-500/30 border-t border-emerald-500/20'} transition-colors cursor-pointer group`}
+                    className={`px-3.5 py-2.5 ${foodSuggestions.length === 0 ? 'hover:bg-emerald-500/10 active:bg-emerald-500/20' : 'bg-emerald-500/10 hover:bg-emerald-500/20 active:bg-emerald-500/30 border-t border-emerald-500/20'} transition-colors cursor-pointer group`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-6 h-6 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-                        <Search size={13} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className={`text-xs font-bold ${t.textMain} truncate group-hover:text-emerald-400 transition-colors`}>
-                          Cari "{chatText.trim()}" dengan Lomy
+                    <div className="min-w-0">
+                      <p className={`body-md font-bold ${t.textMain} truncate group-hover:text-emerald-400 transition-colors`}>
+                        Cari "{chatText.trim()}" online
+                      </p>
+                      {foodSuggestions.length === 0 && (
+                        <p className={`caption ${t.textMuted} truncate mt-0.5`}>
+                          Tidak ada di database lokal
                         </p>
-                        <p className={`text-[10px] ${t.textMuted} truncate`}>
-                          {foodSuggestions.length === 0 ? 'Tidak ada di database lokal · Cari online / AI' : 'Cari di database internet / AI Lomy'}
-                        </p>
-                      </div>
+                      )}
                     </div>
-                    <span className="text-[10px] uppercase font-extrabold tracking-wider px-2 py-0.5 rounded bg-emerald-500 text-white shrink-0">
-                      Cari
-                    </span>
                   </div>
                 )}
               </div>
