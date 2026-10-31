@@ -96,6 +96,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   }, []);
 
   const [pickerOpen, setPickerOpen] = useState(false); // FoodPicker terbuka? (nambah ke batch aiResult yang sama)
+  const [pickerSearchTerm, setPickerSearchTerm] = useState('');
   const [detailSession, setDetailSession] = useState(null); // sessionId sheet detail
   const [detailSlide, setDetailSlide] = useState(0);
   const carouselRef = useRef(null);
@@ -1095,6 +1096,37 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       setAiAbortController(null);
       setAiBusy(false);
     }
+  };
+
+  const handleChatSubmit = (forcedText = null) => {
+    const text = typeof forcedText === 'string' ? forcedText.trim() : chatText.trim();
+    if (!text || aiBusy) return;
+
+    // Deteksi jika user mengetik kata kunci pencarian umum (misal "pepes", "ayam", "soto")
+    // tanpa kuantitas / satuan / pemisah multi-item
+    const hasQuantity = /\d|\b(setengah|seperempat|sebuah|sebutir|sepotong|sepiring|segelas|secangkir|semangkok|semangkuk|selembar|sebungkus|sebatang|seekor|sesendok|secentong|setongkol|sebotol|sekaleng|sekeping|seporsi|secuil)\b/i.test(text);
+    const hasMultiple = /[,;\n+]|\bdan\b|\bsama\b|\btambah\b|\bterus\b/i.test(text);
+
+    if (!hasQuantity && !hasMultiple) {
+      const clean = text.toLowerCase();
+      const list = searchFoods(clean, customFoods);
+      const hasExact = list.some(f => f.name.toLowerCase() === clean || (f.aliases || []).some(a => a.toLowerCase() === clean));
+
+      // Jika ada beberapa makanan di database lokal tapi TIDAK ADA match persis:
+      // Buka modal pencarian FoodPickerModal dengan kata kunci ini supaya user bisa memilih
+      // (bukan di-autolog ke salah satu makanan secara sepihak)
+      if (list.length > 0 && !hasExact) {
+        chatInputRef.current?.blur();
+        setDismissSuggestions(true);
+        if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId());
+        setPickerSearchTerm(text);
+        setPickerOpen(true);
+        return;
+      }
+    }
+
+    setDismissSuggestions(true);
+    runMagicPrompt(text);
   };
 
   const handleDetailPhotoUpload = (eOrFile, sessionId, targetItemIds = null) => {
@@ -2140,8 +2172,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   if (chatText.trim() && !aiBusy) {
-                    setDismissSuggestions(true);
-                    runMagicPrompt();
+                    handleChatSubmit();
                   }
                 }
               }}
@@ -2160,11 +2191,11 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               <X size={20} />
             </button>
           ) : chatText.trim() ? (
-            <button onClick={() => runMagicPrompt()} className={`relative z-10 shrink-0 w-[46px] h-[46px] flex items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-transform active:scale-95`} aria-label="Kirim">
+            <button onClick={() => handleChatSubmit()} className={`relative z-10 shrink-0 w-[46px] h-[46px] flex items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-transform active:scale-95`} aria-label="Kirim">
               <Send size={20} />
             </button>
           ) : (
-            <button onClick={() => { if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId()); setPickerOpen(true); }} className={`relative z-10 shrink-0 w-[46px] h-[46px] flex items-center justify-center rounded-full ${t.bgAccent} shadow-lg transition-transform active:scale-95`} aria-label="Input manual presisi">
+            <button onClick={() => { if (!aiResult) setAiTargetSession(detailSession || getNearestSessionId()); setPickerSearchTerm(''); setPickerOpen(true); }} className={`relative z-10 shrink-0 w-[46px] h-[46px] flex items-center justify-center rounded-full ${t.bgAccent} shadow-lg transition-transform active:scale-95`} aria-label="Input manual presisi">
               <Plus size={20} />
             </button>
           )}
@@ -3320,9 +3351,9 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       {/* ===== FOOD PICKER — nambah ke batch aiResult yang sama kayak hasil Lomy, biar gak ada
           dua cara beda buat "tambah makanan" (satu sheet review buat semua sumber) ===== */}
       {pickerOpen && (
-        <FoodPickerModal
+        <FoodPickerModal initialTerm={pickerSearchTerm}
           t={t} theme={theme} open={pickerOpen}
-          onClose={() => setPickerOpen(false)}
+          onClose={() => { setPickerOpen(false); setPickerSearchTerm(''); }}
           customFoods={customFoods} recipes={recipes} domusItems={domusItems}
           favoriteFoods={profile?.favoriteFoods || []}
           onAdd={(entry) => {
@@ -3353,6 +3384,8 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                if (isEditingItems && draftMeals !== null) {
                  setDraftMeals(prev => [...(prev || []), newEntry]);
                  setPickerOpen(false);
+                  setPickerSearchTerm('');
+                  setChatText('');
                  showToast(`${entry.name} ditambahkan ke draft.`);
                } else {
                  const currentDay = daysMap[selectedYmd] || day || {};
@@ -3360,16 +3393,21 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                  meals[detailSession] = [...(meals[detailSession] || []), newEntry];
                  persistDay({ ...currentDay, meals });
                  setPickerOpen(false);
+                  setPickerSearchTerm('');
+                  setChatText('');
                  showToast(`${entry.name} langsung ditambahkan ke ${activeSessions.find(s => s.id === detailSession)?.label || 'sesi'}.`);
                }
             } else {
                appendAiResult([entry], { source: 'picker' });
                setPickerOpen(false);
+                setPickerSearchTerm('');
+                setChatText('');
                showToast(`${entry.name} ditambahkan ke catatan makan, silakan cek sebelum disimpan.`);
             }
           }}
           onSearchAi={(term) => {
             setPickerOpen(false);
+            setPickerSearchTerm('');
             setChatText(term);
             runMagicPrompt(term);
           }}

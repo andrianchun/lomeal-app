@@ -23,7 +23,32 @@ export const cacheKey = (rawText) => (rawText || '')
  */
 export const getLocalPatternCache = () => {
   try {
-    return JSON.parse(localStorage.getItem(PATTERN_CACHE_KEY) || '{}');
+    const cache = JSON.parse(localStorage.getItem(PATTERN_CACHE_KEY) || '{}');
+    let dirty = false;
+    for (const key of Object.keys(cache)) {
+      const words = key.trim().split(/\s+/).filter(Boolean);
+      // Jika key cuma 1 kata (seperti 'pepes', 'ayam', 'ikan') tapi hasil cachenya makanan multi-kata
+      // yang bukan nama persis atau alias persis, maka ini cache racun (overmatch)
+      if (words.length === 1) {
+        const foods = cache[key];
+        if (Array.isArray(foods) && foods.length === 1) {
+          const fName = (foods[0]?.name || '').toLowerCase();
+          if (fName !== key) {
+            const dbMatch = searchFoods(key);
+            const isLegit = dbMatch.length > 0 && 
+              (dbMatch[0].name.toLowerCase() === key || (dbMatch[0].aliases || []).some(a => a.toLowerCase() === key));
+            if (!isLegit) {
+              delete cache[key];
+              dirty = true;
+            }
+          }
+        }
+      }
+    }
+    if (dirty) {
+      localStorage.setItem(PATTERN_CACHE_KEY, JSON.stringify(cache));
+    }
+    return cache;
   } catch (e) {
     return {};
   }
@@ -31,9 +56,21 @@ export const getLocalPatternCache = () => {
 
 export const saveLocalPatternCache = (rawText, parsedFoods) => {
   try {
+    const key = cacheKey(rawText);
+    const words = key.split(/\s+/).filter(Boolean);
+    // Jangan simpan cache untuk query 1 kata ambigu yang bukan exact match/alias
+    if (words.length === 1 && Array.isArray(parsedFoods) && parsedFoods.length === 1) {
+      const fName = (parsedFoods[0]?.name || '').toLowerCase();
+      if (fName !== key) {
+        const dbMatch = searchFoods(key);
+        const isLegit = dbMatch.length > 0 && 
+          (dbMatch[0].name.toLowerCase() === key || (dbMatch[0].aliases || []).some(a => a.toLowerCase() === key));
+        if (!isLegit) return;
+      }
+    }
     const cache = getLocalPatternCache();
-    delete cache[cacheKey(rawText)]; // hapus dulu biar disisipkan ulang sebagai yang terbaru
-    cache[cacheKey(rawText)] = parsedFoods;
+    delete cache[key]; // hapus dulu biar disisipkan ulang sebagai yang terbaru
+    cache[key] = parsedFoods;
     // Objek JS mempertahankan urutan sisip untuk kunci string, jadi yang paling lama ada di depan.
     const keys = Object.keys(cache);
     const trimmed = keys.length > PATTERN_CACHE_MAX
@@ -57,7 +94,19 @@ export const checkGlobalPatternCache = async (rawText) => {
     const docRef = doc(db, 'lomeal_globalPatternCache', docId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      return snap.data().foods;
+      const foods = snap.data().foods;
+      const words = text.split(/\s+/).filter(Boolean);
+      // Validasi: jangan terima global cache untuk query 1 kata ambigu yang tidak match nama/alias
+      if (words.length === 1 && Array.isArray(foods) && foods.length === 1) {
+        const fName = (foods[0]?.name || '').toLowerCase();
+        if (fName !== text) {
+          const dbMatch = searchFoods(text);
+          const isLegit = dbMatch.length > 0 && 
+            (dbMatch[0].name.toLowerCase() === text || (dbMatch[0].aliases || []).some(a => a.toLowerCase() === text));
+          if (!isLegit) return null;
+        }
+      }
+      return foods;
     }
   } catch (e) {
     console.error('Failed to check global pattern cache', e);
@@ -182,14 +231,19 @@ export const runLocalNlpParse = (text, customFoods = []) => {
     const results = searchFoods(name, customFoods);
     const best = results[0];
     
-    // Syarat lolos: semua kata dalam query harus ada di dalam best.name atau best.aliases
+    // Syarat lolos:
+    // Jika query cuma 1 kata (misal 'pepes', 'ayam', 'soto'), HARUS match persis nama atau persis alias.
+    // Tidak boleh substring liar yang mencocokkan 'pepes' ke 'Ikan mujahir pepes'.
+    // Jika query >= 2 kata (misal 'ikan mas pepes', 'nasi goreng'), boleh kata-per-kata ada di nama/alias.
     const lower = name.toLowerCase().trim();
     const queryWords = lower.split(/\s+/).filter(Boolean);
     const bestNameClean = best ? best.name.toLowerCase().replace(/[,/()\-+]/g, ' ') : '';
-    const aliasHit = best && (best.aliases || []).some(a => a.toLowerCase() === lower || queryWords.every(qw => a.toLowerCase().includes(qw)));
-    const nameHit = best && (best.name.toLowerCase() === lower || queryWords.every(qw => bestNameClean.includes(qw)));
+    const isExactName = best && best.name.toLowerCase() === lower;
+    const isExactAlias = best && (best.aliases || []).some(a => a.toLowerCase() === lower);
+    const isMultiWordMatch = best && queryWords.length >= 2 && queryWords.every(qw => bestNameClean.includes(qw));
+    const isMultiWordAlias = best && queryWords.length >= 2 && (best.aliases || []).some(a => queryWords.every(qw => a.toLowerCase().includes(qw)));
     
-    if (best && (aliasHit || nameHit)) {
+    if (best && (isExactName || isExactAlias || isMultiWordMatch || isMultiWordAlias)) {
       let grams = calculateGramsFromURT(qty, unitStr);
       if (grams === null) grams = best.portion.grams * qty; // satuan gak dikenal → pakai porsi bawaan
       // Satuan rumah tangga ("gelas") dipertahankan supaya sheet konfirmasi tetap nampilin

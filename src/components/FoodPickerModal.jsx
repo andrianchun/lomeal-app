@@ -14,20 +14,29 @@ import useBackClose from '../hooks/useBackClose';
  * batch "Catat Makanan" (LogTab) atau editor gram inline (HistoryTab). Modal ini
  * gak nyimpen state porsi sendiri lagi, biar gak ada 2 cara beda buat hal yang sama.
  */
-const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoods = [], recipes = [], domusItems = [], initialTab = 'db', favoriteFoods = [] }) => {
+const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoods = [], recipes = [], domusItems = [], initialTab = 'db', favoriteFoods = [], initialTerm = '' }) => {
   const [tab, setTab] = useState(initialTab); // 'db' | 'recipes' | 'domus'
-  const [term, setTerm] = useState('');
+  const [term, setTerm] = useState(initialTerm);
   const [category, setCategory] = useState(null);
   const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    if (open) {
+      setTerm(initialTerm || '');
+    }
+  }, [open, initialTerm]);
 
   useEffect(() => {
     if (open && tab === 'db') {
       const timer = setTimeout(() => {
         searchInputRef.current?.focus();
+        if (initialTerm && searchInputRef.current) {
+          searchInputRef.current.select();
+        }
       }, 120);
       return () => clearTimeout(timer);
     }
-  }, [open, tab]);
+  }, [open, tab, initialTerm]);
 
   const results = useMemo(() => {
     let list = searchFoods(term, customFoods);
@@ -125,24 +134,19 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
                   <span className={`shrink-0 ml-2 p-2 rounded-full ${t.bgAccentSoft} ${t.textAccent}`}><Plus size={18} /></span>
                 </button>
               ))}
-              {/* Selalu sediakan tombol cari online dengan Lomy jika user mengetik sesuatu, baik ada hasil database maupun tidak */}
+              {/* Tombol cari online jika user mengetik sesuatu */}
               {term.trim() !== '' && results.length > 0 && (
                 <div className="pt-2 pb-1">
                   <button
                     onClick={() => onSearchAi?.(term)}
-                    className={`w-full flex items-center justify-between p-3.5 rounded-2xl border-2 border-dashed border-emerald-500/50 hover:border-emerald-500 ${t.bgAccentSoft} ${t.textAccent} transition-all active:scale-[0.98]`}
+                    className={`w-full flex items-center justify-between p-3.5 rounded-2xl border border-emerald-500/30 hover:border-emerald-500/60 ${t.bgAccentSoft} transition-all active:scale-[0.98]`}
                   >
-                    <div className="min-w-0 flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
-                        <Search size={16} className="text-emerald-400" />
-                      </div>
-                      <div className="text-left min-w-0">
-                        <p className="body-md font-bold truncate">Cari "{term}" online</p>
-                        <p className={`caption ${t.textMuted} truncate`}>Cari di database internet / AI Lomy</p>
-                      </div>
+                    <div className="text-left min-w-0">
+                      <p className="body-md font-bold truncate">Cari "{term}" online</p>
+                      <p className={`caption ${t.textMuted} truncate`}>Cari di database internet</p>
                     </div>
-                    <span className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold ${t.bgAccent} text-white shadow-sm flex items-center gap-1`}>
-                      <Search size={13} /> Cari Lomy
+                    <span className={`shrink-0 px-3.5 py-1.5 rounded-xl body-md font-bold ${t.bgAccent} text-white shadow-sm`}>
+                      Cari
                     </span>
                   </button>
                 </div>
@@ -152,8 +156,8 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
                 <div className="flex flex-col items-center justify-center py-10 gap-3">
                   <p className={`body-md text-center ${t.textMuted}`}>Tidak ditemukan di database lokal.</p>
                   {term.trim() !== '' && (
-                    <button onClick={() => onSearchAi?.(term)} className={`px-5 py-2.5 rounded-2xl ${t.bgAccent} text-white shadow-glow font-bold flex items-center gap-2`}>
-                      <Search size={16} /> Cari "{term}" dengan Lomy
+                    <button onClick={() => onSearchAi?.(term)} className={`px-5 py-2.5 rounded-2xl ${t.bgAccent} text-white font-bold body-md active:scale-95 transition-transform`}>
+                      Cari "{term}" online
                     </button>
                   )}
                 </div>
@@ -230,10 +234,9 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
                   </button>
                   <button
                     onClick={() => onSearchAi?.(term)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold ${t.bgAccent} text-white shadow-glow flex items-center gap-1 shrink-0 transition-transform active:scale-95`}
-                    title="Cari online dengan Lomy"
+                    className={`px-3.5 py-1.5 rounded-xl body-md font-bold ${t.bgAccent} text-white shadow-glow shrink-0 transition-transform active:scale-95`}
+                    title="Cari online"
                   >
-                    <Search size={13} /> Cari
                   </button>
                 </div>
               )}
