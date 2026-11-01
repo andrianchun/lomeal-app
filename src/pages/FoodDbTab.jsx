@@ -11,7 +11,6 @@ import MedicineBuilder from '../components/MedicineBuilder';
 import { compressImageForAI, analyzeSmartPhoto, humanizeAiError } from '../utils/aiFood';
 import { playSoundEffect } from '../utils/audio';
 import { checkAndCountAiUsage, refundAiUsage } from '../utils/foodLog';
-import { isNativeApp, captureToFile } from '../utils/nativeCamera';
 import { sortFoodsByUsage, sortFoodsByPopularity, sortFoodsByNewest, hydrateFoodUsage } from '../utils/foodUsage';
 import { matchDomusItem } from '../utils/domusSync';
 import { itemStock, formatStock } from '../utils/stockConverter';
@@ -410,17 +409,8 @@ const FoodDbTab = ({ t, customFoods = [], saveCustomFoodsFn, aiKey, showAlert, s
 
   const cancelScan = () => scanAbortRef.current?.abort();
 
-  // Di APK: kamera native (jepretannya sekalian masuk galeri HP). Di browser: input file biasa.
-  const openCamera = async () => {
-    if (isNativeApp()) {
-      try {
-        const file = await captureToFile();
-        if (file) return setCropFile(file);
-      } catch (e) {
-        if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka kamera: ${e.message}`);
-        return;
-      }
-    }
+  // Kamera bawaan murni: input file capture (sensor penuh, real-time tanpa delay)
+  const openCamera = () => {
     cameraRef.current?.click();
   };
 

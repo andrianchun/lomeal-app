@@ -15,7 +15,7 @@ import { parseFoodText, analyzeSmartPhoto, compressImage, compressImageForAI, to
 import { makeEntry, checkAndCountAiUsage, refundAiUsage, subscribeDayPhotos, saveDayPhotos, uploadMealPhoto, getDayPhotos, dataUrlToBlob } from '../utils/foodLog';
 import { getLocalPatternCache, saveLocalPatternCache, checkGlobalPatternCache, saveGlobalPatternCache, runLocalNlpParse, cacheKey } from '../utils/nlpParser';
 import { deleteImageFromFirebase } from '../utils/storageLogym';
-import { isNativeApp, captureToFile, pickFromGallery } from '../utils/nativeCamera';
+import { isNativeApp } from '../utils/nativeCamera';
 import { zeroDomusItemStock, updateDomusItemQuantity, requestShoppingListDomus, matchDomusItem } from '../utils/domusSync';
 import { deductStock, formatStock, itemStock } from '../utils/stockConverter';
 import { nutrientSources } from '../utils/nutrientSources';
@@ -457,88 +457,14 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
       if (!isString && localUrl && localUrl.startsWith('blob:')) URL.revokeObjectURL(localUrl);
     }
   };
-
-  // Kamera bawaan HP (sensor penuh 12MP/50MP asli HP, jernih tanpa grain, tidak ngezoom)
-  const openCamera = async (onFile, inputRef) => {
-    openSystemCamera(onFile, inputRef);
-  };
-
-  const openSystemCamera = async (onFile, inputRef) => {
-    if (isNativeApp()) {
-      let file = null;
-      let cleanupResume = null;
-      try {
-        if (onFile === runPhotoScan) {
-          const photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-          const targetSession = detailSession || getNearestSessionId();
-          setAiTargetSession(targetSession);
-          scanSessionContextRef.current = { photoId, targetSession, previewUrl: null };
-
-          // ZERO LATENCY PREVIEW: Begitu user kembali dari kamera bawaan ke Lomeal,
-          // langsung buka sheet seketika (0 milidetik!) tanpa menunggu pembacaan file di background
-          const onResumeFromCamera = () => {
-            if (document.visibilityState === 'visible') {
-              setAiResult(prev => prev || ({
-                foods: [],
-                photoDataUrl: null,
-                photoFile: null,
-                photoId,
-                time: new Date().toTimeString().slice(0, 5),
-                isScanning: true,
-              }));
-            }
-          };
-          window.addEventListener('focus', onResumeFromCamera, { once: true });
-          document.addEventListener('visibilitychange', onResumeFromCamera, { once: true });
-          cleanupResume = () => {
-            window.removeEventListener('focus', onResumeFromCamera);
-            document.removeEventListener('visibilitychange', onResumeFromCamera);
-          };
-        }
-
-        file = await captureToFile((immediateWebPath) => {
-          // Buka preview modal di Lomeal seketika dengan foto asli yang baru dijepret
-          if (onFile === runPhotoScan) {
-            startPhotoScanPreview(immediateWebPath);
-          }
-        });
-      } catch (e) {
-        if (cleanupResume) cleanupResume();
-        setAiResult(null);
-        scanSessionContextRef.current = { photoId: null, targetSession: null, previewUrl: null };
-        if (!/cancel/i.test(e.message || '')) {
-          showAlert(`Gagal membuka kamera: ${e.message}`);
-        }
-        return;
-      } finally {
-        if (cleanupResume) cleanupResume();
-      }
-      if (file) onFile(file);
-      return;
-    }
+  // Kamera & Galeri bawaan HP murni (HTML5 input capture & file picker)
+  // Membuka kamera/galeri bawaan sistem OS langsung tanpa layer perantara / re-kompresi Capacitor,
+  // menghasilkan tangkapan real-time sensor penuh (full resolution) dan preview 0ms.
+  const openCamera = (onFile, inputRef) => {
     inputRef?.current?.click();
   };
 
-  // Di APK: pilih dari galeri native (@capacitor/camera).
-  // Keuntungan: file disalin ke cache lokal dan dibaca sebagai blob utuh di memori,
-  // sehingga izin akses content:// tidak pernah kedaluwarsa saat proses AI/upload.
-  // Di browser: jatuh balik ke <input type="file">.
-  const openGallery = async (onFile, inputRef) => {
-    if (isNativeApp()) {
-      let file = null;
-      try {
-        file = await pickFromGallery((immediateWebPath) => {
-          if (onFile === runPhotoScan) {
-            startPhotoScanPreview(immediateWebPath);
-          }
-        });
-      } catch (e) {
-        if (!/cancel/i.test(e.message || '')) showAlert(`Gagal membuka galeri: ${e.message}`);
-        return;
-      }
-      if (file) onFile(file);
-      return;
-    }
+  const openGallery = (onFile, inputRef) => {
     inputRef?.current?.click();
   };
 
@@ -1276,35 +1202,25 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const runPhotoScan = (file) => {
     if (!file || aiBusy) return;
 
-    let localPreviewUrl = scanSessionContextRef.current?.previewUrl;
-    if (!localPreviewUrl) {
-      try {
-        localPreviewUrl = file.webPath || (file instanceof Blob ? URL.createObjectURL(file) : null);
-      } catch (_) {}
-    }
+    let localPreviewUrl = null;
+    try {
+      localPreviewUrl = file.webPath || (file instanceof Blob ? URL.createObjectURL(file) : null);
+    } catch (_) {}
 
-    let photoId = scanSessionContextRef.current?.photoId;
-    let targetSession = scanSessionContextRef.current?.targetSession;
+    const photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const targetSession = detailSession || getNearestSessionId();
+    setAiTargetSession(targetSession);
+    scanSessionContextRef.current = { photoId, targetSession, previewUrl: localPreviewUrl };
 
-    if (!photoId) {
-      photoId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-      targetSession = detailSession || getNearestSessionId();
-      setAiTargetSession(targetSession);
-      scanSessionContextRef.current = { photoId, targetSession, previewUrl: localPreviewUrl };
-
-      // Buka sheet jika belum dibuka oleh startPhotoScanPreview (misal di web)
-      setAiResult({
-        foods: [],
-        photoDataUrl: localPreviewUrl,
-        photoFile: file,
-        photoId,
-        time: new Date().toTimeString().slice(0, 5),
-        isScanning: true,
-      });
-    } else {
-      // Lengkapi photoFile di state yang sudah aktif
-      setAiResult(prev => prev ? ({ ...prev, photoFile: file, photoDataUrl: localPreviewUrl || prev.photoDataUrl }) : null);
-    }
+    // PREVIEW 0 DETIK: Langsung buka modal catat makanan seketika dengan foto asli dari memori!
+    setAiResult({
+      foods: [],
+      photoDataUrl: localPreviewUrl,
+      photoFile: file,
+      photoId,
+      time: new Date().toTimeString().slice(0, 5),
+      isScanning: true,
+    });
 
     // Jalankan pengecekan kuota & analisis AI di background dengan jeda 200ms
     // agar render modal & foto 100% mulus tanpa frame drop
@@ -2236,12 +2152,17 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                   {/* Foto Full Hero Preview */}
                   <div className="relative w-full aspect-[4/3] max-h-72 rounded-2xl overflow-hidden border border-emerald-500/30 shadow-xl bg-black/10 dark:bg-white/10 flex items-center justify-center">
                     {aiResult.photoDataUrl ? (
-                      <img
-                        src={aiResult.photoDataUrl}
-                        alt="Foto makanan"
-                        className="w-full h-full object-cover"
-                        decoding="async"
-                      />
+                      <>
+                        <img
+                          src={aiResult.photoDataUrl}
+                          alt="Foto makanan"
+                          className="w-full h-full object-cover"
+                          loading="eager"
+                        />
+                        {/* Laser Scan Beam (Gemini / Lens 0ms scanning aesthetic) */}
+                        <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-transparent via-emerald-500/10 to-transparent" />
+                        <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_15px_#10b981] animate-laser-scan pointer-events-none" />
+                      </>
                     ) : (
                       <div className="flex flex-col items-center justify-center gap-2 text-emerald-400">
                         <Loader2 size={28} className="animate-spin text-emerald-500" />

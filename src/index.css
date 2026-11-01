@@ -224,3 +224,14 @@ body.keyboard-open #smart-input-bar > div {
 .animate-focus-ring {
   animation: cameraFocusRing 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
+
+/* AI Laser Scanner Beam (Gemini / Lens 0ms instant aesthetic) */
+@keyframes laserScan {
+  0% { top: 3%; opacity: 0.3; }
+  50% { top: 94%; opacity: 1; }
+  100% { top: 3%; opacity: 0.3; }
+}
+
+.animate-laser-scan {
+  animation: laserScan 2.4s ease-in-out infinite;
+}
