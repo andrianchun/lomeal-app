@@ -318,29 +318,6 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const path = location.pathname.substring(1) || 'dashboard';
   const setActiveTab = (tabId, swipeDir = null) => navigate(`/${tabId}`, { state: { swipeDir } });
 
-  // Swipe kiri/kanan buat pindah tab utama — pola sama kayak App.jsx Logym. Elemen yang gak
-  // boleh kesenggol (grafik, modal, dst) ditandai `.no-swipe` atau stopPropagation lokal.
-  const swipeStartRef = useRef({ x: 0, y: 0 });
-  const isSwipeGuarded = (e) => {
-    const activeTagName = document.activeElement?.tagName?.toLowerCase();
-    if (activeTagName === 'input' || activeTagName === 'textarea') return true;
-    return e.target.closest('input[type="range"]') || e.target.closest('[role="dialog"]') || e.target.closest('.no-swipe');
-  };
-  const handleSwipeStart = (e) => {
-    if (isSwipeGuarded(e)) return;
-    swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  };
-  const handleSwipeEnd = (e) => {
-    if (isSwipeGuarded(e)) return;
-    const dx = e.changedTouches[0].clientX - swipeStartRef.current.x;
-    const dy = e.changedTouches[0].clientY - swipeStartRef.current.y;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-      const idx = TAB_ORDER.indexOf(path);
-      if (dx < 0 && idx < TAB_ORDER.length - 1) setActiveTab(TAB_ORDER[idx + 1], 'left');
-      else if (dx > 0 && idx > 0) setActiveTab(TAB_ORDER[idx - 1], 'right');
-    }
-  };
-
   useEffect(() => {
     document.body.className = `${t.bgApp} ${t.textMain}`;
   }, [theme, t]);
@@ -1158,7 +1135,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   };
 
   return (
-    <div className={`min-h-screen ${t.bgApp} ${t.textMain}`} onTouchStart={handleSwipeStart} onTouchEnd={handleSwipeEnd}>
+    <div className={`min-h-screen ${t.bgApp} ${t.textMain}`} >
       <Header
         t={t}
         theme={theme}
