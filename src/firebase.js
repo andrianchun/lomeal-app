@@ -1,7 +1,7 @@
 // src/firebase.js
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { initializeFirestore, memoryLocalCache } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
 
@@ -26,7 +26,7 @@ export const googleProvider = new GoogleAuthProvider();
 
 // Menyalakan Fitur Database Master dengan Offline Persistence Aktif (PWA)
 export const db = initializeFirestore(app, {
-  localCache: memoryLocalCache(),
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 
 export const storage = getStorage(app);
