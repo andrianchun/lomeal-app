@@ -25,6 +25,8 @@ const GOOGLE_MODELS = [
     'gemini-3.8-flash',
     'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
     'gemini-flash-lite-latest',
     'gemini-3.1-flash-lite'
 ];
@@ -59,14 +61,23 @@ async function callGoogle(key, model, systemPrompt, contents, tools = null) {
     if (tools) {
         payload.tools = tools;
     }
+    const cleanKey = (key || '').trim();
+    const isOAuth = cleanKey.startsWith('ya29.');
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(isOAuth ? { 'Authorization': `Bearer ${cleanKey}` } : { 'x-goog-api-key': cleanKey })
+    };
     for (let i = 0; i < chain.length; i++) {
         const isLast = i === chain.length - 1;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 25000); // 25 detik per model agar tidak memakan deadline fungsi
         try {
-            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${chain[i]}:generateContent?key=${key}`, {
+            const url = isOAuth
+                ? `https://generativelanguage.googleapis.com/v1beta/models/${chain[i]}:generateContent`
+                : `https://generativelanguage.googleapis.com/v1beta/models/${chain[i]}:generateContent?key=${cleanKey}`;
+            const res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(payload),
                 signal: controller.signal
             });
@@ -76,7 +87,7 @@ async function callGoogle(key, model, systemPrompt, contents, tools = null) {
                 i--;
                 continue;
             }
-            if ([400, 403, 404, 429, 503].includes(res.status) && !isLast) continue;
+            if ([400, 401, 403, 404, 429, 503].includes(res.status) && !isLast) continue;
             if (!res.ok) {
                 const errText = await res.text();
                 throw new Error(`Google API Error (${res.status}): ${errText.substring(0, 150)}`);
@@ -138,7 +149,7 @@ const isFallbackable = (errMsg) => {
 exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB' }).https.onCall(async (data, context) => {
     if (!context.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
 
-    const { messages, provider = 'google', model = '' } = data || {};
+    const { messages, provider = 'google', model = '', tools = null } = data || {};
     if (!Array.isArray(messages) || messages.length === 0) {
         throw new HttpsError('invalid-argument', 'messages harus berupa array.');
     }

@@ -20,6 +20,8 @@ const MODELS = [
   'gemini-3.8-flash',
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
   'gemini-flash-lite-latest',
   'gemini-3.1-flash-lite'
 ];
@@ -40,12 +42,16 @@ export const humanizeAiError = (err, context = 'photo') => {
     return 'Ukuran foto terlalu besar. Silakan coba foto lainnya.';
   }
   
-  if (lower.includes('network') || lower.includes('fetch failed') || lower.includes('koneksi') || lower.includes('offline') || lower.includes('failed to fetch') || lower.includes('unavailable') || lower.includes('timeout')) {
-    return 'Koneksi internet tidak stabil atau sempat terputus saat sinyal berpindah. Coba scan ulang ya.';
+  if (lower.includes('network') || lower.includes('fetch failed') || lower.includes('koneksi') || lower.includes('offline') || lower.includes('failed to fetch') || lower.includes('unavailable') || lower.includes('timeout') || lower.includes('deadline')) {
+    return 'Koneksi internet lambat atau terputus saat menganalisis. Coba scan ulang ya.';
   }
   
-  if (lower.includes('api_key_invalid')) {
-    return 'API Key Gemini Anda tidak valid. Periksa kembali di Pengaturan.';
+  if (lower.includes('api_key_invalid') || lower.includes('unauthenticated')) {
+    return 'API Key Gemini Anda tidak valid atau sudah kedaluwarsa. Periksa kembali di Pengaturan → Lanjutan.';
+  }
+
+  if (lower.includes('rate_limit') || lower.includes('quota') || lower.includes('429')) {
+    return 'Batas kuota harian API Gemini tercapai saat ini. Mohon tunggu sejenak atau periksa API Key di Pengaturan.';
   }
 
   return 'Maaf, saat ini server sedang sibuk. Silakan ulangi kembali beberapa saat lagi.';
@@ -98,7 +104,7 @@ const normalizeNutrientKey = (key) => {
   if (k.includes('serat') || k.includes('fiber') || k.includes('fibre')) return 'fiber';
   if (k.includes('kalium') || k.includes('potassium') || k === 'k') return 'kalium';
   if (k.includes('fosfor') || k.includes('phosphor') || k === 'p') return 'fosfor';
-  if (k.includes('seng') || k.includes('zinc') || k === 'zn') return 'zinc';
+  if (k.includes('seng') || k.includes('zinc') || k === 'zinc') return 'zinc';
   if (k.includes('tembaga') || k.includes('copper') || k === 'cu') return 'tembaga';
   if (k.includes('magnesium') || k === 'mg') return 'magnesium';
   if (k.includes('vita') || k.includes('vitamina')) return 'vitA';
@@ -190,18 +196,20 @@ async function callGeminiWithKey(apiKey, parts, signal = null, opts = {}) {
   const models = opts.models || MODELS;
   const generationConfig = opts.generationConfig || EXTRACT_CONFIG;
   const cleanKey = (apiKey || '').trim();
-  const isBearer = cleanKey.startsWith('AQ.') || cleanKey.startsWith('ya29.');
+  // Hanya ya29. yang merupakan OAuth Access Token Bearer.
+  // Kunci AIza... dan format modern AQ. dari Google AI Studio adalah API Key.
+  const isOAuth = cleanKey.startsWith('ya29.');
 
   let lastErr = 'Unknown error';
   for (const model of models) {
     try {
-      const url = isBearer
+      const url = isOAuth
         ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
         : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
 
       const headers = {
         'Content-Type': 'application/json',
-        ...(isBearer ? { 'Authorization': `Bearer ${cleanKey}` } : { 'x-goog-api-key': cleanKey }),
+        ...(isOAuth ? { 'Authorization': `Bearer ${cleanKey}` } : { 'x-goog-api-key': cleanKey }),
       };
 
       const bodyPayload = { contents: [{ parts }], generationConfig };
@@ -242,24 +250,6 @@ async function callGeminiWithKey(apiKey, parts, signal = null, opts = {}) {
         return parsed;
       }
 
-      // If bearer returned 401 or 404, try query parameter fallback
-      if (isBearer && (res.status === 401 || res.status === 404)) {
-        const altRes = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts }], generationConfig }),
-          signal,
-        });
-        if (altRes.ok) {
-          const data = await altRes.json();
-          let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-          text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
-          const parsed = JSON.parse(text);
-          if (parsed.error === 'OUT_OF_SCOPE') throw new Error('OUT_OF_SCOPE');
-          return parsed;
-        }
-      }
-
       if (res.status === 429) throw new Error('RATE_LIMIT_EXCEEDED');
       if (res.status === 401 || res.status === 403) throw new Error(`API_KEY_INVALID (${res.status})`);
       lastErr = `Server Error (${res.status}) pada ${model}`;
@@ -284,6 +274,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
   await acquireAiWakeLock();
   try {
     const keys = resolveKeys(apiKeyOrKeys);
+    let hasInvalidKey = false;
 
     if (keys.length > 0) {
       let lastErr = 'Unknown error';
@@ -296,6 +287,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
           if (err.message === 'OUT_OF_SCOPE') throw err;
           if (err.message.startsWith('API_KEY_INVALID')) {
             console.warn(`Key invalid (${err.message}), trying next key or fallback...`);
+            hasInvalidKey = true;
             lastErr = err.message;
             continue;
           }
@@ -345,6 +337,9 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
       return parsed;
     } catch (err) {
       if (err.name === 'AbortError' || err.message === 'OUT_OF_SCOPE') throw err;
+      if (hasInvalidKey && !/resource-exhausted|terlalu banyak/i.test(err.message || '')) {
+        throw new Error('API_KEY_INVALID');
+      }
       throw new Error(humanizeAiError(err, 'photo'));
     }
   } finally {
@@ -554,17 +549,17 @@ export const streamLomyChat = async (apiKey, messages, contextBlock = '', onChun
       for (const rawKey of keys) {
         const cleanKey = (rawKey || '').trim();
         if (!cleanKey) continue;
-        const isBearer = cleanKey.startsWith('AQ.') || cleanKey.startsWith('ya29.');
+        const isOAuth = cleanKey.startsWith('ya29.');
         for (const model of MODELS) {
           abortIfCancelled(signal);
           try {
-            const url = isBearer
+            const url = isOAuth
               ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`
               : `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${cleanKey}`;
 
             const headers = {
               'Content-Type': 'application/json',
-              ...(isBearer ? { 'Authorization': `Bearer ${cleanKey}` } : { 'x-goog-api-key': cleanKey }),
+              ...(isOAuth ? { 'Authorization': `Bearer ${cleanKey}` } : { 'x-goog-api-key': cleanKey }),
             };
 
             const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload), signal });
@@ -656,17 +651,7 @@ Format: {"testDate":"YYYY-MM-DD atau null (tanggal periksa yang tertulis)","labN
   return { testDate: res.testDate || null, labName: res.labName || null, results };
 };
 
-// Evaluasi mingguan dulu tombol sendiri di kalender. Sekarang ditangani Lomy Chat, yang
-// konteksnya sudah memuat ringkasan 7 hari — lihat `streamLomyChat` dan LomyChat.jsx.
-
 // --- 5. Generate Diet Recipe (Lomy cerdas berdasarkan kuesioner) ---
-
-// SATU tempat yang menerjemahkan profil user → masukan buat Lomy. Dulu dua pemanggil
-// (ProgramTab & auto-generate sesudah onboarding) masing-masing cuma mengoper
-// dietProfile+medicalHistory+allergies, jadi jawaban kuesioner selebihnya — target kalori,
-// makro, berat badan, fase diet, dan terutama isi kulkas — tidak pernah sampai ke model.
-// Itu sebabnya resep yang keluar bisa cuma "ayam + minyak zaitun": modelnya memang tidak
-// dikasih batasan apa-apa.
 export const buildRecipeProfileInput = (profile = {}, customPrompt = '', customIngredients = null) => {
   const diet = DIET_PROFILES.find((d) => d.id === profile?.dietProfile) || DIET_PROFILES[0];
   const goal = DIET_GOALS.find((g) => g.id === profile?.dietGoal);
@@ -702,9 +687,7 @@ export const buildRecipeProfileInput = (profile = {}, customPrompt = '', customI
     riwayatMedis: profile?.medicalHistory || [],
     alergi: (profile?.allergies || '').trim(),
     permintaanKhusus: (customPrompt || profile?.recipePrompt || profile?.permintaanKhusus || '').trim().slice(0, 150),
-    // Isi kulkas / bahan yang dipilih user
     bahanTersedia,
-    // Bahan yang di-Love oleh user (bisa jadi preferensi).
     bahanFavorit: (profile?.favoriteFoods || []).map(id => {
       const dbMatch = getFoodById(id, []);
       return dbMatch ? dbMatch.name : null;
@@ -734,28 +717,17 @@ Cara memakai profil di atas:
 
 Aturan Bahan & Variasi:
 - PENTING & WAJIB: DILARANG selalu memakai daun kemangi di setiap resep masakan. Berikan variasi bumbu dan profil rasa yang kaya dan autentik (misal: bawang putih & olive oil untuk aglio e olio; gochujang/sesame/kimchi untuk ala Korea; teriyaki/dashi/miso untuk ala Jepang; rempah jahe/lengkuas/kunyit untuk nusantara; oregano/thyme/rosemary untuk western; dsb.).
-- Minimal 6-10 bahan secara lengkap: sumber protein + sumber karbo (kecuali keto/carnivore) + sayur + SELURUH bumbu, rempah, garam, gula, kecap/saus, minyak, dan dedaunan/herbs. Semua bumbu WAJIB dirinci per bahan dengan gramasi nyata (JANGAN gunakan kata "secukupnya") agar kalkulasi Natrium, Gula, kalori, dan pemotongan stok Domus presisi. Resep yang cuma protein + minyak DITOLAK.
-- Beri nama masakan yang spesifik, menarik, dan menggugah, bukan "Ayam Sehat".
-
+- Minimal 6-10 bahan secara terperinci (termasuk bumbu dan aromatik).
 Format balasan (JSON murni):
-{"name":"nama resep","portions":2,"durationMin":number,"ingredients":[{"name":"nama bahan","rawName":"nama bahan mentah dasar (misal: 'Dada ayam', 'Bawang merah') tanpa cara potong","grams":number,"nutrition":{"kcal":number,"protein":number,"carbs":number,"fat":number,"sodium":number,"sugar":number,"cholesterol":number}}],"components":[{"name":"nama komponen","steps":[{"text":"instruksi 1 kalimat","timerSec":number}]}],"note":"catatan singkat (1 kalimat) mengapa ini cocok"}
-
-Aturan langkah memasak:
-- "components" = bagian masakan yang bisa dikerjakan BARENGAN, bukan urutan kaku. Contoh: ["Pasta","Saus / Topping"]. Kalau masakannya satu panci/wajan saja, cukup 1 komponen.
-- Urutkan komponen dari yang paling lama menunggu (mis. menanak nasi, merebus pasta, marinasi) supaya bisa ditinggal sambil mengerjakan komponen lain.
-- "timerSec" HANYA diisi untuk langkah yang butuh menunggu (menanak, merebus, memanggang, mengukus, marinasi, mendiamkan). Langkah aktif seperti memotong atau mengaduk diisi 0.
-- "durationMin" = perkiraan total waktu dari mulai sampai matang kalau komponennya dikerjakan paralel.
-Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang diberikan. Harus presisi.` }],
+{"name":"nama masakan","portions":number,"durationMin":number,"note":"tips/catatan singkat","ingredients":[{"name":"nama bahan","grams":number,"unit":"satuan"}],"components":[{"name":"tahap memasak (mis. Tumis/Rebus)","steps":[{"text":"instruksi","timerSec":number}]}]}
+Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang ditulis.` }],
     null,
-    // Menyusun resep itu tugas kreatif dengan banyak batasan: model 8b terlalu lemah, dan
-    // temperature 0 bikin tiap generate menghasilkan resep yang sama persis.
-    { models: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest'], generationConfig: { temperature: 0.9, topP: 0.95 } },
+    { models: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-lite-latest'], generationConfig: { temperature: 0.9, topP: 0.95 } },
   );
   return { ...res, ingredients: (res.ingredients || []).map(i => ({ ...i, nutrition: clampNutrition(i.nutrition) })) };
 };
 
 // Bentuk hasil generateDietRecipe jadi objek resep siap-simpan (id, total gizi, per porsi).
-// Dipakai baik dari "Ubah Program" (ProgramTab) maupun auto-generate sesudah onboarding.
 export const buildAiRecipe = (generated, dietName) => {
   const stamp = Date.now();
   const aiRecipe = {
@@ -764,15 +736,12 @@ export const buildAiRecipe = (generated, dietName) => {
     portions: generated.portions || 2,
     durationMin: Math.max(0, Number(generated.durationMin) || 0),
     ingredients: (generated.ingredients || []).map(ing => {
-      // Single Source of Truth Mapping
       const match = searchFoods(ing.name, [])[0];
       if (match) {
         return { ...ing, name: match.name, foodId: match.id, nutrition: nutritionForAmount(match, ing.grams || 100) };
       }
       return ing;
     }),
-    // id komponen/langkah dibikin di sini (bukan dari Lomy) karena dipakai sebagai kunci
-    // centang di mode masak — harus unik dan stabil, tidak boleh hasil karangan model.
     components: (generated.components || [])
       .map((c, ci) => ({
         id: `c_${stamp}_${ci}`,
@@ -803,8 +772,6 @@ export const buildAiRecipe = (generated, dietName) => {
 };
 
 // --- Kompresi foto on-device ke ≤100KB (blueprint Fase 5) ---
-// Foto sesi sekarang disimpan sebagai URL Firebase Storage, sedangkan Gemini butuh bytes inline.
-// Foto lama yang masih base64 langsung lewat apa adanya.
 export const toDataUrl = async (src) => {
   if (src.startsWith('data:')) return src;
   
@@ -830,12 +797,11 @@ export const toDataUrl = async (src) => {
 };
 
 // Tiga kebutuhan, tiga ukuran:
-//  - PHOTO_AI      : dikirim ke Gemini, makin tajam makin akurat tebakannya.
+//  - PHOTO_AI      : dikirim ke Gemini (1024px, ~100-250KB, kilat via seluler).
 //  - PHOTO_KEEPSAKE: yang diarsipkan di Storage sebagai kenang-kenangan.
-//  - PHOTO_THUMB   : yang dipajang di kartu sesi & strip. Tanpa ini tiap kartu mengunduh
-//                    berkas arsip penuh — 5 foto sehari ≈ 2MB kuota data tiap hari dibuka.
+//  - PHOTO_THUMB   : yang dipajang di kartu sesi & strip.
 export const PHOTO_KEEPSAKE = { maxSide: 2560, maxChars: 3500000, quality: 0.90 };
-export const PHOTO_AI = { maxSide: 2560, maxChars: 4000000, quality: 0.92 };
+export const PHOTO_AI = { maxSide: 1024, maxChars: 280000, quality: 0.75 };
 export const PHOTO_THUMB = { maxSide: 400, maxChars: 120000, quality: 0.7 };
 
 export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {
@@ -880,4 +846,3 @@ export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality 
 });
 
 export const compressImageForAI = (file) => compressImage(file, PHOTO_AI);
-
