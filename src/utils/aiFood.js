@@ -17,13 +17,12 @@ import { LAB_MARKERS } from '../data/labPanels';
 import { acquireAiWakeLock, releaseAiWakeLock } from './aiWakeLock';
 
 const MODELS = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash',
-  'gemini-3.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash-8b',
   'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-flash-lite-latest',
-  'gemini-3.1-flash-lite'
+  'gemini-flash-lite-latest'
 ];
 
 export const humanizeAiError = (err, context = 'photo') => {
@@ -312,7 +311,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
         res = await aiChat({
           messages: [{ role: 'user', content: parts }],
           provider: 'google',
-          model: 'gemini-3.8-flash',
+          model: 'gemini-2.0-flash',
           tools: opts.tools || null
         });
       } catch (callErr) {
@@ -322,7 +321,7 @@ async function callGemini(apiKeyOrKeys, parts, signal = null, opts = {}) {
           res = await aiChat({
             messages: [{ role: 'user', content: parts }],
             provider: 'google',
-            model: 'gemini-3.8-flash',
+            model: 'gemini-2.0-flash',
             tools: opts.tools || null
           });
         } else {
@@ -607,7 +606,7 @@ export const streamLomyChat = async (apiKey, messages, contextBlock = '', onChun
       const res = await aiChat({
         messages: [{ role: 'system', content: systemPrompt }, ...messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || m.content }))],
         provider: 'google',
-        model: 'gemini-3.8-flash'
+        model: 'gemini-2.0-flash'
       });
       const text = res.data?.text || '';
       if (text) {
@@ -722,7 +721,7 @@ Format balasan (JSON murni):
 {"name":"nama masakan","portions":number,"durationMin":number,"note":"tips/catatan singkat","ingredients":[{"name":"nama bahan","grams":number,"unit":"satuan"}],"components":[{"name":"tahap memasak (mis. Tumis/Rebus)","steps":[{"text":"instruksi","timerSec":number}]}]}
 Nilai gizi per ingredients adalah TOTAL untuk bahan tersebut sesuai grams yang ditulis.` }],
     null,
-    { models: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-lite-latest'], generationConfig: { temperature: 0.9, topP: 0.95 } },
+    { models: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.0-flash-lite', 'gemini-flash-lite-latest'], generationConfig: { temperature: 0.9, topP: 0.95 } },
   );
   return { ...res, ingredients: (res.ingredients || []).map(i => ({ ...i, nutrition: clampNutrition(i.nutrition) })) };
 };
@@ -805,44 +804,88 @@ export const PHOTO_AI = { maxSide: 1024, maxChars: 280000, quality: 0.75 };
 export const PHOTO_THUMB = { maxSide: 400, maxChars: 120000, quality: 0.7 };
 
 export const compressImage = (file, { maxSide = 800, maxChars = 136000, quality = 0.6 } = {}) => new Promise((resolve, reject) => {
-  const img = new Image();
-  const isUrlString = typeof file === 'string';
-  let url = '';
-  try {
-    url = isUrlString ? file : URL.createObjectURL(file);
-  } catch (err) {
-    return reject(err);
+  const processImage = (sourceWidth, sourceHeight, drawFn, cleanupFn) => {
+    try {
+      const canvas = document.createElement('canvas');
+      let width = sourceWidth;
+      let height = sourceHeight;
+      if (Math.max(width, height) > maxSide) {
+        const s = maxSide / Math.max(width, height);
+        width = Math.round(width * s);
+        height = Math.round(height * s);
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      drawFn(ctx, width, height);
+      if (cleanupFn) cleanupFn();
+
+      let q = quality;
+      let mimeType = 'image/webp';
+      let dataUrl = canvas.toDataURL(mimeType, q);
+      // Fallback jika browser lawas belum mendukung export WebP di canvas
+      if (!dataUrl.startsWith('data:image/webp')) {
+        mimeType = 'image/jpeg';
+        dataUrl = canvas.toDataURL(mimeType, q);
+      }
+
+      while (dataUrl.length > maxChars && q > 0.25) {
+        q -= 0.15;
+        dataUrl = canvas.toDataURL(mimeType, q);
+      }
+      resolve({ base64: dataUrl.split(',')[1], dataUrl, mimeType });
+    } catch (err) {
+      if (cleanupFn) cleanupFn();
+      reject(err);
+    }
+  };
+
+  // Decode gambar asinkron & off-thread jika didukung (modern WebView / Chrome),
+  // mencegah freeze saat membuka foto kamera resolusi tinggi (12-50MP).
+  if (typeof createImageBitmap === 'function' && file instanceof Blob) {
+    createImageBitmap(file)
+      .then((bitmap) => {
+        processImage(
+          bitmap.width,
+          bitmap.height,
+          (ctx, w, h) => ctx.drawImage(bitmap, 0, 0, w, h),
+          () => bitmap.close?.()
+        );
+      })
+      .catch(() => fallbackImageLoad());
+  } else {
+    fallbackImageLoad();
   }
-  img.onload = () => {
-    if (!isUrlString && url) {
-      try { URL.revokeObjectURL(url); } catch {}
-    }
-    const canvas = document.createElement('canvas');
-    let { width, height } = img;
-    if (Math.max(width, height) > maxSide) {
-      const s = maxSide / Math.max(width, height);
-      width = Math.round(width * s); height = Math.round(height * s);
-    }
-    canvas.width = width; canvas.height = height;
-    canvas.getContext('2d').drawImage(img, 0, 0, width, height);
 
-    // Pindah ke WebP untuk hemat space drastis
-    let q = quality;
-    let dataUrl = canvas.toDataURL('image/webp', q);
-
-    while (dataUrl.length > maxChars && q > 0.25) {
-      q -= 0.1;
-      dataUrl = canvas.toDataURL('image/webp', q);
+  function fallbackImageLoad() {
+    const img = new Image();
+    const isUrlString = typeof file === 'string';
+    let url = '';
+    try {
+      url = isUrlString ? file : URL.createObjectURL(file);
+    } catch (err) {
+      return reject(err);
     }
-    resolve({ base64: dataUrl.split(',')[1], dataUrl, mimeType: 'image/webp' });
-  };
-  img.onerror = (e) => {
-    if (!isUrlString && url) {
-      try { URL.revokeObjectURL(url); } catch {}
-    }
-    reject(e);
-  };
-  img.src = url;
+    img.onload = () => {
+      processImage(
+        img.width,
+        img.height,
+        (ctx, w, h) => ctx.drawImage(img, 0, 0, w, h),
+        () => {
+          if (!isUrlString && url) {
+            try { URL.revokeObjectURL(url); } catch {}
+          }
+        }
+      );
+    };
+    img.onerror = (e) => {
+      if (!isUrlString && url) {
+        try { URL.revokeObjectURL(url); } catch {}
+      }
+      reject(e);
+    };
+    img.src = url;
+  }
 });
 
 export const compressImageForAI = (file) => compressImage(file, PHOTO_AI);

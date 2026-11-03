@@ -5,7 +5,7 @@ import { formatNumber } from '../utils/numberFormat';
 import { computeDayTotals, calcTEF, calcDynamicTarget, computeDaySummary } from '../data/nutrition';
 import { extractLyfitDay } from '../utils/lyfitSync';
 
-const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, lyfitToday, targets = {}, soundEnabled, playSoundEffect, onPointClick, language }) => {
+const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, lyfitToday, targets = {}, profile, soundEnabled, playSoundEffect, onPointClick, language }) => {
   const chartMetricsList = [
       { key: 'calories', label: 'Kalori', color: theme === 'dark' ? '#7c85d4' : '#4f46e5', type: 'grouped',
         subMetrics: [
@@ -40,12 +40,13 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, lyfitToday, tar
       bioEntries.forEach(entry => {
           const d = new Date(entry.dateStr);
           const lyfitDay = entry.dateStr === todayStr ? (lyfitToday || extractLyfitDay(lyfitYearData, entry.dateStr)) : extractLyfitDay(lyfitYearData, entry.dateStr);
-          const dayTargets = (entry.dateStr >= todayStr ? targets : entry.dayData?.targetSnapshot) || targets;
+          const dayTargets = entry.dateStr >= todayStr ? targets : { ...targets, ...(entry.dayData?.targetSnapshot || {}), tdee: entry.dayData?.targetSnapshot?.tdee || targets?.tdee, dietGoal: entry.dayData?.targetSnapshot?.dietGoal || targets?.dietGoal, customDeltaKcal: entry.dayData?.targetSnapshot?.customDeltaKcal ?? targets?.customDeltaKcal };
 
           const summary = computeDaySummary({
             day: entry.dayData,
             targets: dayTargets,
             lyfitDay,
+            profile,
             logymUser: true,
           });
 
@@ -71,7 +72,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, lyfitToday, tar
           });
       });
       return data;
-  }, [daysMap, lyfitYearData, targets]);
+  }, [daysMap, lyfitYearData, lyfitToday, targets, profile]);
 
   const scrollRef = useRef(null);
 

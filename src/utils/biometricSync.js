@@ -52,20 +52,24 @@ export const pushPreferencesToLogym = async (logymUid, dietProfile, allergies, a
 // (gak ngaruh ke pemilihan/intensitas latihan — sudah dicek: satu-satunya pemakaian nutritionGoal
 // di Logym cuma badge kosmetik, bukan logika program), jadi Lomeal jadi SATU-SATUNYA sumber
 // kebenaran; Logym cuma baca field ini, gak punya preset delta sendiri lagi.
-export const pushTargetsToLogym = async (logymUid, targets) => {
+export const pushTargetsToLogym = async (logymUid, targets, todayTarget = null) => {
   if (!logymUid || !targets) return;
   try {
+    const patch = {
+      kcal: Math.round(targets.kcal || 0),
+      tdee: Math.round(targets.tdee || 0),
+      bmr: Math.round(targets.bmr || 0),
+      dietGoal: targets.dietGoal || 'maintenance',
+      protein: Math.round(targets.protein || 0),
+      carbs: Math.round(targets.carbs || 0),
+      fat: Math.round(targets.fat || 0),
+    };
+    if (todayTarget && todayTarget > 0) {
+      patch.todayTarget = Math.round(todayTarget);
+    }
     await setDoc(doc(db, 'logym_users', logymUid), {
       lomealSync: {
-        targets: {
-          kcal: Math.round(targets.kcal || 0),
-          tdee: Math.round(targets.tdee || 0),
-          bmr: Math.round(targets.bmr || 0),
-          dietGoal: targets.dietGoal || 'maintenance',
-          protein: Math.round(targets.protein || 0),
-          carbs: Math.round(targets.carbs || 0),
-          fat: Math.round(targets.fat || 0),
-        },
+        targets: patch,
       },
     }, { merge: true });
   } catch (e) {
@@ -73,20 +77,24 @@ export const pushTargetsToLogym = async (logymUid, targets) => {
   }
 };
 
-export const pushDailyTotalsToLogym = async (logymUid, ymd, totals, mealsCount = 0) => {
+export const pushDailyTotalsToLogym = async (logymUid, ymd, totals, mealsCount = 0, dynamicTarget = null) => {
   if (!logymUid) return;
   try {
+    const todayObj = {
+      ymd,
+      kcal: Math.round(totals.kcal || 0),
+      protein: Math.round(totals.protein || 0),
+      carbs: Math.round(totals.carbs || 0),
+      fat: Math.round(totals.fat || 0),
+      mealsCount: mealsCount,
+      updatedAt: new Date().toISOString(),
+    };
+    if (dynamicTarget && dynamicTarget > 0) {
+      todayObj.targetKcal = Math.round(dynamicTarget);
+    }
     await setDoc(doc(db, 'logym_users', logymUid), {
       lomealSync: {
-        today: {
-          ymd,
-          kcal: Math.round(totals.kcal || 0),
-          protein: Math.round(totals.protein || 0),
-          carbs: Math.round(totals.carbs || 0),
-          fat: Math.round(totals.fat || 0),
-          mealsCount: mealsCount,
-          updatedAt: new Date().toISOString(),
-        },
+        today: todayObj,
       },
     }, { merge: true });
   } catch (e) {

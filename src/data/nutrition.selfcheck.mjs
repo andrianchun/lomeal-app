@@ -144,7 +144,7 @@ assert.equal(tgLogym.kcal, 2069 + 240); // 2309 kcal (rest day)
 import { calcDynamicTarget, computeDaySummary } from './nutrition.js';
 // On rest day (burn <= baseTdee or burn = 0) -> target is base target
 assert.equal(calcDynamicTarget(tgLogym, 0), tgLogym.kcal);
-assert.equal(calcDynamicTarget(tgLogym, 2000), tgLogym.kcal);
+assert.equal(calcDynamicTarget(tgLogym, 2000), 2000 + 240);
 
 // On workout day (burn 2666 > baseTdee 2069) -> target expands dynamically!
 assert.equal(calcDynamicTarget(tgLogym, 2666), 2666 + 240); // 2906 kcal!

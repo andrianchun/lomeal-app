@@ -217,18 +217,28 @@ export const MIN_SAFE_KCAL = { female: 1200, male: 1500 };
 
 export const calcDynamicTarget = (baseTargets, burnedTotal, gender = 'male') => {
   if (!baseTargets) return 2000;
-  const baseTdee = baseTargets.tdee || baseTargets.kcal || 2000;
-  const programDelta = (baseTargets.kcal || 0) - baseTdee; // 0=maintenance, neg=cut, pos=bulk
   const baseKcal = baseTargets.kcal || 2000;
-
   const burn = Number(burnedTotal) || 0;
-  if (burn > baseTdee) {
-    const rawTarget = Math.round(burn + programDelta);
-    const safeMin = MIN_SAFE_KCAL[gender === 'female' ? 'female' : 'male'] || 1500;
-    return Math.max(rawTarget, safeMin);
+  if (burn <= 0) return baseKcal;
+
+  // Tentukan programDelta (defisit/surplus dari dietGoal)
+  let programDelta = 0;
+  if (baseTargets.customDeltaKcal != null) {
+    const d = Math.abs(baseTargets.customDeltaKcal);
+    if (baseTargets.dietGoal === 'cutting' || baseTargets.dietGoal === 'cut') programDelta = -d;
+    else if (baseTargets.dietGoal === 'bulk' || baseTargets.dietGoal === 'bulking') programDelta = d;
+  } else if (baseTargets.tdee && baseTargets.kcal) {
+    programDelta = baseTargets.kcal - baseTargets.tdee;
+  } else if (baseTargets.programDelta != null) {
+    programDelta = baseTargets.programDelta;
   }
 
-  return baseKcal;
+  // Target fleksibel harian: Kalori Dibakar riil hari itu + program delta.
+  // Olahraga berat (burn tinggi) -> target makan naik.
+  // Istirahat / rest day (burn rendah) -> target makan turun lebih sedikit.
+  const rawTarget = Math.round(burn + programDelta);
+  const safeMin = MIN_SAFE_KCAL[gender === 'female' ? 'female' : 'male'] || 1500;
+  return Math.max(rawTarget, safeMin);
 };
 
 export const calcTargets = (profile) => {

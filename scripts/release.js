@@ -12,7 +12,11 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-const run = (cmd, env = {}) => execSync(cmd, { stdio: 'inherit', env: { ...process.env, ...env } });
+const run = (cmd, env = {}) => {
+  const tempDir = path.resolve('node_modules/.temp');
+  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+  return execSync(cmd, { stdio: 'inherit', env: { ...process.env, TEMP: tempDir, TMP: tempDir, ...env } });
+};
 const readVersion = () => JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 
 const BUMPS = ['patch', 'minor', 'major'];

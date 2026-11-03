@@ -22,7 +22,7 @@ import {
   pushNutritionBatchToLogym,
 } from './utils/biometricSync';
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcReadTodayActivity, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
-import { computeDayTotals, calcTargets, calcBMR, calcTEF } from './data/nutrition';
+import { computeDayTotals, calcTargets, calcBMR, calcTEF, calcDynamicTarget } from './data/nutrition';
 import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from './utils/aiFood';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
@@ -457,6 +457,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   }, [daysMap, profile, todayYmd]);
 
   // Setelah tiap simpan hari, ikut tulis ke Health Connect (fire-and-forget) kalau tersambung.
+  const dashboardLyfitTodayRef = useRef(null);
   const saveDay = useCallback(async (ymd, dayData) => {
     // Snapshot target LIVE hari ini nempel ke record hari itu — begitu tanggalnya lewat,
     // gak disentuh lagi efek manapun, otomatis jadi arsip (target beda di masa depan gak
@@ -489,7 +490,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       // seolah sudah masuk perut.
       const dayTotals = computeDayTotals(dayData, ymd <= todayYmd);
       if (ymd === todayYmd) {
-        pushDailyTotalsToLogym(logymUser.uid, ymd, dayTotals, mealsCount).catch(() => {});
+        const dynamicToday = calcDynamicTarget(profile?.targets, dashboardLyfitTodayRef.current?.burnedKcal, profile?.physical?.gender || profile?.gender);
+        pushDailyTotalsToLogym(logymUser.uid, ymd, dayTotals, mealsCount, dynamicToday).catch(() => {});
       }
       pushNutritionBioToLogym(logymUser.uid, ymd, dayTotals.kcal).catch(() => {});
     }
@@ -750,7 +752,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     if (!physical?.weight || !physical?.height || !physical?.dob || !physical?.gender) return;
     const age = computeAge(physical.dob);
     const newTargets = calcTargets({ 
-      ...physical, age, 
+      ...physical, age, fromLogym: !!logymUser, logymUser: !!logymUser, 
       activityLevel: profile?.activityLevel || physical?.activityLevel || 'light',
       dietGoal: profile?.dietGoal, 
       dietProfile: profile?.dietProfile, 
@@ -762,18 +764,18 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     });
     if (JSON.stringify(newTargets) === JSON.stringify(profile?.targets)) return;
     saveProfilePatch({ targets: newTargets });
-  }, [profile?.physical, profile?.activityLevel, profile?.dietGoal, profile?.dietProfile, profile?.pace, profile?.customDeltaKcal, profile?.customProteinPerKg, profile?.medicalHistory, profile?.targets?.waterGoal]);
+  }, [profile?.physical, profile?.activityLevel, profile?.dietGoal, profile?.dietProfile, profile?.pace, profile?.customDeltaKcal, profile?.customProteinPerKg, profile?.medicalHistory, profile?.targets?.waterGoal, logymUser]);
 
   // Target kalori/makro → Logym, biar kartu "Kalori Dimakan" Logym baca target dari sini
   // langsung (Logym gak lagi punya preset delta cutting/bulking sendiri).
-  const lastSyncedTargetsRef = useRef(null);
+  // Target kalori/makro disinkronkan ke Logym di bawah setelah dashboardLyfitToday dihitung
   useEffect(() => {
-    if (!logymUser || !profile?.targets) return;
-    const key = JSON.stringify(profile.targets);
-    if (key === lastSyncedTargetsRef.current) return;
-    lastSyncedTargetsRef.current = key;
-    pushTargetsToLogym(logymUser.uid, profile.targets);
-  }, [logymUser, profile?.targets]);
+    return; // Sync target kalori dipindah ke bawah setelah dashboardLyfitToday
+
+
+
+
+  }, []);
 
   // Kunci Lomy efektif: milik Lomeal sendiri (prioritas) + cadangan dari Logym.
   // Jangan pernah array kosong (truthy!) — pass null biar guard `!aiKey` di tab lain tetap benar.
@@ -976,6 +978,23 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       workouts: hist?.workouts || [],
     };
   }, [lyfitToday, logymFastSync, hcActivity, todayYmd, profile, daysMap, logymUser]);
+
+  dashboardLyfitTodayRef.current = dashboardLyfitToday;
+
+  // Target kalori/makro → Logym (sertakan todayTarget fleksibel sesuai pembakaran hari ini)
+  const lastSyncedTargetsRef = useRef(null);
+  useEffect(() => {
+    if (!logymUser || !profile?.targets) return;
+    const dynamicToday = calcDynamicTarget(
+      profile.targets,
+      dashboardLyfitToday?.burnedKcal,
+      profile?.physical?.gender || profile?.gender
+    );
+    const key = `${JSON.stringify(profile.targets)}_${dynamicToday}`;
+    if (key === lastSyncedTargetsRef.current) return;
+    lastSyncedTargetsRef.current = key;
+    pushTargetsToLogym(logymUser.uid, profile.targets, dynamicToday);
+  }, [logymUser, profile?.targets, profile?.physical?.gender, profile?.gender, dashboardLyfitToday?.burnedKcal]);
 
   // --- Pengingat Catat Makan (LocalNotifications, cuma aktif di APK Android/iOS) ---
   useEffect(() => {
