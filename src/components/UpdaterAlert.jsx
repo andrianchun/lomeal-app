@@ -95,13 +95,20 @@ export default function UpdaterAlert({
     );
   }
 
-  // Update opsional — kartu di dasbor, bisa ditutup
+  // Update opsional — Bottom Sheet Dialog yang Menghabiskan Batas Bawah Layar (Anti-Melayang Kosong)
   return (
-    <div className="fixed bottom-24 inset-x-4 z-[100] flex justify-center pointer-events-none animate-in slide-in-from-bottom-8 fade-in duration-500">
-      <div className={`pointer-events-auto ${t.bgCardSolid} ${t.textMain} rounded-2xl p-4 shadow-2xl ${t.shadowAccent} w-full max-w-sm border ${t.borderAccentSoft} flex flex-col gap-3 relative overflow-hidden`}>
+    <div className="fixed inset-0 z-[100] flex flex-col justify-end items-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300 select-none sm:p-4">
+      {/* Backdrop Klik Luar untuk Menutup (Bila tidak sedang mengunduh) */}
+      <div
+        className="absolute inset-0 cursor-pointer"
+        onClick={() => {
+          if (!downloading) onClose();
+        }}
+      />
+      <div className={`relative z-10 w-full sm:max-w-sm ${t.bgCardSolid} ${t.textMain} rounded-t-3xl rounded-b-none sm:rounded-2xl px-5 pt-5 pb-[max(env(safe-area-inset-bottom,0px),1.25rem)] sm:p-5 shadow-2xl ${t.shadowAccent} border-t sm:border ${t.borderAccentSoft} flex flex-col gap-3.5 overflow-hidden select-none animate-in slide-in-from-bottom-6 duration-300 ring-1 ring-black/5 dark:ring-white/10 sm:mb-6`}>
         {/* Tombol tutup disembunyikan saat mengunduh supaya kartu (dan progresnya) tidak hilang di tengah jalan */}
         {!downloading && (
-          <div className="absolute top-0 right-0 p-2">
+          <div className="absolute top-3.5 right-3.5">
             <button onClick={onClose} className={`p-1 rounded-full ${t.textMuted} hover:${t.textMain} transition-colors`}>
               <X size={18} />
             </button>
