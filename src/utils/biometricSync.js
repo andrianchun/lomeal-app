@@ -154,14 +154,22 @@ export const pushNutritionBatchToLogym = async (logymUid, year, byYmd) => {
 // (di path history_years yang sama dengan activityCalories), agar grafik Logym
 // bisa menampilkan data yang konsisten dengan food log Lomeal.
 // Flag _manualFlags.nutritionCalories=true mencegah proses Logym menimpa data ini.
-export const pushNutritionBioToLogym = async (logymUid, ymd, kcal) => {
+export const pushNutritionBioToLogym = async (logymUid, ymd, totalsOrKcal) => {
   if (!logymUid || !ymd) return;
   const year = ymd.slice(0, 4);
+  const isObj = typeof totalsOrKcal === 'object' && totalsOrKcal !== null;
+  const kcal = isObj ? totalsOrKcal.kcal : totalsOrKcal;
+  const protein = isObj ? totalsOrKcal.protein : undefined;
+  const carbs = isObj ? totalsOrKcal.carbs : undefined;
+  const fat = isObj ? totalsOrKcal.fat : undefined;
   try {
     await setDoc(doc(db, 'logym_users', logymUid, 'history_years', year), {
       [ymd]: {
         bioData: {
           nutritionCalories: Math.round(kcal) || 0,
+          ...(protein !== undefined ? { protein: Math.round(protein) || 0 } : {}),
+          ...(carbs !== undefined ? { carbs: Math.round(carbs) || 0 } : {}),
+          ...(fat !== undefined ? { fat: Math.round(fat) || 0 } : {}),
           _manualFlags: { nutritionCalories: true },
         },
       },

@@ -493,7 +493,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
         const dynamicToday = calcDynamicTarget(profile?.targets, dashboardLyfitTodayRef.current?.burnedKcal, profile?.physical?.gender || profile?.gender);
         pushDailyTotalsToLogym(logymUser.uid, ymd, dayTotals, mealsCount, dynamicToday).catch(() => {});
       }
-      pushNutritionBioToLogym(logymUser.uid, ymd, dayTotals.kcal).catch(() => {});
+      pushNutritionBioToLogym(logymUser.uid, ymd, dayTotals).catch(() => {});
     }
   }, [user, settings.healthConnectEnabled, logymUser, todayYmd, profile?.targets, showAlert]);
 
