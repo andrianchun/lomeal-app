@@ -46,8 +46,8 @@ export default function UpdaterAlert({
 
   const t = theme;
   const versionLine = currentVersion && newVersion
-    ? `v${currentVersion} → v${newVersion}`
-    : newVersion ? `v${newVersion}` : null;
+    ? `Versi ${currentVersion} → Versi ${newVersion}`
+    : newVersion ? `Versi ${newVersion}` : null;
 
   if (force) {
     // Scrim sengaja TIDAK ikut di-fade: elemen ber-backdrop-filter yang animasi opacity-nya

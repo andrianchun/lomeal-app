@@ -76,3 +76,10 @@ npm run sync:android
 
 lalu build di Android Studio. `versionCode`/`versionName` di `android/app/build.gradle`
 sengaja tidak disinkronkan — versi yang dipakai app adalah `__APP_VERSION__` dari bundle JS.
+
+
+## Standarisasi Notifikasi Pembaruan (UpdaterAlert — Ekosistem Hexaverse)
+Sesuai aturan induk `E:\CODING\AGENTS.md` Pasal 12, implementasi `UpdaterAlert.jsx` di Lomeal merupakan standar emas bersama Logym:
+- **Mode Opsional**: Floating bottom card di atas navigasi bawah (`fixed bottom-24 inset-x-4 max-w-sm pointer-events-none` dengan inner `pointer-events-auto`), tanpa scrim pemblokir layar.
+- **Mode Wajib (`force`)**: Fullscreen frost modal dengan logo besar dan background blur `bg-black/80`.
+- **Indikator Progres**: Fluid progress crawler 60fps dengan label fase unduh & pasang yang transparan.
