@@ -387,14 +387,14 @@ const DashboardTab = ({
                  WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)'
                }}
              >
-                 <img src="/bg-lomeal-coach.webp" alt="" className={`w-full h-full object-cover object-top origin-top scale-[1.45] translate-x-10 opacity-90`} />
+                 <img src="/bg-lomeal-coach.webp" alt="" className="w-full h-full object-cover object-top origin-top opacity-90" style={{ transform: 'scaleX(-1) scale(1.45) translateX(-20px)' }} />
              </div>
 
              {/* Konten Kartu */}
              <div className="relative z-20">
              <div className="pt-2 pb-4 no-swipe">
                  <NutritionChart
-                     t={t} theme={theme} daysMap={daysMap} targets={targets}
+                      t={t} theme={theme} daysMap={daysMap} targets={targets} profile={profile}
                      lyfitYearData={lyfitToday === null && lyfitToday === undefined ? null : lyfitYearData}
                      lyfitToday={lyfitToday}
                  />

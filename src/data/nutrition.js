@@ -223,14 +223,14 @@ export const calcDynamicTarget = (baseTargets, burnedTotal, gender = 'male') => 
 
   // Tentukan programDelta (defisit/surplus dari dietGoal)
   let programDelta = 0;
-  if (baseTargets.customDeltaKcal != null) {
+  if (baseTargets.programDelta != null) {
+    programDelta = baseTargets.programDelta;
+  } else if (baseTargets.customDeltaKcal != null) {
     const d = Math.abs(baseTargets.customDeltaKcal);
     if (baseTargets.dietGoal === 'cutting' || baseTargets.dietGoal === 'cut') programDelta = -d;
     else if (baseTargets.dietGoal === 'bulk' || baseTargets.dietGoal === 'bulking') programDelta = d;
   } else if (baseTargets.tdee && baseTargets.kcal) {
     programDelta = baseTargets.kcal - baseTargets.tdee;
-  } else if (baseTargets.programDelta != null) {
-    programDelta = baseTargets.programDelta;
   }
 
   // Target fleksibel harian: Kalori Dibakar riil hari itu + program delta.
@@ -499,10 +499,28 @@ export const computeDaySummary = ({
   const eatKcal = Math.max(0, Math.round(burnedTotal - bmr - neatKcal - tef));
 
   // Target Kalori & Calorie Cycling (Target naik jika burnedTotal > baseTdee)
+  const activeTargets = profile?.targets || targets || {};
+  let resolvedDelta = targets?.programDelta;
+  if (resolvedDelta == null) {
+    if (activeTargets.customDeltaKcal != null) {
+      const d = Math.abs(activeTargets.customDeltaKcal);
+      resolvedDelta = (activeTargets.dietGoal === 'cutting' || activeTargets.dietGoal === 'cut') ? -d : (activeTargets.dietGoal === 'bulk' || activeTargets.dietGoal === 'bulking') ? d : 0;
+    } else if (activeTargets.tdee && activeTargets.kcal) {
+      resolvedDelta = activeTargets.kcal - activeTargets.tdee;
+    } else {
+      resolvedDelta = Math.round((targets?.kcal || 0) - (targets?.tdee || targets?.kcal || 0));
+    }
+  }
+
+  const effectiveTargets = {
+    ...targets,
+    programDelta: resolvedDelta,
+  };
+
   const baseTdee = Math.round(targets?.tdee || targets?.kcal || 0);
-  const programDelta = Math.round((targets?.kcal || 0) - baseTdee); // 0=maint, neg=cut, pos=bulk
+  const programDelta = resolvedDelta;
   const dynamicTarget = logymUser
-    ? Math.round(calcDynamicTarget(targets, burnedTotal, profile?.physical?.gender || profile?.gender))
+    ? Math.round(calcDynamicTarget(effectiveTargets, burnedTotal, profile?.physical?.gender || profile?.gender))
     : Math.round(targets?.kcal || 2000);
   const targetKcal = dynamicTarget;
 

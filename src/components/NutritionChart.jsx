@@ -40,7 +40,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, lyfitToday, tar
       bioEntries.forEach(entry => {
           const d = new Date(entry.dateStr);
           const lyfitDay = entry.dateStr === todayStr ? (lyfitToday || extractLyfitDay(lyfitYearData, entry.dateStr)) : extractLyfitDay(lyfitYearData, entry.dateStr);
-          const dayTargets = entry.dateStr >= todayStr ? targets : { ...targets, ...(entry.dayData?.targetSnapshot || {}), tdee: entry.dayData?.targetSnapshot?.tdee || targets?.tdee, dietGoal: entry.dayData?.targetSnapshot?.dietGoal || targets?.dietGoal, customDeltaKcal: entry.dayData?.targetSnapshot?.customDeltaKcal ?? targets?.customDeltaKcal };
+          const dayTargets = entry.dateStr >= todayStr ? targets : { ...targets, ...(entry.dayData?.targetSnapshot || {}) };
 
           const summary = computeDaySummary({
             day: entry.dayData,
