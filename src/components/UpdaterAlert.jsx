@@ -2,16 +2,14 @@ import React from 'react';
 import { DownloadCloud, X } from 'lucide-react';
 import useBackClose from '../hooks/useBackClose';
 
-// Bar progres unduhan. Mendukung OTA zip maupun streaming in-app APK installer (seperti doctoid).
-function DownloadProgress({ progress, t, isApk }) {
+// Bar progres unduhan halus
+function DownloadProgress({ progress, t }) {
   const isInstalling = progress >= 100;
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-2">
         <span className={`text-xs font-bold ${t.textMuted}`}>
-          {isInstalling
-            ? (isApk ? 'Mempersiapkan pemasangan APK…' : 'Memasang berkas & memuat ulang…')
-            : (isApk ? 'Mengunduh paket pembaruan APK…' : 'Mengunduh pembaruan…')}
+          {isInstalling ? 'Memasang berkas & memuat ulang…' : 'Mengunduh pembaruan…'}
         </span>
         <span className={`text-xs font-bold ${t.textMain} tabular-nums`}>{progress}%</span>
       </div>
@@ -25,9 +23,7 @@ function DownloadProgress({ progress, t, isApk }) {
         )}
       </div>
       <p className={`text-[10px] ${t.textMuted} mt-2 leading-tight`}>
-        {isInstalling && isApk
-          ? 'Tunggu dialog pemasangan Android muncul di layar.'
-          : 'Jangan tutup aplikasi saat proses berlangsung.'}
+        Jangan tutup aplikasi saat proses berlangsung.
       </p>
     </div>
   );
@@ -58,12 +54,10 @@ export default function UpdaterAlert({
           <div className="pt-8 pb-4">
             <img src="/maskable-icon-512x512.webp" alt="Lomeal Logo" className="w-24 h-24 mx-auto rounded-2xl shadow-lg mb-4 bg-white/5 border border-white/10 p-2" />
             <h2 className={`text-2xl font-bold tracking-tight mb-2 bg-clip-text text-transparent bg-gradient-to-br ${t.gradientText}`}>
-              {isApk ? 'Pembaruan Aplikasi APK' : 'Update Penting!'}
+              Update Penting!
             </h2>
             <p className={`text-sm font-medium ${t.textMuted} px-6`}>
-              {isApk
-                ? 'Versi APK terbaru Lomeal telah tersedia. Unduh pembaruan ini langsung di dalam aplikasi.'
-                : 'Versi terbaru Lomeal telah tersedia. Kamu harus mengunduh pembaruan ini untuk melanjutkan.'}
+              Versi terbaru Lomeal telah tersedia. Kamu harus mengunduh pembaruan ini untuk melanjutkan.
             </p>
             {versionLine && (
               <p className={`text-xs font-bold ${t.textAccent} mt-2 tabular-nums`}>{versionLine}</p>
@@ -79,14 +73,14 @@ export default function UpdaterAlert({
 
           <div className="w-full p-6 mt-2 text-center">
             {downloading ? (
-              <DownloadProgress progress={progress} t={t} isApk={isApk} />
+              <DownloadProgress progress={progress} t={t} />
             ) : (
               <button
                 onClick={onUpdate}
                 className={`w-full py-4 ${t.bgAccent} rounded-2xl font-bold text-lg ${t.shadowAccent} flex items-center justify-center gap-2 active:scale-95 transition-transform`}
               >
                 <DownloadCloud size={24} />
-                {isApk ? 'Pasang Pembaruan APK' : 'Update Sekarang'}
+                Update Sekarang
               </button>
             )}
           </div>
@@ -121,7 +115,7 @@ export default function UpdaterAlert({
           </div>
           <div>
             <h3 className="font-bold text-lg leading-tight">
-              {isApk ? 'Update APK Tersedia' : 'Update Tersedia'}
+              Update Tersedia
             </h3>
             <p className={`text-xs ${t.textMuted} mt-0.5 tabular-nums`}>
               {versionLine || 'Ada versi Lomeal yang lebih baru.'}
@@ -134,14 +128,14 @@ export default function UpdaterAlert({
         )}
 
         {downloading ? (
-          <DownloadProgress progress={progress} t={t} isApk={isApk} />
+          <DownloadProgress progress={progress} t={t} />
         ) : (
           <button
             onClick={onUpdate}
             className={`w-full py-2.5 ${t.bgAccent} rounded-xl font-bold text-sm shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-2`}
           >
             <DownloadCloud size={18} />
-            {isApk ? 'Pasang Pembaruan APK' : 'Update Sekarang'}
+            Update Sekarang
           </button>
         )}
       </div>
