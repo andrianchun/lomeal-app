@@ -15,6 +15,66 @@
 import { db } from '../firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
+const CAFFEINE_RULES = [
+  { rx: /\b(pre[\s-]?workout|pwo|c4|gorilla\s?mode|total\s?war)\b/i, mg: 175, label: 'Pre-Workout' },
+  { rx: /\b(double\s?espresso|cold\s?brew)\b/i, mg: 140, label: 'Kopi Kuat' },
+  { rx: /\b(energy\s?drink|red\s?bull|monster|kratingdaeng|extra\s?joss|kuku\s?bima)\b/i, mg: 110, label: 'Energy Drink' },
+  { rx: /\b(espresso|americano|kopi|coffee|latte|cappuccino|macchiato|mocha|flat\s?white|v60|arabika|robusta)\b/i, mg: 95, label: 'Kopi' },
+  { rx: /\b(matcha)\b/i, mg: 70, label: 'Matcha' },
+  { rx: /\b(green\s?tea|teh\s?hijau|oolong|black\s?tea|teh\s?hitam|earl\s?grey|thai\s?tea)\b/i, mg: 45, label: 'Teh' },
+];
+
+const SESSION_FALLBACK_TIME = {
+  breakfast: '07:30',
+  snack: '10:00',
+  lunch: '12:30',
+  snack2: '15:00',
+  dinner: '19:00',
+  snack3: '20:30',
+  drink: '09:00',
+};
+
+/**
+ * Ekstrak daftar konsumsi kafein / stimulan yang SUDAH DIMAKAN dari `dayData.meals` Lomeal
+ * untuk dikirim ke Logym (`lomealSync.today.caffeineLogs` & `bioData.caffeineLogs`).
+ * @returns {Array<{mg:number, time:string, source:string}>}
+ */
+export const extractDayCaffeineLogs = (dayData, defaultEaten = true) => {
+  if (!dayData?.meals || typeof dayData.meals !== 'object') return [];
+  const hidden = dayData?.hiddenSessions || [];
+  const logs = [];
+
+  Object.entries(dayData.meals).forEach(([sessionId, entries]) => {
+    if (hidden.includes(sessionId) && !(entries || []).length) return;
+    (entries || []).forEach((e) => {
+      if (!e) return;
+      const isPlanned = e.isMealPrep || e.source === 'recipe' || e.planned;
+      const eaten = e.isEaten !== undefined ? Boolean(e.isEaten) : (isPlanned ? false : defaultEaten);
+      if (!eaten) return;
+
+      const name = String(e.name || e.title || '').trim();
+      const explicitMg = Number(e.nutrition?.caffeine ?? e.caffeineMg ?? e.caffeine ?? 0);
+      const rawTime = e.time || dayData?.sessionTimes?.[sessionId] || SESSION_FALLBACK_TIME[sessionId] || '09:00';
+      const time = /^\d{1,2}:\d{2}/.test(String(rawTime)) ? String(rawTime).slice(0, 5) : '09:00';
+
+      if (explicitMg > 0) {
+        logs.push({ mg: Math.min(600, Math.round(explicitMg)), time, source: name || 'Kafein' });
+        return;
+      }
+
+      if (!name) return;
+      for (const rule of CAFFEINE_RULES) {
+        if (rule.rx.test(name)) {
+          logs.push({ mg: rule.mg, time, source: rule.label });
+          break;
+        }
+      }
+    });
+  });
+
+  return logs.sort((a, b) => a.time.localeCompare(b.time));
+};
+
 export const pushBiometricsToLogym = async (logymUid, { gender, dob, height, weight, activityLevel }) => {
   if (!logymUid) return;
   const patch = {};
@@ -77,7 +137,7 @@ export const pushTargetsToLogym = async (logymUid, targets, todayTarget = null) 
   }
 };
 
-export const pushDailyTotalsToLogym = async (logymUid, ymd, totals, mealsCount = 0, dynamicTarget = null) => {
+export const pushDailyTotalsToLogym = async (logymUid, ymd, totals, mealsCount = 0, dynamicTarget = null, caffeineLogs = null) => {
   if (!logymUid) return;
   try {
     const todayObj = {
@@ -91,6 +151,9 @@ export const pushDailyTotalsToLogym = async (logymUid, ymd, totals, mealsCount =
     };
     if (dynamicTarget && dynamicTarget > 0) {
       todayObj.targetKcal = Math.round(dynamicTarget);
+    }
+    if (Array.isArray(caffeineLogs)) {
+      todayObj.caffeineLogs = caffeineLogs;
     }
     await setDoc(doc(db, 'logym_users', logymUid), {
       lomealSync: {
@@ -154,7 +217,7 @@ export const pushNutritionBatchToLogym = async (logymUid, year, byYmd) => {
 // (di path history_years yang sama dengan activityCalories), agar grafik Logym
 // bisa menampilkan data yang konsisten dengan food log Lomeal.
 // Flag _manualFlags.nutritionCalories=true mencegah proses Logym menimpa data ini.
-export const pushNutritionBioToLogym = async (logymUid, ymd, totalsOrKcal) => {
+export const pushNutritionBioToLogym = async (logymUid, ymd, totalsOrKcal, caffeineLogs = null) => {
   if (!logymUid || !ymd) return;
   const year = ymd.slice(0, 4);
   const isObj = typeof totalsOrKcal === 'object' && totalsOrKcal !== null;
@@ -170,6 +233,7 @@ export const pushNutritionBioToLogym = async (logymUid, ymd, totalsOrKcal) => {
           ...(protein !== undefined ? { protein: Math.round(protein) || 0 } : {}),
           ...(carbs !== undefined ? { carbs: Math.round(carbs) || 0 } : {}),
           ...(fat !== undefined ? { fat: Math.round(fat) || 0 } : {}),
+          ...(Array.isArray(caffeineLogs) ? { caffeineLogs } : {}),
           _manualFlags: { nutritionCalories: true },
         },
       },

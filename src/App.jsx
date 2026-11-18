@@ -19,7 +19,7 @@ import { subscribeDomusItems, subscribeDomusLocations } from './utils/domusSync'
 import { fetchLyfitProfile, extractLyfitDay, subscribeLyfitYear, subscribeLyfitProfile, fetchLyfitYear } from './utils/lyfitSync';
 import {
   pushBiometricsToLogym, pushDailyTotalsToLogym, pushPreferencesToLogym, pushTargetsToLogym, pushNutritionBioToLogym,
-  pushNutritionBatchToLogym,
+  pushNutritionBatchToLogym, extractDayCaffeineLogs,
 } from './utils/biometricSync';
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcReadTodayActivity, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
 import { computeDayTotals, calcTargets, calcBMR, calcTEF, calcDynamicTarget } from './data/nutrition';
@@ -489,11 +489,12 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       // Tanpa argumen kedua ini, makanan yang dijadwalkan besok langsung dikirim ke Logym
       // seolah sudah masuk perut.
       const dayTotals = computeDayTotals(dayData, ymd <= todayYmd);
+      const caffeineLogs = extractDayCaffeineLogs(dayData, ymd <= todayYmd);
       if (ymd === todayYmd) {
         const dynamicToday = calcDynamicTarget(profile?.targets, dashboardLyfitTodayRef.current?.burnedKcal, profile?.physical?.gender || profile?.gender);
-        pushDailyTotalsToLogym(logymUser.uid, ymd, dayTotals, mealsCount, dynamicToday).catch(() => {});
+        pushDailyTotalsToLogym(logymUser.uid, ymd, dayTotals, mealsCount, dynamicToday, caffeineLogs).catch(() => {});
       }
-      pushNutritionBioToLogym(logymUser.uid, ymd, dayTotals).catch(() => {});
+      pushNutritionBioToLogym(logymUser.uid, ymd, dayTotals, caffeineLogs).catch(() => {});
     }
   }, [user, settings.healthConnectEnabled, logymUser, todayYmd, profile?.targets, showAlert]);
 
@@ -687,7 +688,14 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   // Mirror biometrik dari Logym (gender/dob/height/weight/activityLevel) — ARAH DATA doang, delta
   // bulking/cutting (nutritionGoal) sekarang murni milik Lomeal (lihat efek pushTargetsToLogym
   // di bawah) jadi gak perlu lagi dibaca balik/dicek kontradiksinya di sini.
-  const [logymFastSync, setLogymFastSync] = useState(null);
+  const [logymFastSync, setLogymFastSync] = useState(() => {
+    try {
+      const cached = localStorage.getItem('__CACHED_LOGYM_FAST_SYNC');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
     if (!logymUser) {
@@ -698,6 +706,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       if (!p) return;
       if (p.logymSync?.today) {
         setLogymFastSync(p.logymSync.today);
+        try {
+          localStorage.setItem('__CACHED_LOGYM_FAST_SYNC', JSON.stringify(p.logymSync.today));
+        } catch {}
       }
       const incoming = {};
       ['gender', 'dob', 'height', 'weight', 'activityLevel'].forEach((k) => { if (p[k]) incoming[k] = p[k]; });
@@ -956,8 +967,9 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       finalBurnedKcal = logymBurned + extraStepsKcal;
     } else if (maxSteps > 0 || logymUser) {
       // 2. Jika Logym belum dibuka hari ini sama sekali, gunakan rumus yang persis sama dengan Logym:
-      //    TDEE = BMR + TEF + NEAT (langkah * 0.04)
-      finalBurnedKcal = Math.round(bmr + tef + maxStepsKcal);
+      //    TDEE = BMR + TEF + NEAT (langkah * 0.04) + aktif Health Connect (jika ada sesi eksternal)
+      const hcActiveKcal = Math.max(maxStepsKcal, Number(hcActivity?.burnedKcal) || 0);
+      finalBurnedKcal = Math.round(bmr + tef + hcActiveKcal);
     }
 
     // Jika tidak ada data aktivitas sama sekali dan bukan user Logym
