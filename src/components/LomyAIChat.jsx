@@ -309,10 +309,11 @@ export default function LomyAIChat({
       logymUser: !!logymUser,
     });
 
+    const effectiveTargets = todaySummary.targets || targets;
     const todayTotals = todaySummary.totals;
     const todayLine = KEYS.map((k) => {
       const v = Math.round(todayTotals[k] || 0);
-      return targets[k] ? `${labelOf(k)}: ${v}/${Math.round(targets[k])}` : `${labelOf(k)}: ${v}`;
+      return effectiveTargets[k] ? `${labelOf(k)}: ${v}/${Math.round(effectiveTargets[k])}` : `${labelOf(k)}: ${v}`;
     }).join(', ');
 
     // Single Source of Truth 6 hari sebelumnya
@@ -366,7 +367,7 @@ export default function LomyAIChat({
       profile?.goal ? `Target utama: ${profile.goal}` : null,
       asList(profile?.medicalHistory).length ? `Riwayat medis: ${asList(profile.medicalHistory).join(', ')}` : null,
       asList(profile?.allergies).length ? `Alergi/Pantangan: ${asList(profile.allergies).join(', ')}` : null,
-      targets.kcal ? `Target nutrisi harian: ${KEYS.filter((k) => targets[k]).map((k) => `${labelOf(k)} ${Math.round(targets[k])}`).join(', ')}` : null,
+      effectiveTargets.kcal ? `Target nutrisi harian (dinamis hari ini): ${KEYS.filter((k) => effectiveTargets[k]).map((k) => `${labelOf(k)} ${Math.round(effectiveTargets[k])}`).join(', ')}` : null,
       '',
       `=== RINGKASAN ENERGI & METABOLISME HARI INI (SINGLE SOURCE OF TRUTH APLIKASI) ===`,
       `- Total Kalori Dimakan (Asupan Makanan Terdata): ${todaySummary.eatenKcal} kkal`,
@@ -376,7 +377,7 @@ export default function LomyAIChat({
       `    2. TEF (Efek Termik Pengolahan Makanan): ${todaySummary.tef} kkal`,
       `    3. NEAT (Langkah / Gerak Harian ${todaySummary.steps.toLocaleString('id-ID')} langkah): ${todaySummary.neatKcal} kkal`,
       `    4. EAT (Latihan & Olahraga Logym ${todaySummary.workoutCount} gerakan, ${todaySummary.sessionCount} sesi): ${todaySummary.eatKcal} kkal`,
-      `- Target Asupan Kalori Hari Ini: ${todaySummary.targetKcal} kkal (Target dasar istirahat: ${todaySummary.baseTdee} kkal, ${todaySummary.targetKcal !== todaySummary.baseTdee ? 'naik karena aktivitas fisik/Calorie Cycling' : 'stabil'})`,
+      `- Target Asupan Kalori Hari Ini: ${todaySummary.targetKcal} kkal (Baseline istirahat: ${targets.kcal || todaySummary.baseTdee} kkal; Kalori Dibakar ${todaySummary.burnedTotal} ${todaySummary.programDelta >= 0 ? '+' : ''}${Math.round(todaySummary.programDelta)} kkal program)`,
       `- Sisa Kalori Terhadap Target Makan: ${todaySummary.remainingKcal >= 0 ? `${todaySummary.remainingKcal} kkal tersisa` : `${Math.abs(todaySummary.remainingKcal)} kkal melebihi target`}`,
       `- Keseimbangan Energi & Net Metabolisme:`,
       `  * Net Metabolisme Riil (Kalori Dimakan - Total Kalori Dibakar): ${todaySummary.netDelta > 0 ? `+${todaySummary.netDelta} kkal (SURPLUS riil metabolisme)` : `${todaySummary.netDelta} kkal (DEFISIT riil metabolisme)`}`,

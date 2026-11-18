@@ -225,6 +225,8 @@ export const calcDynamicTarget = (baseTargets, burnedTotal, gender = 'male') => 
   let programDelta = 0;
   if (baseTargets.programDelta != null) {
     programDelta = baseTargets.programDelta;
+  } else if (baseTargets.dietGoal === 'maintenance') {
+    programDelta = 0;
   } else if (baseTargets.customDeltaKcal != null) {
     const d = Math.abs(baseTargets.customDeltaKcal);
     if (baseTargets.dietGoal === 'cutting' || baseTargets.dietGoal === 'cut') programDelta = -d;
@@ -239,6 +241,102 @@ export const calcDynamicTarget = (baseTargets, burnedTotal, gender = 'male') => 
   const rawTarget = Math.round(burn + programDelta);
   const safeMin = MIN_SAFE_KCAL[gender === 'female' ? 'female' : 'male'] || 1500;
   return Math.max(rawTarget, safeMin);
+};
+
+// Makro (g): protein tetap mengikuti berat badan (g/kg BB), sedangkan karbohidrat & lemak
+// menyesuaikan total kalori harian sesuai profil makan.
+export const calcMacroTargets = ({ kcal = 2000, protein = 0, dietProfile = 'weight_loss' } = {}) => {
+  const k = Math.max(0, Number(kcal) || 0);
+  const p = Math.max(0, Math.round(Number(protein) || 0));
+  let fat = 0;
+  let carbs = 0;
+  if (dietProfile === 'keto') {
+    carbs = 25; // g — batas ketat standar keto (~5% kalori)
+    fat = Math.max(0, Math.round((k - p * 4 - carbs * 4) / 9));
+  } else if (dietProfile === 'carnivore') {
+    carbs = 0;
+    fat = Math.max(0, Math.round((k - p * 4) / 9));
+  } else if (dietProfile === 'weight_loss') {
+    fat = Math.round((k * 0.18) / 9); // Lo Fat — lemak ditekan lebih dari default 27%
+    carbs = Math.max(0, Math.round((k - p * 4 - fat * 9) / 4));
+  } else {
+    fat = Math.round((k * 0.27) / 9);
+    carbs = Math.max(0, Math.round((k - p * 4 - fat * 9) / 4));
+  }
+  return { protein: p, carbs, fat };
+};
+
+export const calcSatFatLimit = (kcal = 2000, isKolesterol = false) =>
+  Math.round(((Math.max(0, Number(kcal) || 0)) * (isKolesterol ? 0.07 : 0.10)) / 9);
+
+const resolveDietProfileForTargets = (baseTargets, profile) => {
+  if (baseTargets?.dietProfile) return baseTargets.dietProfile;
+  // Fallback untuk targets / snapshot lama yang belum menyimpan field dietProfile.
+  if (baseTargets?.kcal > 0 && baseTargets?.carbs != null && baseTargets?.fat != null) {
+    if (baseTargets.carbs === 0) return 'carnivore';
+    if (baseTargets.carbs === 25) return 'keto';
+    if (Math.abs((baseTargets.fat * 9) / baseTargets.kcal - 0.18) < 0.035) return 'weight_loss';
+    if (profile?.dietProfile && !['keto', 'carnivore', 'weight_loss'].includes(profile.dietProfile)) {
+      return profile.dietProfile;
+    }
+    return 'balanced';
+  }
+  return profile?.dietProfile || 'weight_loss';
+};
+
+/**
+ * Menyesuaikan target nutrisi yang bergantung pada total kalori (karbohidrat, lemak, lemak jenuh)
+ * terhadap target kalori dinamis harian, sementara protein tetap berpatokan ke berat badan
+ * dan mikronutrien/batas klinis mengikuti standar AKG/medis.
+ */
+export const scaleTargetsForKcal = (baseTargets = {}, targetKcal, profile = {}) => {
+  const base = baseTargets || {};
+  const k = Math.round(Number(targetKcal) || 0);
+  if (k <= 0) return { ...base };
+  if (base.kcal != null && Math.round(base.kcal) === k) {
+    return { ...base, kcal: k };
+  }
+  if (base.protein == null && !profile?.physical?.weight && !profile?.weight) {
+    return { ...base, kcal: k };
+  }
+
+  const dietProfile = resolveDietProfileForTargets(base, profile);
+  const weight = Number(profile?.physical?.weight ?? profile?.weight) || 70;
+  const customProteinPerKg = base.customProteinPerKg ?? profile?.customProteinPerKg ?? null;
+  const fallbackProteinPerKg = customProteinPerKg != null ? customProteinPerKg : (
+    dietProfile === 'muscle_gain' ? 2.0
+      : dietProfile === 'weight_loss' ? 1.6
+      : dietProfile === 'keto' ? 1.6
+      : dietProfile === 'carnivore' ? 2.2
+      : 1.2
+  );
+  const protein = base.protein != null ? Math.round(base.protein) : Math.round(weight * fallbackProteinPerKg);
+  const { carbs, fat } = calcMacroTargets({ kcal: k, protein, dietProfile });
+
+  const medicalHistory = profile?.medicalHistory || [];
+  const inferredKolesterol = base.kcal > 0 && base.satFat != null
+    ? Math.abs((base.satFat * 9) / base.kcal - 0.07) < 0.015
+    : false;
+  const isKolesterol = (base.kcal > 0 && base.satFat != null)
+    ? inferredKolesterol
+    : medicalHistory.includes('Kolesterol Tinggi');
+
+  return {
+    ...base,
+    kcal: k,
+    protein,
+    carbs,
+    fat,
+    ...(base.satFat != null ? { satFat: calcSatFatLimit(k, isKolesterol) } : {}),
+  };
+};
+
+export const calcDynamicTargets = (baseTargets, burnedTotal, profile = {}) => {
+  const gender = typeof profile === 'string'
+    ? profile
+    : (profile?.physical?.gender || profile?.gender || 'male');
+  const dynamicKcal = calcDynamicTarget(baseTargets, burnedTotal, gender);
+  return scaleTargetsForKcal(baseTargets, dynamicKcal, typeof profile === 'object' ? profile : {});
 };
 
 export const calcTargets = (profile) => {
@@ -278,21 +376,11 @@ export const calcTargets = (profile) => {
   // (karbo ditekan abis) makanya dihitung terpisah dari pola persen-lemak-tetap yang lain.
   const proteinPerKg = customProteinPerKg != null ? customProteinPerKg : (dietProfile === 'muscle_gain' ? 2.0 : dietProfile === 'weight_loss' ? 1.6
     : dietProfile === 'keto' ? 1.6 : dietProfile === 'carnivore' ? 2.2 : 1.2);
-  const protein = Math.round(weight * proteinPerKg);
-  let fat, carbs;
-  if (dietProfile === 'keto') {
-    carbs = 25; // g — batas ketat standar keto (~5% kalori)
-    fat = Math.max(0, Math.round((kcal - protein * 4 - carbs * 4) / 9));
-  } else if (dietProfile === 'carnivore') {
-    carbs = 0;
-    fat = Math.max(0, Math.round((kcal - protein * 4) / 9));
-  } else if (dietProfile === 'weight_loss') {
-    fat = Math.round((kcal * 0.18) / 9); // Lo Fat — lemak ditekan lebih dari default 27%
-    carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
-  } else {
-    fat = Math.round((kcal * 0.27) / 9);
-    carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
-  }
+  const { protein, carbs, fat } = calcMacroTargets({
+    kcal,
+    protein: Math.round(weight * proteinPerKg),
+    dietProfile,
+  });
 
   // Batas mikro harian (default klinis umum; DASH memperketat natrium)
   const medicalHistory = profile?.medicalHistory || [];
@@ -305,7 +393,7 @@ export const calcTargets = (profile) => {
     sodium: isHipertensi ? 1500 : 2000,     // mg (WHO/AHA)
     sugar: isDiabetes ? 25 : 50,            // g (Permenkes 30/2013)
     cholesterol: isKolesterol ? 200 : 300,  // mg
-    satFat: isKolesterol ? Math.round((kcal * 0.07) / 9) : Math.round((kcal * 0.10) / 9),
+    satFat: calcSatFatLimit(kcal, isKolesterol),
     iron: profile?.gender === 'female' ? 18 : 9,       // mg (AKG, target minimal)
     calcium: 1000,                                     // mg (target minimal)
     purine: dietProfile === 'low_purine' ? 400 : null, // mg — hanya dilacak kondisional
@@ -313,7 +401,7 @@ export const calcTargets = (profile) => {
     vitA: 600, vitB1: 1.2, vitB2: 1.3, vitB3: 16, vitB6: 1.3, vitB9: 400, vitB12: 2.4,
     vitC: 90, vitD: 15, vitE: 15, vitK: 90,
     waterGoal: profile?.waterGoal || 2000, // ml — bisa dikustom user, default 2000
-    tdee, bmr, dietGoal, customDeltaKcal, kcalFloored, customProteinPerKg,
+    tdee, bmr, dietGoal, dietProfile, customDeltaKcal, kcalFloored, customProteinPerKg,
   };
   return targets;
 };
@@ -499,14 +587,19 @@ export const computeDaySummary = ({
   const eatKcal = Math.max(0, Math.round(burnedTotal - bmr - neatKcal - tef));
 
   // Target Kalori & Calorie Cycling (Target naik jika burnedTotal > baseTdee)
-  const activeTargets = profile?.targets || targets || {};
-  let resolvedDelta = targets?.programDelta;
+  const deltaSource = (targets && (targets.kcal || targets.tdee || targets.programDelta != null || targets.customDeltaKcal != null))
+    ? targets
+    : (profile?.targets || targets || {});
+  let resolvedDelta = deltaSource?.programDelta;
   if (resolvedDelta == null) {
-    if (activeTargets.customDeltaKcal != null) {
-      const d = Math.abs(activeTargets.customDeltaKcal);
-      resolvedDelta = (activeTargets.dietGoal === 'cutting' || activeTargets.dietGoal === 'cut') ? -d : (activeTargets.dietGoal === 'bulk' || activeTargets.dietGoal === 'bulking') ? d : 0;
-    } else if (activeTargets.tdee && activeTargets.kcal) {
-      resolvedDelta = activeTargets.kcal - activeTargets.tdee;
+    const dg = deltaSource?.dietGoal;
+    if (dg === 'maintenance') {
+      resolvedDelta = 0;
+    } else if (deltaSource?.customDeltaKcal != null && (dg === 'cutting' || dg === 'cut' || dg === 'bulk' || dg === 'bulking')) {
+      const d = Math.abs(deltaSource.customDeltaKcal);
+      resolvedDelta = (dg === 'cutting' || dg === 'cut') ? -d : d;
+    } else if (deltaSource?.tdee && deltaSource?.kcal) {
+      resolvedDelta = deltaSource.kcal - deltaSource.tdee;
     } else {
       resolvedDelta = Math.round((targets?.kcal || 0) - (targets?.tdee || targets?.kcal || 0));
     }
@@ -519,10 +612,16 @@ export const computeDaySummary = ({
 
   const baseTdee = Math.round(targets?.tdee || targets?.kcal || 0);
   const programDelta = resolvedDelta;
-  const dynamicTarget = logymUser
-    ? Math.round(calcDynamicTarget(effectiveTargets, burnedTotal, profile?.physical?.gender || profile?.gender))
+  const gender = profile?.physical?.gender || profile?.gender;
+  const safeMin = MIN_SAFE_KCAL[gender === 'female' ? 'female' : 'male'] || 1500;
+  const dynamicTarget = (logymUser && !isFuture)
+    ? Math.round(calcDynamicTarget(effectiveTargets, burnedTotal, gender))
     : Math.round(targets?.kcal || 2000);
   const targetKcal = dynamicTarget;
+  const dynamicTargets = scaleTargetsForKcal(targets, targetKcal, profile);
+  const isTargetFloored = Boolean(
+    logymUser && !isFuture && burnedTotal > 0 && Math.round(burnedTotal + programDelta) < safeMin
+  );
 
   // Sisa kalori terhadap target makan harian
   const remainingKcal = Math.round(targetKcal - eatenKcal);
@@ -553,6 +652,9 @@ export const computeDaySummary = ({
     programDelta,
     targetKcal,
     dynamicTarget,
+    targets: dynamicTargets,
+    isTargetFloored,
+    safeMin,
     remainingKcal,
     netDelta,
     balance,

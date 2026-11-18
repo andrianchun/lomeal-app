@@ -141,7 +141,7 @@ assert.equal(tgLogym.tdee, Math.round(1724 * 1.2)); // 2069 kcal
 assert.equal(tgLogym.kcal, 2069 + 240); // 2309 kcal (rest day)
 
 // Dynamic Target (Calorie Cycling)
-import { calcDynamicTarget, computeDaySummary } from './nutrition.js';
+import { calcDynamicTarget, calcDynamicTargets, scaleTargetsForKcal, computeDaySummary } from './nutrition.js';
 // On rest day (burn <= baseTdee or burn = 0) -> target is base target
 assert.equal(calcDynamicTarget(tgLogym, 0), tgLogym.kcal);
 assert.equal(calcDynamicTarget(tgLogym, 2000), 2000 + 240);
@@ -178,6 +178,100 @@ assert.equal(summaryTest.workoutCount, 4);
 assert.equal(summaryTest.netDelta, 1000 - 2400); // -1400 kcal (real deficit!)
 assert.equal(summaryTest.dynamicTarget, 2400 + 240); // 2640 kcal
 assert.equal(summaryTest.remainingKcal, 2640 - 1000); // 1640 kcal remaining
+assert.equal(summaryTest.targets.kcal, 2640);
+assert.equal(summaryTest.targets.protein, tgLogym.protein); // protein tetap berbasis BB
+assert.equal(summaryTest.targets.fat, Math.round((2640 * 0.18) / 9)); // weight_loss (default) 18% lemak
+assert.equal(summaryTest.targets.carbs, Math.round((2640 - tgLogym.protein * 4 - summaryTest.targets.fat * 9) / 4));
+assert.equal(summaryTest.targets.satFat, Math.round((2640 * 0.10) / 9));
+
+// Skenario Cutting Santai (-10% = -207 dari TDEE 2070) + burn 2247 + makan 2122
+const userTargetsLegacy = {
+  kcal: 1863,
+  tdee: 2070,
+  bmr: 1725,
+  dietGoal: 'cutting',
+  protein: 128,
+  carbs: 212,
+  fat: 56,
+  satFat: 21,
+  sodium: 2000,
+  sugar: 50,
+};
+const userDay = {
+  meals: {
+    lunch: [entry(2122, { nutrition: { ...EMPTY_NUTRITION, kcal: 2122, protein: 156, carbs: 174, fat: 90 } })],
+  },
+};
+const userSummary = computeDaySummary({
+  day: userDay,
+  targets: userTargetsLegacy,
+  lyfitDay: { bmr: 1725, burnedKcal: 2247, steps: 4000, workoutCount: 0 },
+  profile: { gender: 'male', dietGoal: 'cutting', dietProfile: 'muscle_gain' },
+  logymUser: true,
+});
+assert.equal(userSummary.programDelta, -207);
+assert.equal(userSummary.targetKcal, 2040);
+assert.equal(userSummary.remainingKcal, -82);
+assert.equal(userSummary.netDelta, -125);
+assert.equal(userSummary.targets.protein, 128);
+assert.equal(userSummary.targets.fat, 61);
+assert.equal(userSummary.targets.carbs, 245);
+assert.equal(userSummary.targets.satFat, 23);
+assert.equal(userSummary.targets.sodium, 2000, 'natrium tidak ikut berubah mengikuti kalori');
+
+// Profil keto & carnivore: karbo tetap 25g/0g, lemak yang mengikuti perubahan kalori
+const tgKeto = calcTargets({ ...maleBio, dietProfile: 'keto', dietGoal: 'bulk', fromLogym: true, customDeltaKcal: 300 });
+const dynKeto = calcDynamicTargets(tgKeto, 2800, { ...maleBio, dietProfile: 'keto' });
+assert.equal(dynKeto.kcal, 3100);
+assert.equal(dynKeto.carbs, 25);
+assert.equal(dynKeto.fat, Math.round((3100 - tgKeto.protein * 4 - 25 * 4) / 9));
+
+const tgCarnivore = calcTargets({ ...maleBio, dietProfile: 'carnivore', dietGoal: 'maintenance', fromLogym: true });
+const dynCarnivore = calcDynamicTargets(tgCarnivore, 2600, { ...maleBio, dietProfile: 'carnivore' });
+assert.equal(dynCarnivore.kcal, 2600);
+assert.equal(dynCarnivore.carbs, 0);
+assert.equal(dynCarnivore.fat, Math.round((2600 - tgCarnivore.protein * 4) / 9));
+
+// Kolesterol tinggi menjaga satFat di 7%
+const tgChol = calcTargets({ ...maleBio, medicalHistory: ['Kolesterol Tinggi'], fromLogym: true });
+const dynChol = scaleTargetsForKcal(tgChol, 2700, { ...maleBio, medicalHistory: ['Kolesterol Tinggi'] });
+assert.equal(dynChol.satFat, Math.round((2700 * 0.07) / 9));
+
+// Maintenance mengabaikan customDeltaKcal sisa
+const maintSum = computeDaySummary({
+  day: {},
+  targets: { ...userTargetsLegacy, dietGoal: 'maintenance', customDeltaKcal: 400, kcal: 2070, tdee: 2070 },
+  lyfitDay: { burnedKcal: 2300 },
+  profile: { gender: 'male', dietGoal: 'maintenance', targets: userTargetsLegacy },
+  logymUser: true,
+});
+assert.equal(maintSum.programDelta, 0);
+assert.equal(maintSum.targetKcal, 2300);
+
+// Snapshot historis tidak tertimpa oleh profile.targets saat ini
+const pastSnap = calcTargets({ ...maleBio, dietGoal: 'bulk', customDeltaKcal: 300, fromLogym: true });
+const todayCut = calcTargets({ ...maleBio, dietGoal: 'cutting', customDeltaKcal: 500, fromLogym: true });
+const pastSum = computeDaySummary({
+  day: {},
+  targets: pastSnap,
+  lyfitDay: { burnedKcal: 2500 },
+  profile: { ...maleBio, targets: todayCut },
+  logymUser: true,
+});
+assert.equal(pastSum.programDelta, 300);
+assert.equal(pastSum.targetKcal, 2800);
+
+// Tanggal masa depan (meal prep) memakai target baseline, bukan bmr * 1.1
+const futureSum = computeDaySummary({
+  day: {},
+  targets: tgLogym,
+  lyfitDay: null,
+  profile: maleBio,
+  logymUser: true,
+  isFuture: true,
+});
+assert.equal(futureSum.targetKcal, tgLogym.kcal);
+assert.equal(futureSum.targets.carbs, tgLogym.carbs);
 
 console.log('nutrition OK (all tests passed)');
 

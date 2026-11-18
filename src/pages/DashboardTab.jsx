@@ -38,7 +38,7 @@ const DashboardTab = ({
     monthsToLoad.forEach(m => ensureMonth(m));
   }, [ensureMonth]);
 
-  const targets = profile?.targets || {};
+  const targets = useMemo(() => profile?.targets || {}, [profile?.targets]);
   const dietProfile = profile?.dietProfile;
 
   // State accordion untuk Tren Kalori
@@ -78,22 +78,6 @@ const DashboardTab = ({
   useBackClose(!!selectedNutrientForBreakdown, () => setSelectedNutrientForBreakdown(null));
   useBackClose(showCalorieModal, () => setShowCalorieModal(false));
 
-  // Chip profil makanan di header
-  const dietMeta = DIET_PROFILES.find(d => d.id === dietProfile) || null;
-  const physicalWeight = profile?.physical?.weight || 0;
-  const proteinPerKg = physicalWeight > 0 ? ((targets.protein || 0) / physicalWeight).toFixed(1) : null;
-  const tdee = targets.tdee || targets.kcal || 0;
-  const kcalDiff = (targets.kcal || 0) - tdee;
-  let programLabel = '⚖️ Maintenance';
-  let programColor = 'border-gray-500/30 bg-gray-500/10 text-gray-500';
-  if (kcalDiff <= -50) {
-    programLabel = `✂️ Cutting ${Math.round(kcalDiff)} kkal`;
-    programColor = 'border-yellow-500/30 bg-yellow-500/10 text-yellow-500';
-  } else if (kcalDiff >= 50) {
-    programLabel = `🥩 Bulking +${Math.round(kcalDiff)} kkal`;
-    programColor = 'border-blue-500/30 bg-blue-500/10 text-blue-500';
-  }
-
   const today = daysMap[todayYmd];
   const summary = useMemo(() => computeDaySummary({
     day: today,
@@ -104,32 +88,58 @@ const DashboardTab = ({
   }), [today, targets, lyfitToday, profile, logymUser]);
 
   const totals = summary.totals;
-  const bmrBase = summary.bmr;
+  const effectiveTargets = summary.targets || targets;
   const bmrDisplay = summary.bmr;
   const tefCalc = summary.tefCalc;
   const stepsCount = summary.steps;
   const neatKcal = summary.neatKcal;
   const workoutCount = summary.workoutCount;
-  const sessionCount = summary.sessionCount;
   const burnedTotal = summary.burnedTotal;
   const eatKcal = summary.eatKcal;
   const displayKcal = summary.eatenKcal;
   const baseTdee = summary.baseTdee;
   const programDelta = summary.programDelta;
-  const dynamicTarget = summary.dynamicTarget;
   const targetKcal = summary.targetKcal;
   const remaining = summary.remainingKcal;
+  const netDelta = summary.netDelta;
+  const isTargetFloored = summary.isTargetFloored;
+  const safeMinKcal = summary.safeMin;
   const ringProgress = targetKcal > 0 ? Math.min(1, displayKcal / targetKcal) : 0;
-  const burnedBonus = summary.burnedBonus;
-  const balance = summary.balance;
   const isBulking = summary.isBulking;
+
+  // Badge program Cut / Maintenance / Bulk agar arah target langsung jelas di dasbor
+  const activeDietGoal = targets?.dietGoal || profile?.dietGoal || 'maintenance';
+  const isCuttingGoal = activeDietGoal === 'cutting' || activeDietGoal === 'cut' || programDelta < 0;
+  const isBulkingGoal = activeDietGoal === 'bulk' || activeDietGoal === 'bulking' || programDelta > 0;
+  const roundedDelta = Math.round(programDelta || 0);
+  let programBadgeLabel = '⚖️ Maintenance';
+  let programBadgeClass = 'border-zinc-500/25 bg-zinc-500/10 text-zinc-600 dark:text-zinc-300';
+  if (isCuttingGoal) {
+    programBadgeLabel = roundedDelta < 0 ? `✂️ Cutting ${roundedDelta.toLocaleString('id-ID')} kkal` : '✂️ Cutting';
+    programBadgeClass = 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400';
+  } else if (isBulkingGoal) {
+    programBadgeLabel = roundedDelta > 0 ? `📈 Bulk +${roundedDelta.toLocaleString('id-ID')} kkal` : '📈 Bulk';
+    programBadgeClass = 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
+  }
+
+  let netToneClass = t.textMuted;
+  if (displayKcal > 0 && burnedTotal > 0) {
+    if (isCuttingGoal) {
+      netToneClass = netDelta < 0 ? 'text-emerald-500 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400';
+    } else if (isBulkingGoal) {
+      netToneClass = netDelta > 0 ? 'text-emerald-500 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-400';
+    } else {
+      netToneClass = Math.abs(netDelta) <= 100 ? 'text-emerald-500 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-400';
+    }
+  }
+
   let ringColor;
   let remainingText;
   
   if (isBulking) {
     if (remaining < 0) {
       ringColor = STATUS.ok.hex;
-      remainingText = 'kkal lebih';
+      remainingText = 'lewat target';
     } else if (remaining === 0) {
       ringColor = STATUS.ok.hex;
       remainingText = 'pas target';
@@ -143,7 +153,7 @@ const DashboardTab = ({
   } else {
     if (remaining < 0) {
       ringColor = STATUS.danger.hex;
-      remainingText = 'kkal lebih';
+      remainingText = 'lewat target';
     } else if (remaining === 0) {
       ringColor = STATUS.ok.hex;
       remainingText = 'pas target';
@@ -155,14 +165,14 @@ const DashboardTab = ({
       remainingText = 'kkal tersisa';
     }
   }
-  const warnings = useMemo(() => getSmartWarnings(totals, targets, dietProfile), [totals, targets, dietProfile]);
+  const warnings = useMemo(() => getSmartWarnings(totals, effectiveTargets, dietProfile), [totals, effectiveTargets, dietProfile]);
 
 
 
   const microChips = NUTRIENTS.filter(n => !n.macro && (!n.conditional || dietProfile === 'low_purine'));
 
   const MacroBar = ({ mkey }) => {
-    const target = targets[mkey] || 1;
+    const target = effectiveTargets[mkey] || 1;
     const value = totals[mkey] || 0;
     const actualPct = (value / target) * 100;
     const barWidth = Math.min(100, Math.max(0, actualPct));
@@ -286,6 +296,39 @@ const DashboardTab = ({
                   )}
                 </div>
               </div>
+
+              {/* Program Aktif (Cut/Maint/Bulk) & Net Metabolisme Riil */}
+              <div className="mt-3 pt-2.5 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTargetSettings(true)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold active:scale-95 transition-transform ${programBadgeClass}`}
+                  title="Ketuk untuk mengubah fase & target kalori"
+                >
+                  <span>{programBadgeLabel}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowCalorieModal(true)}
+                  className="text-right text-[11px] font-bold tabular-nums active:scale-95 transition-transform"
+                  title="Selisih kalori dimakan vs dibakar (ketuk untuk rincian)"
+                >
+                  {displayKcal > 0 && burnedTotal > 0 ? (
+                    <span className={netToneClass}>
+                      {netDelta < 0
+                        ? `Net ${netDelta.toLocaleString('id-ID')} kkal (Defisit)`
+                        : netDelta > 0
+                        ? `Net +${netDelta.toLocaleString('id-ID')} kkal (Surplus)`
+                        : 'Net 0 kkal (Seimbang)'}
+                    </span>
+                  ) : (
+                    <span className={t.textMuted}>
+                      {burnedTotal > 0 ? 'Belum ada asupan' : 'Target harian aktif'}
+                    </span>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="w-full space-y-3">
@@ -339,14 +382,14 @@ const DashboardTab = ({
               <div className={`rounded-b-3xl border border-t-0 ${t.border} bg-white dark:bg-zinc-900 relative -mt-5 pt-10 pb-6 px-5`}>
                 <div className="flex flex-col gap-3.5">
                   {(() => {
-                    const activeMicros = microChips.filter(n => targets[n.key] && (totals[n.key] || 0) > 0);
+                    const activeMicros = microChips.filter(n => effectiveTargets[n.key] && (totals[n.key] || 0) > 0);
                     
                     if (activeMicros.length === 0) {
                       return <p className={`caption ${t.textMuted} text-center py-2`}>Belum ada data nutrisi mikro yang tercatat hari ini.</p>;
                     }
 
                     return activeMicros.map(n => {
-                      const target = targets[n.key];
+                      const target = effectiveTargets[n.key];
                       const ratio = (totals[n.key] || 0) / target;
                       const s = statusFor(ratio, { invert: MINIMUM_TARGETS.has(n.key) });
                       const actualPct = ratio * 100;
@@ -409,7 +452,7 @@ const DashboardTab = ({
       />
 
       {showTargetSettings && (
-        <TargetSettingsModal t={t} theme={theme} profile={profile} saveProfilePatch={saveProfilePatch} onClose={() => setShowTargetSettings(false)} />
+        <TargetSettingsModal t={t} theme={theme} profile={profile} logymUser={logymUser} burnedTotal={burnedTotal} saveProfilePatch={saveProfilePatch} onClose={() => setShowTargetSettings(false)} />
       )}
 
       {showBiometricModal && (
@@ -611,6 +654,57 @@ const DashboardTab = ({
                       <span className={`caption font-normal ${t.textMuted}`}>kkal</span>
                     </span>
                   </div>
+                </div>
+              </div>
+
+              {/* Kalkulasi Target Makan Hari Ini */}
+              <div className={`p-4 rounded-2xl border ${t.border} ${t.bgSunken} space-y-2`}>
+                <div className="flex items-center justify-between">
+                  <span className={`caption font-bold uppercase tracking-wider ${t.textMuted}`}>
+                    Kalkulasi Target Makan
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setShowCalorieModal(false); setShowTargetSettings(true); }}
+                    className={`caption font-bold ${t.textAccent} hover:underline`}
+                  >
+                    Ubah Program
+                  </button>
+                </div>
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex justify-between">
+                    <span className={t.textMuted}>{logymUser ? 'Kalori Dibakar Hari Ini' : 'TDEE Dasar (Istirahat)'}</span>
+                    <span className={`font-bold tabular-nums ${t.textMain}`}>
+                      {Math.round(Number(logymUser ? burnedTotal : baseTdee) || 0).toLocaleString('id-ID')} kkal
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className={t.textMuted}>Program ({programBadgeLabel})</span>
+                    <span className={`font-bold tabular-nums ${programDelta < 0 ? 'text-amber-500' : programDelta > 0 ? 'text-emerald-500' : t.textMain}`}>
+                      {roundedDelta > 0 ? `+${roundedDelta.toLocaleString('id-ID')}` : roundedDelta.toLocaleString('id-ID')} kkal
+                    </span>
+                  </div>
+                  {isTargetFloored && (
+                    <p className="text-[11px] text-amber-500 font-semibold">
+                      * Dinaikkan ke batas aman minimum ({safeMinKcal.toLocaleString('id-ID')} kkal).
+                    </p>
+                  )}
+                  <div className="pt-1.5 border-t border-black/10 dark:border-white/10 flex justify-between items-baseline">
+                    <span className={`font-bold ${t.textMain}`}>Target Makan Hari Ini</span>
+                    <span className={`text-base font-black tabular-nums ${t.textAccent}`}>
+                      {Math.round(targetKcal).toLocaleString('id-ID')} kkal
+                    </span>
+                  </div>
+                  {displayKcal > 0 && burnedTotal > 0 && (
+                    <div className="pt-1 flex justify-between text-[11px]">
+                      <span className={t.textMuted}>
+                        Net Riil ({Math.round(displayKcal).toLocaleString('id-ID')} − {Math.round(burnedTotal).toLocaleString('id-ID')})
+                      </span>
+                      <span className={`font-bold tabular-nums ${netToneClass}`}>
+                        {netDelta > 0 ? `+${netDelta.toLocaleString('id-ID')}` : netDelta.toLocaleString('id-ID')} kkal ({netDelta < 0 ? 'Defisit' : netDelta > 0 ? 'Surplus' : 'Seimbang'})
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

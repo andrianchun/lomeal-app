@@ -574,6 +574,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   }), [day, targets, selectedLyfitDay, profile, logymUser, isFuture]);
 
   const totals = summary.totals;
+  const effectiveTargets = summary.targets || targets;
   const dietGoal = targets.dietGoal || profile?.dietGoal || 'maintenance';
   const baseTdee = summary.baseTdee;
   const kcalDiff = summary.programDelta;
@@ -1683,16 +1684,16 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   };
 
   const MacroBar = ({ mkey, showSources = false }) => {
-    const rawTarget = mkey === 'kcal' ? (targetKcal || targets.kcal || 1) : (targets[mkey] || 1);
+    const rawTarget = mkey === 'kcal' ? (targetKcal || effectiveTargets.kcal || 1) : (effectiveTargets[mkey] || 1);
     const target = Math.round(rawTarget);
     const value = Math.round(totals[mkey] || 0);
     const actualPct = (value / target) * 100;
     const barWidth = Math.min(100, Math.max(0, actualPct));
     const mc = mkey === 'kcal' ? { label: 'Kalori', hex: value > (target || Infinity) ? '#cd4a4a' : '#3daa5c' } : MACRO_COLORS[mkey];
     const sources = showSources && expandedNutrient === mkey ? nutrientSources(day, mkey) : null;
-    const isCut = dietGoal === 'cutting' || dietGoal === 'cut';
-    const isBulk = dietGoal === 'bulk' || dietGoal === 'bulking';
-    const kcalDiff = Math.round((targets.kcal || 0) - baseTdee);
+    const isCut = dietGoal === 'cutting' || dietGoal === 'cut' || kcalDiff < 0;
+    const isBulk = dietGoal === 'bulk' || dietGoal === 'bulking' || kcalDiff > 0;
+    const roundedDiff = Math.round(kcalDiff || 0);
 
     return (
         <div>
@@ -1703,7 +1704,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                 <span className={`caption ${t.textMuted}`}>Kalori</span>
                 {dietGoal && (
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isCut ? 'bg-amber-500/20 text-amber-500' : isBulk ? 'bg-emerald-500/20 text-emerald-500' : 'bg-blue-500/20 text-blue-500'}`}>
-                    {isCut ? `Cut (${kcalDiff > 0 ? '+' : ''}${kcalDiff} kcal)` : isBulk ? `Bulk (${kcalDiff > 0 ? '+' : ''}${kcalDiff} kcal)` : 'Maintenance'}
+                    {isCut ? `Cut (${roundedDiff > 0 ? '+' : ''}${roundedDiff} kcal)` : isBulk ? `Bulk (${roundedDiff > 0 ? '+' : ''}${roundedDiff} kcal)` : 'Maintenance'}
                   </span>
                 )}
               </div>
@@ -3149,16 +3150,16 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
             <div className="space-y-4 mb-4">
                <h3 className={`caption ${t.textMuted} uppercase tracking-wider`}>Mikro & Lainnya</h3>
                {(() => {
-                 const dietProfile = profile?.settings?.dietProfile || 'standard';
+                 const dietProfile = profile?.dietProfile || profile?.settings?.dietProfile || 'standard';
                  const microChips = NUTRIENTS.filter(n => !n.macro && (!n.conditional || dietProfile === 'low_purine'));
-                 const activeMicros = microChips.filter(n => targets[n.key] && (totals[n.key] || 0) > 0);
+                 const activeMicros = microChips.filter(n => effectiveTargets[n.key] && (totals[n.key] || 0) > 0);
                  
                  if (activeMicros.length === 0) {
                    return <p className={`caption ${t.textMuted} py-2`}>Belum ada data nutrisi mikro yang tercatat hari ini.</p>;
                  }
 
                  return activeMicros.map(n => {
-                   const target = targets[n.key];
+                   const target = effectiveTargets[n.key];
                    const ratio = (totals[n.key] || 0) / target;
                    const s = statusFor(ratio, { invert: MINIMUM_TARGETS.has(n.key) });
                    const actualPct = ratio * 100;

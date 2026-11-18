@@ -22,7 +22,7 @@ import {
   pushNutritionBatchToLogym, extractDayCaffeineLogs,
 } from './utils/biometricSync';
 import { hcAvailable, hcRequestPermissions, hcReadBurnedCalories, hcReadTodayActivity, hcWriteNutrition, hcWriteHydration, hcBackfillBurnedCalories, hcCheckStatus } from './utils/healthConnect';
-import { computeDayTotals, calcTargets, calcBMR, calcTEF, calcDynamicTarget } from './data/nutrition';
+import { computeDayTotals, calcTargets, calcBMR, calcTEF, calcDynamicTarget, calcDynamicTargets } from './data/nutrition';
 import { generateDietRecipe, buildAiRecipe, buildRecipeProfileInput } from './utils/aiFood';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
@@ -344,6 +344,8 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
     const targets = calcTargets({
       ...physical,
       age: computeAge(physical.dob),
+      fromLogym: !!(physical.fromLogym || logymUser),
+      logymUser: !!logymUser,
       activityLevel: merged.activityLevel,
       dietGoal: merged.dietGoal,
       dietProfile: merged.dietProfile,
@@ -354,7 +356,7 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
       waterGoal: merged.targets.waterGoal,
     });
     return saveLomealProfile(user.uid, { ...patch, targets });
-  }, [user, profile]);
+  }, [user, profile, logymUser]);
   const updateSetting = useCallback((key, value) => saveProfilePatch({ settings: { [key]: value } }), [saveProfilePatch]);
 
   // Dipasang sekali; makeEntry memanggilnya dari SEMUA jalur pencatatan (picker, parser teks,
@@ -997,16 +999,25 @@ const AppContent = ({ user, profile, logymUser, onLogout }) => {
   const lastSyncedTargetsRef = useRef(null);
   useEffect(() => {
     if (!logymUser || !profile?.targets) return;
-    const dynamicToday = calcDynamicTarget(
+    const dynamicTargets = calcDynamicTargets(
       profile.targets,
       dashboardLyfitToday?.burnedKcal,
-      profile?.physical?.gender || profile?.gender
+      profile
     );
-    const key = `${JSON.stringify(profile.targets)}_${dynamicToday}`;
+    const key = `${JSON.stringify(profile.targets)}_${dynamicTargets.kcal}_${dynamicTargets.carbs}_${dynamicTargets.fat}`;
     if (key === lastSyncedTargetsRef.current) return;
     lastSyncedTargetsRef.current = key;
-    pushTargetsToLogym(logymUser.uid, profile.targets, dynamicToday);
-  }, [logymUser, profile?.targets, profile?.physical?.gender, profile?.gender, dashboardLyfitToday?.burnedKcal]);
+    pushTargetsToLogym(
+      logymUser.uid,
+      {
+        ...profile.targets,
+        protein: dynamicTargets.protein,
+        carbs: dynamicTargets.carbs,
+        fat: dynamicTargets.fat,
+      },
+      dynamicTargets.kcal
+    );
+  }, [logymUser, profile, dashboardLyfitToday?.burnedKcal]);
 
   // --- Pengingat Catat Makan (LocalNotifications, cuma aktif di APK Android/iOS) ---
   useEffect(() => {

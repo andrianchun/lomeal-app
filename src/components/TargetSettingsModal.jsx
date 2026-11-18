@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { X, ChevronDown, ChevronUp, Calculator } from 'lucide-react';
-import { DIET_PROFILES, DIET_GOALS, PACES, calcTargets } from '../data/nutrition';
+import { DIET_PROFILES, DIET_GOALS, PACES, calcTargets, calcDynamicTargets } from '../data/nutrition';
 import { computeAge } from '../data/constants';
 import SwipeInput from './SwipeInput';
 import useBackClose from '../hooks/useBackClose';
@@ -12,7 +12,7 @@ import useBackClose from '../hooks/useBackClose';
  * modal Logym (fixed inset-0 items-center + kartu backdrop-blur tinggi).
  * pace dulu cuma bisa diisi sekali pas onboarding, gak ada UI ubah lagi — ini nutupnya.
  */
-const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) => {
+const TargetSettingsModal = ({ t, theme, profile, logymUser, burnedTotal = 0, saveProfilePatch, onClose }) => {
   useBackClose(true, onClose); // cuma di-mount selagi kebuka — mount = buka, unmount = tutup
   const [dietGoal, setDietGoal] = useState(profile?.dietGoal || 'maintenance');
   const [pace, setPace] = useState(profile?.pace || 'normal');
@@ -38,8 +38,27 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
     const physical = profile?.physical;
     if (!physical?.weight || !physical?.height || !physical?.dob || !physical?.gender) return null;
     const age = computeAge(physical.dob);
-    return calcTargets({ ...physical, age, activityLevel: profile?.activityLevel || physical?.activityLevel || 'light', dietGoal, dietProfile, pace, waterGoal, customDeltaKcal: customDeltaNum, customProteinPerKg: customProteinNum, medicalHistory });
-  }, [profile?.physical, profile?.activityLevel, dietGoal, dietProfile, pace, waterGoal, customDeltaNum, customProteinNum, medicalHistory]);
+    return calcTargets({
+      ...physical,
+      age,
+      fromLogym: !!(physical?.fromLogym || logymUser),
+      logymUser: !!logymUser,
+      activityLevel: profile?.activityLevel || physical?.activityLevel || 'light',
+      dietGoal,
+      dietProfile,
+      pace,
+      waterGoal,
+      customDeltaKcal: customDeltaNum,
+      customProteinPerKg: customProteinNum,
+      medicalHistory,
+    });
+  }, [profile?.physical, profile?.activityLevel, logymUser, dietGoal, dietProfile, pace, waterGoal, customDeltaNum, customProteinNum, medicalHistory]);
+
+  const dynamicPreview = useMemo(() => {
+    if (!preview) return null;
+    if (!logymUser || !(Number(burnedTotal) > 0)) return preview;
+    return calcDynamicTargets(preview, burnedTotal, { ...profile, dietProfile, medicalHistory });
+  }, [preview, logymUser, burnedTotal, profile, dietProfile, medicalHistory]);
 
   React.useEffect(() => {
     if (!waterCalcOpen) return;
@@ -103,18 +122,27 @@ const TargetSettingsModal = ({ t, theme, profile, saveProfilePatch, onClose }) =
         </div>
 
         <div className="overflow-y-auto px-5 py-4 space-y-5">
-          {preview && (
+          {preview && dynamicPreview && (
             <div className={`rounded-2xl border ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} ${t.bgBox} backdrop-blur-xl p-3`}>
-              <p className={`caption font-bold ${t.textMuted} mb-2 uppercase tracking-wider`}>Target Harian</p>
+              <p className={`caption font-bold ${t.textMuted} mb-2 uppercase tracking-wider`}>
+                {logymUser && Number(burnedTotal) > 0
+                  ? `Target Hari Ini (Dibakar ${Math.round(Number(burnedTotal)).toLocaleString('id-ID')} kkal)`
+                  : 'Target Harian'}
+              </p>
               <div className="grid grid-cols-4 gap-2 text-center">
-                {[['Kkal', preview.kcal], ['Protein', `${preview.protein}g`], ['Karbo', `${preview.carbs}g`], ['Lemak', `${preview.fat}g`]].map(([label, val]) => (
+                {[['Kkal', dynamicPreview.kcal], ['Protein', `${dynamicPreview.protein}g`], ['Karbo', `${dynamicPreview.carbs}g`], ['Lemak', `${dynamicPreview.fat}g`]].map(([label, val]) => (
                   <div key={label}>
                     <p className={`font-black text-sm ${t.textMain}`}>{val}</p>
                     <p className={`text-[9px] font-bold ${t.textMuted} uppercase`}>{label}</p>
                   </div>
                 ))}
               </div>
-              <p className={`caption ${t.textMuted} mt-2`}>Natrium: <span className={t.textMain}>{preview.sodium}mg</span>{dietProfile === 'dash' && ' (diperketat mode DASH)'}</p>
+              {logymUser && Number(burnedTotal) > 0 && (
+                <p className={`caption ${t.textMuted} mt-2`}>
+                  Baseline istirahat: <span className={t.textMain}>{preview.kcal} kkal</span> (TDEE {preview.tdee}{preview.kcal !== preview.tdee ? ` ${preview.kcal - preview.tdee > 0 ? '+' : ''}${preview.kcal - preview.tdee}` : ''})
+                </p>
+              )}
+              <p className={`caption ${t.textMuted} ${logymUser && Number(burnedTotal) > 0 ? 'mt-1' : 'mt-2'}`}>Natrium: <span className={t.textMain}>{dynamicPreview.sodium}mg</span>{dietProfile === 'dash' && ' (diperketat mode DASH)'}</p>
               {preview.kcalFloored && (
                 <p className="caption text-amber-500 font-bold mt-2">
                   ⚠️ Target dipotong ke {preview.kcal}kkal (batas aman minimum) — deltamu bakal bikin asupan di bawah ambang aman kalau dituruti apa adanya.

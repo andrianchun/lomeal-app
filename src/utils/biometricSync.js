@@ -120,6 +120,7 @@ export const pushTargetsToLogym = async (logymUid, targets, todayTarget = null) 
       tdee: Math.round(targets.tdee || 0),
       bmr: Math.round(targets.bmr || 0),
       dietGoal: targets.dietGoal || 'maintenance',
+      customDeltaKcal: targets.customDeltaKcal ?? null,
       protein: Math.round(targets.protein || 0),
       carbs: Math.round(targets.carbs || 0),
       fat: Math.round(targets.fat || 0),

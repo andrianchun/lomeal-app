@@ -582,9 +582,10 @@ const HistoryTab = ({
 
     return {
       ...baseTargets,
+      ...(summary.targets || {}),
       kcal: summary.targetKcal,
     };
-  }, [todayStr, profile?.targets, profile?.physical, lyfitYearData, lyfitToday, logymUser]);
+  }, [todayStr, profile, lyfitYearData, lyfitToday, logymUser]);
 
   // Helper Dots Status Kepatuhan Kalori (Tercatat vs Direncanakan)
   const getDayDot = (ymd) => {

@@ -40,7 +40,7 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, lyfitToday, tar
       bioEntries.forEach(entry => {
           const d = new Date(entry.dateStr);
           const lyfitDay = entry.dateStr === todayStr ? (lyfitToday || extractLyfitDay(lyfitYearData, entry.dateStr)) : extractLyfitDay(lyfitYearData, entry.dateStr);
-          const dayTargets = entry.dateStr >= todayStr ? targets : { ...targets, ...(entry.dayData?.targetSnapshot || {}) };
+          const dayTargets = entry.dateStr >= todayStr ? targets : (entry.dayData?.targetSnapshot?.kcal ? entry.dayData.targetSnapshot : targets);
 
           const summary = computeDaySummary({
             day: entry.dayData,
@@ -65,9 +65,9 @@ const NutritionChart = ({ t, theme, daysMap = {}, lyfitYearData, lyfitToday, tar
               fat: summary.totals.fat > 0 ? Math.round(summary.totals.fat) : null,
               carbs: summary.totals.carbs > 0 ? Math.round(summary.totals.carbs) : null,
               targetCalories: summary.targetKcal ? Math.round(summary.targetKcal) : null,
-              targetProtein: dayTargets?.protein ? Math.round(dayTargets.protein) : null,
-              targetFat: dayTargets?.fat ? Math.round(dayTargets.fat) : null,
-              targetCarbs: dayTargets?.carbs ? Math.round(dayTargets.carbs) : null,
+              targetProtein: summary.targets?.protein ? Math.round(summary.targets.protein) : null,
+              targetFat: summary.targets?.fat ? Math.round(summary.targets.fat) : null,
+              targetCarbs: summary.targets?.carbs ? Math.round(summary.targets.carbs) : null,
               targetDelta: summary.programDelta != null ? Math.round(summary.programDelta) : null,
           });
       });
