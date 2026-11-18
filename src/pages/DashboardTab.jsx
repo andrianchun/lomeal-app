@@ -260,7 +260,7 @@ const DashboardTab = ({
 
             {/* Kalori Dimakan & Dibakar Highlight */}
             <div className={`py-3.5 px-5 -mx-5 w-[calc(100%+2.5rem)] ${t.bgBox} backdrop-blur-md border-y border-x-0 ${t.border}`}>
-              {/* Program Aktif (Cut/Maint/Bulk) & Net Metabolisme Riil */}
+              {/* Program Aktif (Cut/Maint/Bulk) & Delta Kalori */}
               <div className="mb-3 pb-2.5 border-b border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-2">
                 <button
                   type="button"
@@ -280,8 +280,8 @@ const DashboardTab = ({
                   {displayKcal > 0 && burnedTotal > 0 ? (
                     <span className={netToneClass}>
                       {netDelta > 0
-                        ? `Net +${netDelta.toLocaleString('id-ID')} kkal`
-                        : `Net ${netDelta.toLocaleString('id-ID')} kkal`}
+                        ? `Delta +${netDelta.toLocaleString('id-ID')} kkal`
+                        : `Delta ${netDelta.toLocaleString('id-ID')} kkal`}
                     </span>
                   ) : (
                     <span className={t.textMuted}>
@@ -696,7 +696,7 @@ const DashboardTab = ({
                   {displayKcal > 0 && burnedTotal > 0 && (
                     <div className="pt-1 flex justify-between text-[11px]">
                       <span className={t.textMuted}>
-                        Net Riil ({Math.round(displayKcal).toLocaleString('id-ID')} − {Math.round(burnedTotal).toLocaleString('id-ID')})
+                        Delta ({Math.round(displayKcal).toLocaleString('id-ID')} − {Math.round(burnedTotal).toLocaleString('id-ID')})
                       </span>
                       <span className={`font-bold tabular-nums ${netToneClass}`}>
                         {netDelta > 0 ? `+${netDelta.toLocaleString('id-ID')}` : netDelta.toLocaleString('id-ID')} kkal
