@@ -112,13 +112,13 @@ const DashboardTab = ({
   const isCuttingGoal = activeDietGoal === 'cutting' || activeDietGoal === 'cut' || programDelta < 0;
   const isBulkingGoal = activeDietGoal === 'bulk' || activeDietGoal === 'bulking' || programDelta > 0;
   const roundedDelta = Math.round(programDelta || 0);
-  let programBadgeLabel = '⚖️ Maintenance';
+  let programBadgeLabel = 'Maintenance';
   let programBadgeClass = 'border-zinc-500/25 bg-zinc-500/10 text-zinc-600 dark:text-zinc-300';
   if (isCuttingGoal) {
-    programBadgeLabel = roundedDelta < 0 ? `✂️ Cutting ${roundedDelta.toLocaleString('id-ID')} kkal` : '✂️ Cutting';
+    programBadgeLabel = roundedDelta < 0 ? `Cutting ${roundedDelta.toLocaleString('id-ID')} kkal` : 'Cutting';
     programBadgeClass = 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400';
   } else if (isBulkingGoal) {
-    programBadgeLabel = roundedDelta > 0 ? `📈 Bulk +${roundedDelta.toLocaleString('id-ID')} kkal` : '📈 Bulk';
+    programBadgeLabel = roundedDelta > 0 ? `Bulking +${roundedDelta.toLocaleString('id-ID')} kkal` : 'Bulking';
     programBadgeClass = 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
   }
 
@@ -260,6 +260,37 @@ const DashboardTab = ({
 
             {/* Kalori Dimakan & Dibakar Highlight */}
             <div className={`py-3.5 px-5 -mx-5 w-[calc(100%+2.5rem)] ${t.bgBox} backdrop-blur-md border-y border-x-0 ${t.border}`}>
+              {/* Program Aktif (Cut/Maint/Bulk) & Net Metabolisme Riil */}
+              <div className="mb-3 pb-2.5 border-b border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTargetSettings(true)}
+                  className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold active:scale-95 transition-transform ${programBadgeClass}`}
+                  title="Ketuk untuk mengubah fase & target kalori"
+                >
+                  <span>{programBadgeLabel}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowCalorieModal(true)}
+                  className="text-right text-[11px] font-bold tabular-nums active:scale-95 transition-transform"
+                  title="Selisih kalori dimakan vs dibakar (ketuk untuk rincian)"
+                >
+                  {displayKcal > 0 && burnedTotal > 0 ? (
+                    <span className={netToneClass}>
+                      {netDelta > 0
+                        ? `Net +${netDelta.toLocaleString('id-ID')} kkal`
+                        : `Net ${netDelta.toLocaleString('id-ID')} kkal`}
+                    </span>
+                  ) : (
+                    <span className={t.textMuted}>
+                      {burnedTotal > 0 ? 'Belum ada asupan' : 'Target harian aktif'}
+                    </span>
+                  )}
+                </button>
+              </div>
+
               <div className="flex justify-between w-full">
                 {/* Kiri: Kalori Dimakan */}
                 <div className="flex flex-col items-start w-[48%]">
@@ -295,39 +326,6 @@ const DashboardTab = ({
                     <p className={`caption ${t.textMuted} mt-0.5`}>Logym: {workoutCount > 0 ? `${workoutCount} latihan` : '0 latihan'}</p>
                   )}
                 </div>
-              </div>
-
-              {/* Program Aktif (Cut/Maint/Bulk) & Net Metabolisme Riil */}
-              <div className="mt-3 pt-2.5 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowTargetSettings(true)}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold active:scale-95 transition-transform ${programBadgeClass}`}
-                  title="Ketuk untuk mengubah fase & target kalori"
-                >
-                  <span>{programBadgeLabel}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowCalorieModal(true)}
-                  className="text-right text-[11px] font-bold tabular-nums active:scale-95 transition-transform"
-                  title="Selisih kalori dimakan vs dibakar (ketuk untuk rincian)"
-                >
-                  {displayKcal > 0 && burnedTotal > 0 ? (
-                    <span className={netToneClass}>
-                      {netDelta < 0
-                        ? `Net ${netDelta.toLocaleString('id-ID')} kkal (Defisit)`
-                        : netDelta > 0
-                        ? `Net +${netDelta.toLocaleString('id-ID')} kkal (Surplus)`
-                        : 'Net 0 kkal (Seimbang)'}
-                    </span>
-                  ) : (
-                    <span className={t.textMuted}>
-                      {burnedTotal > 0 ? 'Belum ada asupan' : 'Target harian aktif'}
-                    </span>
-                  )}
-                </button>
               </div>
             </div>
 
@@ -701,7 +699,7 @@ const DashboardTab = ({
                         Net Riil ({Math.round(displayKcal).toLocaleString('id-ID')} − {Math.round(burnedTotal).toLocaleString('id-ID')})
                       </span>
                       <span className={`font-bold tabular-nums ${netToneClass}`}>
-                        {netDelta > 0 ? `+${netDelta.toLocaleString('id-ID')}` : netDelta.toLocaleString('id-ID')} kkal ({netDelta < 0 ? 'Defisit' : netDelta > 0 ? 'Surplus' : 'Seimbang'})
+                        {netDelta > 0 ? `+${netDelta.toLocaleString('id-ID')}` : netDelta.toLocaleString('id-ID')} kkal
                       </span>
                     </div>
                   )}
