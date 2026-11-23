@@ -511,7 +511,7 @@ export const SharedDietStepRenderer = ({
             value={answers.kulkasSearch || ''}
             onChange={e => setAnswers(prev => ({ ...prev, kulkasSearch: e.target.value }))}
             onKeyDown={e => {
-              if (e.key === 'Enter' && answers.kulkasSearch?.trim()) {
+              if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && answers.kulkasSearch?.trim()) {
                 const text = answers.kulkasSearch.trim();
                 setAnswers(prev => {
                   const arr = prev.kulkas || [];

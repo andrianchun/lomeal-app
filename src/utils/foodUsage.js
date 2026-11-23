@@ -47,7 +47,7 @@ export const recordFoodUsage = (foodId, { uid, saveProfilePatch } = {}) => {
 export const sortFoodsByUsage = (foods, favoriteIds = []) => {
   const usage = readMap();
   const favSet = new Set(favoriteIds);
-  return [...foods].sort((a, b) => {
+  return foods.toSorted((a, b) => {
     const favDiff = (favSet.has(b.id) ? 1 : 0) - (favSet.has(a.id) ? 1 : 0);
     if (favDiff) return favDiff;
     const au = usage[a.id] || { count: 0, lastUsed: 0 };
@@ -59,8 +59,8 @@ export const sortFoodsByUsage = (foods, favoriteIds = []) => {
 
 /** Urutan berdasarkan hitungan global. `popularity` = { [foodId]: count }. */
 export const sortFoodsByPopularity = (foods, popularity = {}) =>
-  [...foods].sort((a, b) => (popularity[b.id] || 0) - (popularity[a.id] || 0));
+  foods.toSorted((a, b) => (popularity[b.id] || 0) - (popularity[a.id] || 0));
 
 /** Paling baru ditambahkan user. Item bawaan TKPI tidak punya `createdAt` — turun ke bawah. */
 export const sortFoodsByNewest = (foods) =>
-  [...foods].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  foods.toSorted((a, b) => (b.createdAt || 0) - (a.createdAt || 0));

@@ -279,7 +279,7 @@ const SocialFeed = ({ t, theme, logymUser, showAlert, showConfirm, onPostCreated
                       <input
                         value={commentInput[post.id] || ''}
                         onChange={(e) => setCommentInput((prev) => ({ ...prev, [post.id]: e.target.value }))}
-                        onKeyDown={(e) => { if (e.key === 'Enter') submitComment(post); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) submitComment(post); }}
                         placeholder="Tulis komentar..."
                         className={`flex-1 text-xs px-3 py-2 rounded-full outline-none ${t.inputBg} ${t.textMain}`}
                       />

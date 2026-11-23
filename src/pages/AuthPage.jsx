@@ -303,7 +303,7 @@ const AuthPage = ({ t, theme, soundEnabled, onLogin }) => {
 
                <div className={`flex items-center ${t.inputBg} rounded-2xl px-4 py-3 border border-transparent focus-within:${t.borderAccentSoft} transition-colors`}>
                   <Lock size={20} className={t.textMuted} />
-                  <input type="password" placeholder="Password" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} required className={`ml-3 bg-transparent w-full outline-none ${t.textMain} font-medium`} disabled={isLoading}/>
+                  <input type="password" placeholder="Password" autoComplete={isLoginMode ? "current-password" : "new-password"} value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} required className={`ml-3 bg-transparent w-full outline-none ${t.textMain} font-medium`} disabled={isLoading}/>
                </div>
 
                {isLoginMode && (

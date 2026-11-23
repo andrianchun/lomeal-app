@@ -61,7 +61,7 @@ const LabResultsCard = ({ t, theme, user, aiKey, profile, saveProfilePatch, show
     return m.unit || '—';
   };
 
-  const sorted = useMemo(() => [...entries].sort((a, b) => (a.testDate || '').localeCompare(b.testDate || '')), [entries]);
+  const sorted = useMemo(() => entries.toSorted((a, b) => (a.testDate || '').localeCompare(b.testDate || '')), [entries]);
   const latest = sorted[sorted.length - 1];
 
   // Penanda yang pernah punya nilai — termasuk penanda kustom
@@ -248,7 +248,7 @@ const LabResultsCard = ({ t, theme, user, aiKey, profile, saveProfilePatch, show
 
           {sorted.length > 0 && (
             <div className={`pt-3 border-t ${t.border} space-y-1`}>
-              {[...sorted].reverse().map((e) => (
+              {sorted.toReversed().map((e) => (
                 <div key={e.id} className="flex items-center justify-between">
                   <button onClick={() => setEditing({ ...e, results: { ...e.results } })} className={`caption ${t.textMuted} text-left`}>
                     {e.testDate} · {Object.keys(e.results).length} nilai {e.labName ? `· ${e.labName}` : ''}

@@ -123,7 +123,7 @@ const ScrollPicker = ({ value, onChange, min = 0, max = 200, step = 1, width = '
           value={draftValue}
           onChange={(e) => setDraftValue(e.target.value)}
           onBlur={commitEdit}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); } }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.target.blur(); } }}
           className={`w-full text-center font-black text-2xl bg-transparent outline-none ${textAccentClass}`}
         />
       </div>

@@ -260,7 +260,7 @@ export default function LomyChat({ t, user, aiKey, profile, daysMap, ensureMonth
             <div className={`shrink-0 p-3 border-t ${t.border} flex items-end gap-2`}>
               <textarea
                 rows={1} value={input} onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); } }}
                 placeholder="Tanya Lomy…"
                 className={`flex-1 resize-none max-h-28 px-4 py-3 rounded-2xl border ${t.border} ${t.inputBg} ${t.textMain} body-md outline-none`}
               />

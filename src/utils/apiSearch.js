@@ -9,13 +9,9 @@ export const searchOpenFoodFacts = async (query) => {
     const q = encodeURIComponent(query.trim());
     if (q.length < 3) return null; // terlalu pendek
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-
     const res = await fetch(`https://world.openfoodfacts.net/api/v2/search?search_terms=${q}&fields=code,product_name,product_name_id,nutriments&page_size=5`, {
-      signal: controller.signal
+      signal: AbortSignal.timeout(3500)
     });
-    clearTimeout(timeoutId);
     if (!res.ok) return null;
     const data = await res.json();
     

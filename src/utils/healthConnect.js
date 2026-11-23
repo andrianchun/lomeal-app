@@ -94,7 +94,7 @@ export const groupByDay = (samples) => {
 // record per-sesi latihan di dalam hari yang sama, yang jika dijumlah polos membuat
 // kalori harian melonjak ganda (misal 2.200 kkal + 1.200 kkal = 3.400+ kkal).
 export const sumNonOverlapping = (list) => {
-  const urut = [...(list || [])].sort(
+  const urut = (list || []).toSorted(
     (a, b) => a.mulai - b.mulai || (b.selesai - b.mulai) - (a.selesai - a.mulai)
   );
   let batas = -Infinity;

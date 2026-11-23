@@ -65,7 +65,7 @@ const SwipeInput = ({ value, onChange, step = 1, min = 0, max, className, placeh
       value={localValue ?? ''}
       onChange={(e) => setLocalValue(e.target.value)}
       onBlur={() => { const n = clamp(Number(localValue) || 0); setLocalValue(n); onChange(n); }}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+      onKeyDown={(e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) e.target.blur(); }}
       onFocus={(e) => e.target.select()}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}

@@ -630,7 +630,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
   const startEditing = () => {
     const currentDay = daysMap[selectedYmd] || day || {};
     const currentMeals = currentDay.meals?.[detailSession] || [];
-    setDraftMeals(JSON.parse(JSON.stringify(currentMeals)));
+    setDraftMeals(structuredClone(currentMeals));
     setDraftSlideTimes({});
     setDraftTitle(sessionTitleInput);
     setIsEditingItems(true);
@@ -1645,7 +1645,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
     // 2. Slide manual (tanpa foto) — kelompokkan jika jamnya terpisah (> 45 menit)
     const manualSlides = [];
     if (unlinkedItems.length > 0) {
-      const sorted = [...unlinkedItems].sort((a, b) => toMins(a.time || sessionDefaultTime) - toMins(b.time || sessionDefaultTime));
+      const sorted = unlinkedItems.toSorted((a, b) => toMins(a.time || sessionDefaultTime) - toMins(b.time || sessionDefaultTime));
       const groups = [];
       let curGroup = [];
       let curGroupTime = null;
@@ -2051,7 +2051,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               onChange={(e) => {
                 setChatText(e.target.value);
                 setDismissSuggestions(false);
-                if (chatInputRef.current) {
+                if (chatInputRef.current && !CSS.supports('field-sizing', 'content')) {
                   chatInputRef.current.style.height = 'auto';
                   const baseH = (isInputFocused || e.target.value) ? 46 : 38;
                   chatInputRef.current.style.height = Math.max(baseH, Math.min(chatInputRef.current.scrollHeight, 120)) + 'px';
@@ -2060,7 +2060,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
               onFocus={() => {
                 setIsInputFocused(true);
                 document.body.classList.add('keyboard-open');
-                if (chatInputRef.current) {
+                if (chatInputRef.current && !CSS.supports('field-sizing', 'content')) {
                   chatInputRef.current.style.height = 'auto';
                   chatInputRef.current.style.height = Math.max(46, Math.min(chatInputRef.current.scrollHeight, 120)) + 'px';
                 }
@@ -2086,7 +2086,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                   setDismissSuggestions(true);
                   return;
                 }
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
                   e.preventDefault();
                   if (chatText.trim() && !aiBusy) {
                     handleChatSubmit();
@@ -2508,7 +2508,7 @@ const LogTab = ({ t, theme, user, logymUser, lyfitToday, lyfitYearData, profile,
                       value={sessionTitleInput}
                       onChange={(e) => setSessionTitleInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
+                        if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
                           e.preventDefault();
                           e.currentTarget.blur();
                         }

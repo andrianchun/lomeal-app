@@ -212,7 +212,7 @@ const FoodPickerModal = ({ t, theme, open, onClose, onAdd, onSearchAi, customFoo
                 value={term}
                 onChange={(e) => setTerm(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && term.trim()) {
+                  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && term.trim()) {
                     e.preventDefault();
                     onSearchAi?.(term);
                   }

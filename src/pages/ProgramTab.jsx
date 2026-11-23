@@ -787,7 +787,7 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                       value={ingredientSearch}
                       onChange={(e) => setIngredientSearch(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && ingredientSearch.trim()) {
+                        if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && ingredientSearch.trim()) {
                           e.preventDefault();
                           handleAddIngredient(ingredientSearch);
                         }
@@ -1119,12 +1119,9 @@ const ProgramTab = ({ t, theme, user, logymUser, domusItems, domusLocations, rec
                   }
 
                   // Group by location
-                  const grouped = domusMatang.reduce((acc, item) => {
-                    const locName = domusLocations?.find(l => l.id === item.locationId)?.name || 'Tanpa Lokasi';
-                    if (!acc[locName]) acc[locName] = [];
-                    acc[locName].push(item);
-                    return acc;
-                  }, {});
+                  const grouped = Object.groupBy(domusMatang, item => {
+                    return domusLocations?.find(l => l.id === item.locationId)?.name || 'Tanpa Lokasi';
+                  });
 
                   return Object.entries(grouped).map(([locName, items]) => (
                     <div key={locName} className="py-4 border-b last:border-b-0 border-black/5 dark:border-white/5">
