@@ -52,3 +52,12 @@ Desain UI modern Lomeal menganut prinsip **Single-Surface Hierarchy**:
 
 - Form pembuatan resep harus menyediakan multi-select bahan makanan yang tersedia (mengintegrasikan stok Domus, database pangan, dan input bebas pengguna).
 - Bahan yang dipilih ditampilkan dalam bentuk *pill/chip* yang bisa dihapus dengan satu ketukan.
+
+---
+
+## 5. Palet Warna Resmi (`src/theme.js` & `src/styles/tokens.css`)
+- **Tema Utama:** Modern Fresh Glassmorphism (`Sora` untuk heading `.h1`/`.h2`, `Inter` untuk teks isi; lantai font **16px / `1rem`**).
+- **Aksen Brand:** Forest Emerald Green (`#22c55e` / `#15803d`), status nutrisi lampu lalu lintas (`#22c55e` aman, `#eab308` mendekati batas 85%, `#f87171` melebihi batas / aksi destruktif rose `#f43f5e`).
+- **Dark vs Light:** Dark Mode `#070a08` dengan gradien radial hijau lembut + kartu kaca solid `#0f1d16`; Light Mode latar putih bersih dengan gradien hijau halus + kartu `#FFFFFF`.
+- **Komponen Baku & UpdaterAlert:** Token dikunci di [`src/styles/tokens.css`](./src/styles/tokens.css) serta `<Button>` (`src/components/ui/Button.jsx`) & `<Dialog>` (`src/components/ui/Dialog.jsx`). `UpdaterAlert` memakai layout Solid Bottom Sheet `logym.app` bertema hijau Lomeal.
+- **Audit Layout Otomatis (Dark/Light, HP/PC, & i18n):** Verifikasi kontras di kedua mode, nol overflow di HP (~375px) & PC (~1440px), dan pastikan setiap perubahan terjemahan di `src/i18n.js` konsisten tanpa teks gado-gado ID/EN.

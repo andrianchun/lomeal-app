@@ -1,45 +1,24 @@
-# 🚀 Lomeal App Release Protocol (`releaseprotocol.md`)
+# Lomeal App Release Protocol (`releaseprotocol.md`)
 
-Panduan rilis dan pembaruan aplikasi **Lomeal Nutrition Tracker** (Web PWA & APK Android).
+Mengacu pada [`E:\CODING\.agent\skills\release-protocol\SKILL.md`](file:///e:/CODING/.agent/skills/release-protocol/SKILL.md).
 
----
+## 1. Aturan Mutlak Rilis (Anti-Gagal)
+1. **`package.json` adalah Single Source of Truth versi.** `__APP_VERSION__` di-inject saat build.
+2. **`dist/ota/version.json` hanya dihasilkan oleh `npm run build:ota`.** Jangan pernah membuat `public/ota/version.json`.
+3. **JANGAN HAPUS Jembatan `update_0118.zip`:** `scripts/build-ota.js` selalu menerbitkan ulang `update_0118.zip` berisi build terbaru agar APK lama tidak menerima HTML 200.
+4. **Dilarang Precache `index.html`:** Workbox mengecualikan `index.html` (`navigateFallback: null`).
+5. **Master Rules di `E:\CODING\hexa-life\`:** `lomeal-app/scripts/release.js` **hanya** men-deploy `hosting` (`target: lomeal`). Jangan deploy `firestore`/`storage` rules dari folder ini.
+6. **Kontrak Lintas-App (`domus_items` & `darka_shared_items`):** Pastikan kompatibel dengan `domus-app` & `darka-app`.
 
-## 1. Prinsip Utama Rilis
-1. **`package.json` adalah Single Source of Truth versi.** Jangan pernah mengedit nomor versi di file lain secara manual.
-2. **Precache Protection**: `index.html` WAJIB dikecualikan dari precache Service Worker (`globIgnores: ['index.html']` dan `navigateFallback: null`).
-3. **Pemberitahuan Otomatis ke User**: Keduanya membaca `/ota/version.json` saat app dibuka, saat foreground/resume, dan tiap 15 menit.
-
----
-
-## 2. Prosedur Rilis
-
-### Jalur A — Rilis OTA Standar (React/UI/Komposisi Gizi)
-Jalankan satu perintah otomatis:
+## 2. Perintah Rilis
 ```bash
-npm run release "Catatan rilis fitur atau perbaikan"
-```
-Untuk perbaikan kritis yang wajib diterapkan pengguna tanpa bisa ditutup:
-```bash
-npm run release force "Perbaikan kritis X"
-```
-*Perintah ini secara otomatis:*
-1. Bump versi patch di `package.json`.
-2. Build web bundle (`vite build`).
-3. Kompresi paket OTA zip (`scripts/build-ota.js`).
-4. Upload hosting & storage ke Firebase (`firebase deploy --only hosting,storage`).
-5. Verifikasi deployment dua tahap (memastikan `version.json` & zip live).
-6. Commit git & push ke branch utama.
-
----
-
-### Jalur B — Rilis APK Native (Plugin Capacitor / Permissions)
-```bash
-npm run release force apk "Pembaruan native Lomeal vX.X.X"
+npm run release "Catatan pembaruan fitur atau perbaikan"
+npm run release minor "Fitur besar baru"
+npm run release force "Perbaikan kritis nutrisi atau sinkronisasi"
+npm run release force apk "Pembaruan native APK Lomeal"
 ```
 
----
-
-## 3. Checklist Verifikasi Rilis
-- [ ] Versi live terbaca di `https://lomeal.web.app/ota/version.json`.
-- [ ] Header `Cache-Control: no-cache` aktif pada `version.json` dan `index.html`.
-- [ ] File OTA zip tersaji dengan `Content-Type: application/zip` (bukan HTML).
+## 3. Verifikasi Rilis
+- Jalankan `npm run build` dan `node --check functions/index.js` sebelum merilis.
+- Verifikasi `https://lomeal.web.app/ota/version.json` mengembalikan versi terbaru dan `ota_url` ber-header `application/zip`.
+- Perbarui kartu Lomeal di [`E:\CODING\hexaverse-app\public\index.html`](file:///e:/CODING/hexaverse-app/public/index.html) lalu deploy hosting Hexaverse.

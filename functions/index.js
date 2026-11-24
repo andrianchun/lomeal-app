@@ -145,7 +145,7 @@ const isFallbackable = (errMsg) => {
 
 // ---------- Endpoints ----------
 
-exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB' }).https.onCall(async (data, context) => {
+exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 10 }).https.onCall(async (data, context) => {
     if (!context.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
 
     const { messages, provider = 'google', model = '', tools = null } = data || {};
@@ -206,7 +206,7 @@ exports.lomealAiChat = functions.region(REGION).runWith({ timeoutSeconds: 120, m
         'Maaf, saat ini server sedang sibuk. Silakan ulangi kembali beberapa saat lagi.');
 });
 
-exports.lomealAiVision = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB' }).https.onCall(async (data, context) => {
+exports.lomealAiVision = functions.region(REGION).runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 10 }).https.onCall(async (data, context) => {
     if (!context.auth) throw new HttpsError('unauthenticated', 'Harus login untuk memakai AI.');
 
     const { imageBase64, mimeType = 'image/jpeg', prompt, provider = 'google', model = '' } = data || {};
@@ -271,7 +271,7 @@ exports.lomealAiVision = functions.region(REGION).runWith({ timeoutSeconds: 120,
 
 // force deploy env vars
 
-exports.lomealTrendCatcher = functions.region(REGION).pubsub.schedule('every 24 hours').onRun(async (context) => {
+exports.lomealTrendCatcher = functions.region(REGION).runWith({ maxInstances: 2 }).pubsub.schedule('every 24 hours').onRun(async (context) => {
     const snapshot = await db.collection('lomeal_search_misses').where('count', '>=', 5).get();
     if (snapshot.empty) return null;
 

@@ -96,21 +96,19 @@ if (apk) {
     fs.mkdirSync('public/apk', { recursive: true });
   }
   fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'public/apk/lomeal-latest.apk');
-  fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'public/lomeal.apk');
 
   if (fs.existsSync('dist')) {
     if (!fs.existsSync('dist/apk')) {
       fs.mkdirSync('dist/apk', { recursive: true });
     }
     fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'dist/apk/lomeal-latest.apk');
-    fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'dist/lomeal.apk');
   }
   console.log('✓ APK rilis baru berhasil dikompilasi dan disalin ke public/apk & dist/apk\n');
 }
 
 const deployHosting = () => {
   fs.rmSync('.firebase', { recursive: true, force: true });
-  run('firebase deploy --only hosting,storage');
+  run('firebase deploy --only hosting');
 };
 
 const BASE = 'https://lomeal.web.app/ota';
@@ -168,7 +166,7 @@ const periksaDuaKali = async () => {
   return verifyDeploy(version);
 };
 
-console.log('\n📡 Mengunggah ke Firebase Hosting & Storage...');
+console.log('\n📡 Mengunggah ke Firebase Hosting...');
 deployHosting();
 
 console.log('\n🔍 Menjalankan verifikasi deploy otomatis ke hosting...');

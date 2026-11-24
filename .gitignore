@@ -29,8 +29,16 @@ functions/.env
 # Cache unggah Firebase Hosting
 .firebase/
 
-# Keystore
+# Keystore & Secrets
+.env
+.env.*
+!.env.example
+*-firebase-adminsdk-*.json
+service-account*.json
+users.json
 *.jks
+*.keystore
+KEYSTORE/
 keystore.properties
 android/keystore.properties
 

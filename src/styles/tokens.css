@@ -1,0 +1,52 @@
+/* ==========================================================================
+   DESIGN TOKENS — LOMEAL APP
+   Tema: Fresh Nutrition Glassmorphism | Forest Green (#22c55e) | Min 16px
+   ========================================================================== */
+
+:root {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-heading: 'Sora', 'Inter', ui-sans-serif, sans-serif;
+
+  /* 5 Token Skala Tipografi Golden Ratio (Min 16px = 1rem) */
+  --text-h1: 2.0625rem;
+  --text-h2: 1.3125rem;
+  --text-h3: 1rem;
+  --text-body: 1rem;
+  --text-caption: 1rem;
+
+  /* Light Mode */
+  --brand-bg: #f8fafc;
+  --brand-surface: rgba(255, 255, 255, 0.72);
+  --brand-surface-solid: #ffffff;
+  --brand-border: rgba(0, 0, 0, 0.10);
+  --brand-text: #0f172a;
+  --brand-muted: #64748b;
+
+  /* Brand Accent & Semantic */
+  --brand-accent: #22c55e;
+  --brand-accent-hover: #15803d;
+  --brand-accent-fg: #ffffff;
+  --brand-danger: #f43f5e;
+  --brand-danger-hover: #e11d48;
+
+  --brand-badge-bg: #ffffff;
+  --brand-badge-fg: #15803d;
+  --radius-dialog: 1.5rem;
+  --radius-control: 1rem;
+}
+
+.dark {
+  /* Dark Mode */
+  --brand-bg: #070a08;
+  --brand-surface: rgba(255, 255, 255, 0.045);
+  --brand-surface-solid: #0f1d16;
+  --brand-border: rgba(255, 255, 255, 0.10);
+  --brand-text: #f1f5f9;
+  --brand-muted: #94a3b8;
+}
+
+.ds-h1 { font-family: var(--font-heading); font-size: var(--text-h1); line-height: 1.2; font-weight: 800; }
+.ds-h2 { font-family: var(--font-heading); font-size: var(--text-h2); line-height: 1.35; font-weight: 700; }
+.ds-h3 { font-family: var(--font-heading); font-size: var(--text-h3); line-height: 1.4; font-weight: 700; }
+.ds-body { font-family: var(--font-sans); font-size: var(--text-body); line-height: 1.6; }
+.ds-caption { font-family: var(--font-sans); font-size: var(--text-caption); line-height: 1.4; color: var(--brand-muted); }

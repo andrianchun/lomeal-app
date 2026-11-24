@@ -1,85 +1,15 @@
-# Lomeal — catatan untuk agent / IDE
+# LOMEAL — Panduan Agen & Teknis (`AGENTS.md`)
 
-> Mau memakai sistem OTA ini di proyek lain (logym, darka, domus, tokoto)?
-> Panduan portnya ada di [OTA-TEMPLATE.md](OTA-TEMPLATE.md).
+Mengacu penuh pada konstitusi global [`E:\CODING\AGENTS.md`](file:///e:/CODING/AGENTS.md).
 
-## Rilis & versi
-
-`package.json` adalah **satu-satunya** sumber versi. Jangan pernah mengetik nomor versi
-di file lain, dan jangan edit `"version"` di `package.json` secara manual.
-
-Setelah menyelesaikan perubahan yang terlihat oleh user (UI, fitur, bugfix), jalankan:
-
-```bash
-npm run release
-```
-
-Perintah itu melakukan semuanya: bump patch → `vite build` → zip OTA → `firebase deploy --only hosting`
-→ `git commit` → `git push`. Semua PWA dan APK yang sudah terpasang akan dapat update otomatis.
-
-- `npm run release minor` untuk fitur besar, `npm run release major` untuk breaking change.
-- Tambahkan catatan rilis (tampil di kartu update): `npm run release "Perbaikan X dan Y"`.
-- Untuk update **wajib** (bug serius/data rusak), tambahkan `force` — user diblokir modal
-  yang tidak bisa ditutup sampai memperbarui: `npm run release force "Perbaikan kritis X"`.
-  Pakai seperlunya; tanpa `force` user dapat kartu yang bisa ditutup dan tombol di
-  Pengaturan → Lanjutan → Pembaruan Aplikasi.
-- **Jangan** panggil `scripts/build-ota.js` dengan argumen versi — script itu baca `package.json` sendiri.
-- **Jangan** hardcode versi di komponen; pakai `__APP_VERSION__` (di-inject vite dari `package.json`).
-
-## Cara update sampai ke user
-
-PWA dan APK memakai **jalur deteksi yang sama**: keduanya membaca `/ota/version.json` dan
-membandingkannya dengan versi yang sedang berjalan. Cek dijalankan tiga kali — saat app dibuka,
-saat kembali ke foreground, dan tiap 15 menit selama app terbuka — supaya update muncul sendiri
-tanpa user perlu refresh atau hapus cache. UI-nya satu komponen: `src/components/UpdaterAlert.jsx`
-(modal blokir kalau `is_forced`, kartu yang bisa ditutup kalau tidak), plus tombol di
-Pengaturan → Lanjutan.
-
-| Target | Cara memasang | Progress |
-|---|---|---|
-| PWA / browser | `location.reload()` — index.html di-serve NetworkFirst, jadi selalu dapat HTML + chunk terbaru | instan, tidak ada unduhan besar |
-| APK Android | Capgo mengunduh bundle `.zip` lalu `CapacitorUpdater.set()` | progress bar %, bundle ~48 MB |
-
-### Jembatan `update_0118.zip` — jangan dihapus
-
-Bundle **bawaan APK** yang terpasang sekarang adalah kode lama yang cuma membaca Firestore
-`lomeal_settings/ota_update`, dan dokumen itu menunjuk permanen ke `update_0118.zip`.
-Bundle itu aktif lagi setiap user menghapus data aplikasi atau install ulang APK.
-
-Karena itu `scripts/build-ota.js` selalu menerbitkan ulang `update_0118.zip` berisi build
-**terbaru**. Kalau file itu hilang, Firebase Hosting melayani `index.html` (kena rewrite SPA)
-dengan status 200, Capgo gagal meng-unzip, dan user dapat pesan "periksa koneksi internet"
-padahal koneksinya normal. Ini sudah pernah terjadi dua kali.
-
-Baru boleh dihapus setelah APK di-build ulang dan disebarkan dengan bundle bawaan versi baru.
-
-**Jangan pernah memasukkan `index.html` ke precache service worker.** Workbox memetakan `/` ke
-entri precache `index.html`, jadi kalau ikut ter-precache, reload sesudah update tetap menyajikan
-aplikasi versi lama — inilah yang dulu memaksa user hapus data/cache. Lihat `globIgnores` dan
-`navigateFallback: null` di `vite.config.js`.
-
-Versi yang sedang berjalan di APK dibaca dari `CapacitorUpdater.current()`, **bukan** dari
-`localStorage` — supaya rollback Capgo ke bundle builtin tidak bikin app nyangkut.
-
-`firebase.json` menjaga `index.html` / `sw.js` / `version.json` selalu revalidate, sementara
-`/assets/**` (nama file sudah di-hash) di-cache setahun. Jangan longgarkan header `index.html`
-atau update PWA bisa telat sampai satu jam.
-
-## Android
-
-Distribusi APK lewat sideload + OTA Capgo, bukan Play Store. Rebuild APK hanya perlu kalau
-menambah plugin Capacitor atau mengubah `capacitor.config.json`:
-
-```bash
-npm run sync:android
-```
-
-lalu build di Android Studio. `versionCode`/`versionName` di `android/app/build.gradle`
-sengaja tidak disinkronkan — versi yang dipakai app adalah `__APP_VERSION__` dari bundle JS.
-
-
-## Standarisasi Notifikasi Pembaruan (UpdaterAlert — Ekosistem Hexaverse)
-Sesuai aturan induk `E:\CODING\AGENTS.md` Pasal 12, implementasi `UpdaterAlert.jsx` di Lomeal merupakan standar emas bersama Logym:
-- **Mode Opsional**: Floating bottom card di atas navigasi bawah (`fixed bottom-24 inset-x-4 max-w-sm pointer-events-none` dengan inner `pointer-events-auto`), tanpa scrim pemblokir layar.
-- **Mode Wajib (`force`)**: Fullscreen frost modal dengan logo besar dan background blur `bg-black/80`.
-- **Indikator Progres**: Fluid progress crawler 60fps dengan label fase unduh & pasang yang transparan.
+- **Ringkasan Aplikasi:** Pelacak nutrisi, kalori, makro/mikro, resep AI, dan sinkronisasi metabolik (Lomeal App).
+- **Tech Stack:** React 18 + Vite + Tailwind CSS v3 + Capacitor + Firebase (`hexa-life`, hosting target `lomeal`, Cloud Functions v1 `lomealAiChat`/`lomealAiVision`/`lomealTrendCatcher` `codebase: "lomeal"`).
+- **Rules & Indexes Terpusat:** Master `firestore.rules`, `firestore.indexes.json`, dan `storage.rules` untuk `hexa-life` dikelola **eksklusif dari [`E:\CODING\hexa-life\`](file:///e:/CODING/hexa-life)** — jangan menambah `"firestore"`/`"storage"` ke `firebase.json` lokal.
+- **Integritas Data & Sinkronisasi Lintas-App:**
+  - Log makanan harian berbasis `YYYY-MM-DD` & sesi (`breakfast`, `lunch`, `dinner`, `snack`) wajib append-safe (anti-timpa).
+  - Kalori/makro wajib melewati `reconcileKcal` dan clamp `MAX_PLAUSIBLE`.
+  - Kontrak `domusSync.js`: membaca/menulis `domus_items` memakai `runTransaction` dengan menjaga `quantity`, `qtyValue`, dan `status` identik dengan `domus-app`. Item `darka_shared_items` dengan `previousStatus === 'claimed'` memberi peringatan tanpa memodifikasi food log masa lalu.
+- **Jembatan OTA Wajib (`update_0118.zip`):** **DILARANG** menghapus pembuatan `update_0118.zip` di `scripts/build-ota.js` selama APK lama masih aktif; `notifyAppReady()` pakai timer 7s + `RootErrorBoundary` rollback protection.
+- **AI Domain Lock (Coach Lomy & Vision):** Terkunci khusus pada makanan, bahan pangan, kalori, nutrisi, dan resep sehat. Tolak topik non-nutrisi (diagnosis medis/obat), dilarang mengarang makanan tak terlihat (`lowConfidence: true`), output parser JSON ketat.
+- **Perintah Baku:** `npm run dev`, `npm run build`, `npm run build:ota`, `npm run sync:android`.
+- **Dokumen Terkait:** [`design.md`](./design.md), [`SCHEMA.md`](./SCHEMA.md), [`PROGRESS.md`](./PROGRESS.md), [`releaseprotocol.md`](./releaseprotocol.md), [`OTA-TEMPLATE.md`](./OTA-TEMPLATE.md).
